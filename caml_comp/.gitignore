@@ -1,5 +1,6 @@
 # Dune build directories (the main one that needs to be ignored)
 _build/
+out/
 
 # Dune private directory
 .dune/
