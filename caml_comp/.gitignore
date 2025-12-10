@@ -1,0 +1,51 @@
+# Dune build directories
+/_build/
+/_build
+**/_build/
+
+# Local opam switch (optional, ignore if you use a global switch)
+.opam/
+
+# Dune sandbox
+/.sandbox/
+
+# Merlin files (editor hints)
+*.merlin
+
+# OCaml compiler artifacts
+*.cmi
+*.cmx
+*.cmo
+*.cmt
+*.cmti
+*.annot
+*.cache
+
+# utop history
+.utop-history
+
+# dune-release artifacts
+.dune-release/
+
+# Coverage & profiling
+*.profraw
+*.profdata
+coverage/
+
+# Editor / OS files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# VSCode
+.vscode/
+
+# Local binaries or output files (if your project writes them)
+*.exe
+*.out
+*.byte
+*.native
+
+# Logs and dumps
+*.log
