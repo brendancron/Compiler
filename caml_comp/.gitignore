@@ -1,25 +1,42 @@
-# Dune build directories
-/_build/
-/_build
-**/_build/
+# Dune build directories (the main one that needs to be ignored)
+_build/
 
-# Local opam switch (optional, ignore if you use a global switch)
-.opam/
+# Dune private directory
+.dune/
 
 # Dune sandbox
-/.sandbox/
+.sandbox/
 
-# Merlin files (editor hints)
-*.merlin
+# Local opam switch
+.opam/
 
-# OCaml compiler artifacts
+# OCaml compiled files
 *.cmi
 *.cmx
 *.cmo
 *.cmt
 *.cmti
+*.cmxa
+*.cma
+*.cmxs
+*.a
+*.ml-gen
+
+# OCaml annotations
 *.annot
 *.cache
+
+# Merlin files (editor hints)
+*.merlin
+
+# Executables and binaries
+*.exe
+*.out
+*.byte
+*.native
+
+# Output directories (if generated)
+out/
 
 # utop history
 .utop-history
@@ -32,20 +49,17 @@
 *.profdata
 coverage/
 
+# Logs and dumps
+*.log
+
 # Editor / OS files
 *.swp
 *.swo
 *~
 .DS_Store
+Thumbs.db
 
-# VSCode
+# IDE files
 .vscode/
-
-# Local binaries or output files (if your project writes them)
-*.exe
-*.out
-*.byte
-*.native
-
-# Logs and dumps
-*.log
+.idea/
+*.iml
