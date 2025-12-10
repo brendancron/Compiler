@@ -14,9 +14,9 @@ let () =
   let ast = Components.Parser.parse tokens in
 
   let oc_ast = open_out "out/ast.txt" in
-  output_string oc_ast (Models.Ast.string_of_expr ast);
+  let Box e = ast in
+  output_string oc_ast (Models.Ast.string_of_expr e);
   close_out oc_ast;
 
-  let result = Components.Eval.eval ast in
-
-  Printf.printf "%d\n" result
+  let result = Components.Eval.eval e in
+  Models.Ast.print_result e result
