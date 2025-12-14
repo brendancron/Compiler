@@ -21,6 +21,7 @@ fn main() {
     io::stdin().read_to_string(&mut buf).unwrap();
     println!("\nSource Code");
     print!("{}", buf);
+
     let tokens = lexer::tokenize(&buf);
     println!("\nTokens");
     for tok in &tokens {
@@ -28,10 +29,8 @@ fn main() {
     }
 
     println!("\nExpr");
-    let expr = parser::parse(&tokens);
-    println!("{:#?}", expr);
+    let code = parser::parse(&tokens);
+    println!("{:#?}", code);
     
-    println!("\nResult");
-    let result = interpreter::eval(&expr);
-    println!("{:#?}", result);
+    interpreter::eval(&code);
 }

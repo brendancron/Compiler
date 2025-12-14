@@ -118,7 +118,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                     "and"    => Token::And,
                     "else"   => Token::Else,
                     "false"  => Token::False,
-                    "func"   => Token::Func,
+                    "fn"   => Token::Func,
                     "for"    => Token::For,
                     "if"     => Token::If,
                     "or"     => Token::Or,

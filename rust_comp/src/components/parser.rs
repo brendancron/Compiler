@@ -1,7 +1,8 @@
 use crate::models::token::Token;
 use crate::models::ast::Expr;
+use crate::models::ast::Stmt;
 
-pub fn parse(tokens: &[Token]) -> Expr {
+pub fn parse(tokens: &[Token]) -> Stmt {
     let mut pos = 0;
 
     // factor := NUMBER | STRING | TRUE | FALSE | "(" expr ")"
@@ -98,6 +99,41 @@ pub fn parse(tokens: &[Token]) -> Expr {
             }
         }
     }
+    
+    fn parse_stmt<'a>(
+        tokens: &'a [Token],
+        pos: &mut usize,
+    ) -> Stmt {
+        match tokens.get(*pos) {
+            Some(Token::Print) => {
+                *pos += 1; // consume 'print'
+                match tokens.get(*pos) {
+                    Some(Token::LeftParen) => {
+                        *pos += 1; // consume '('
+                        let expr = parse_expr(tokens, pos);
+                        match tokens.get(*pos) {
+                            Some(Token::RightParen) => {
+                                *pos += 1; // consume ')'
+                                match tokens.get(*pos) {
+                                    Some(Token::Semicolon) => {
+                                        *pos += 1; // consume ';'
+                                        Stmt::PrintStmt(Box::new(expr))
+                                    }
+                                    _ => panic!("expected ';' after print statement"),
+                                }
+                            }
+                            _ => panic!("expected ')' after print expression"),
+                        }
+                    }
+                    _ => panic!("expected '(' after 'print'"),
+                }
+            }
+            _ => {
+                let expr = parse_expr(tokens, pos);
+                Stmt::ExprStmt(Box::new(expr))
+            }
+        }
+    }
 
-    parse_expr(tokens, &mut pos)
+    parse_stmt(tokens, &mut pos)
 }
