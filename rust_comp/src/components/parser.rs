@@ -1,15 +1,11 @@
-use crate::models::token::Token;
 use crate::models::ast::Expr;
-use crate::models::ast::Stmt;
+use crate::models::token::Token;
 
-pub fn parse(tokens: &[Token]) -> Stmt {
+pub fn parse(tokens: &[Token]) -> Expr {
     let mut pos = 0;
 
     // factor := NUMBER | STRING | TRUE | FALSE | "(" expr ")"
-    fn parse_factor<'a>(
-        tokens: &'a [Token],
-        pos: &mut usize,
-    ) -> Expr {
+    fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize) -> Expr {
         match tokens.get(*pos).unwrap_or(&Token::EOF) {
             Token::Number(n) => {
                 *pos += 1;
@@ -48,10 +44,7 @@ pub fn parse(tokens: &[Token]) -> Stmt {
     }
 
     // term := factor (("*" factor) | ("/" factor))*
-    fn parse_term<'a>(
-        tokens: &'a [Token],
-        pos: &mut usize,
-    ) -> Expr {
+    fn parse_term<'a>(tokens: &'a [Token], pos: &mut usize) -> Expr {
         let mut left = parse_factor(tokens, pos);
 
         loop {
@@ -72,10 +65,7 @@ pub fn parse(tokens: &[Token]) -> Stmt {
     }
 
     // expr := term (("+" term) | ("-" term))*
-    fn parse_expr<'a>(
-        tokens: &'a [Token],
-        pos: &mut usize,
-    ) -> Expr {
+    fn parse_expr<'a>(tokens: &'a [Token], pos: &mut usize) -> Expr {
         let mut left = parse_term(tokens, pos);
 
         loop {
@@ -99,11 +89,8 @@ pub fn parse(tokens: &[Token]) -> Stmt {
             }
         }
     }
-    
-    fn parse_stmt<'a>(
-        tokens: &'a [Token],
-        pos: &mut usize,
-    ) -> Stmt {
+
+    fn parse_keyword<'a>(tokens: &'a [Token], pos: &mut usize) -> Expr {
         match tokens.get(*pos) {
             Some(Token::Print) => {
                 *pos += 1; // consume 'print'
@@ -117,7 +104,7 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                                 match tokens.get(*pos) {
                                     Some(Token::Semicolon) => {
                                         *pos += 1; // consume ';'
-                                        Stmt::PrintStmt(Box::new(expr))
+                                        Expr::Print(Box::new(expr))
                                     }
                                     _ => panic!("expected ';' after print statement"),
                                 }
@@ -128,12 +115,9 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     _ => panic!("expected '(' after 'print'"),
                 }
             }
-            _ => {
-                let expr = parse_expr(tokens, pos);
-                Stmt::ExprStmt(Box::new(expr))
-            }
+            _ => parse_expr(tokens, pos),
         }
     }
 
-    parse_stmt(tokens, &mut pos)
+    parse_keyword(tokens, &mut pos)
 }

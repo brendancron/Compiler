@@ -9,10 +9,7 @@ pub enum Expr {
     Mult(Box<Expr>, Box<Expr>),
     Div(Box<Expr>, Box<Expr>),
     Equals(Box<Expr>, Box<Expr>),
-}
 
-#[derive(Debug, Clone)]
-pub enum Stmt {
-    ExprStmt(Box<Expr>),
-    PrintStmt(Box<Expr>),
+    If(Box<Expr>, Box<Expr>),
+    Print(Box<Expr>),
 }
