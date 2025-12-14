@@ -1,6 +1,24 @@
 use crate::models::ast::Expr;
 use crate::models::token::Token;
 
+fn peek<'a>(tokens: &'a [Token], pos: usize) -> Option<&'a Token> {
+    tokens.get(pos)
+}
+
+fn consume<'a>(tokens: &'a [Token], pos: &mut usize, expected: Token) -> Option<&'a Token> {
+    match tokens.get(*pos) {
+        Some(t) if *t == expected => consume_next(tokens, pos),
+        _ => panic!("expected {:?}", expected),
+    }
+}
+
+fn consume_next<'a>(tokens: &'a [Token], pos: &mut usize) -> Option<&'a Token> {
+    let tok = tokens.get(*pos)?;
+    *pos += 1;
+    println!("Consumed: {:?}", tok);
+    Some(tok)
+}
+
 pub fn parse(tokens: &[Token]) -> Expr {
     let mut pos = 0;
 
@@ -8,34 +26,29 @@ pub fn parse(tokens: &[Token]) -> Expr {
     fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize) -> Expr {
         match tokens.get(*pos).unwrap_or(&Token::EOF) {
             Token::Number(n) => {
-                *pos += 1;
+                consume_next(tokens, pos);
                 Expr::Int(*n)
             }
 
             Token::String(s) => {
-                *pos += 1;
+                consume_next(tokens, pos);
                 Expr::String(s.clone())
             }
 
             Token::True => {
-                *pos += 1;
+                consume_next(tokens, pos);
                 Expr::Bool(true)
             }
 
             Token::False => {
-                *pos += 1;
+                consume_next(tokens, pos);
                 Expr::Bool(false)
             }
 
             Token::LeftParen => {
-                *pos += 1; // (
+                consume(tokens, pos, Token::LeftParen);
                 let expr = parse_expr(tokens, pos);
-                match tokens.get(*pos) {
-                    Some(Token::RightParen) => {
-                        *pos += 1;
-                    }
-                    _ => panic!("expected ')'"),
-                }
+                consume(tokens, pos, Token::RightParen);
                 expr
             }
 
@@ -93,27 +106,22 @@ pub fn parse(tokens: &[Token]) -> Expr {
     fn parse_keyword<'a>(tokens: &'a [Token], pos: &mut usize) -> Expr {
         match tokens.get(*pos) {
             Some(Token::Print) => {
-                *pos += 1; // consume 'print'
-                match tokens.get(*pos) {
-                    Some(Token::LeftParen) => {
-                        *pos += 1; // consume '('
-                        let expr = parse_expr(tokens, pos);
-                        match tokens.get(*pos) {
-                            Some(Token::RightParen) => {
-                                *pos += 1; // consume ')'
-                                match tokens.get(*pos) {
-                                    Some(Token::Semicolon) => {
-                                        *pos += 1; // consume ';'
-                                        Expr::Print(Box::new(expr))
-                                    }
-                                    _ => panic!("expected ';' after print statement"),
-                                }
-                            }
-                            _ => panic!("expected ')' after print expression"),
-                        }
-                    }
-                    _ => panic!("expected '(' after 'print'"),
-                }
+                consume(tokens, pos, Token::Print);
+                consume(tokens, pos, Token::LeftParen);
+                let expr = parse_keyword(tokens, pos);
+                consume(tokens, pos, Token::RightParen);
+                consume(tokens, pos, Token::Semicolon);
+                Expr::Print(Box::new(expr))
+            }
+            Some(Token::If) => {
+                consume(tokens, pos, Token::If);
+                consume(tokens, pos, Token::LeftParen);
+                let conditional = parse_expr(tokens, pos);
+                consume(tokens, pos, Token::RightParen);
+                consume(tokens, pos, Token::LeftBrace);
+                let inner = parse_keyword(tokens, pos);
+                consume(tokens, pos, Token::RightBrace);
+                Expr::If(Box::new(conditional), Box::new(inner))
             }
             _ => parse_expr(tokens, pos),
         }

@@ -40,6 +40,17 @@ pub fn eval(expr: &Expr) -> Value {
             Value::None
         }
 
+        Expr::If(cond, inner) => match eval(cond) {
+            Value::Bool(b) => {
+                if b {
+                    eval(inner)
+                } else {
+                    Value::None
+                }
+            }
+            _ => panic!("type error: expected bool expr"),
+        },
+
         _ => {
             panic!("Expression not handled!");
         }
