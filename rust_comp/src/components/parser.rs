@@ -123,6 +123,14 @@ pub fn parse(tokens: &[Token]) -> Expr {
                 consume(tokens, pos, Token::RightBrace);
                 Expr::If(Box::new(conditional), Box::new(inner))
             }
+            Some(Token::Var) => {
+                consume(tokens, pos, Token::Var);
+                consume(tokens, pos, Token::Identifier);
+                consume(tokens, pos, Token::Equal);
+                let expr = parse_keyword(tokens, pos);
+                consume(tokens, pos, Token::Semicolon);
+                Expr::Assignment(, Box::new(expr))
+            }
             _ => parse_expr(tokens, pos),
         }
     }

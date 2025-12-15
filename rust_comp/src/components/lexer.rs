@@ -5,9 +5,7 @@ fn is_digit(c: char) -> bool {
 }
 
 fn is_alpha(c: char) -> bool {
-    (c >= 'a' && c <= 'z')
-        || (c >= 'A' && c <= 'Z')
-        || c == '_'
+    (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
 }
 
 fn is_alpha_numeric(c: char) -> bool {
@@ -50,20 +48,53 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 i += 1;
             }
 
-            '(' => { tokens.push(Token::LeftParen); i += 1; }
-            ')' => { tokens.push(Token::RightParen); i += 1; }
+            '(' => {
+                tokens.push(Token::LeftParen);
+                i += 1;
+            }
+            ')' => {
+                tokens.push(Token::RightParen);
+                i += 1;
+            }
 
             // FIXED: correct brace handling `{` and `}`
-            '{' => { tokens.push(Token::LeftBrace); i += 1; }
-            '}' => { tokens.push(Token::RightBrace); i += 1; }
+            '{' => {
+                tokens.push(Token::LeftBrace);
+                i += 1;
+            }
+            '}' => {
+                tokens.push(Token::RightBrace);
+                i += 1;
+            }
 
-            ',' => { tokens.push(Token::Comma); i += 1; }
-            '.' => { tokens.push(Token::Dot); i += 1; }
-            '-' => { tokens.push(Token::Minus); i += 1; }
-            '+' => { tokens.push(Token::Plus); i += 1; }
-            ';' => { tokens.push(Token::Semicolon); i += 1; }
-            '/' => { tokens.push(Token::Slash); i += 1; }
-            '*' => { tokens.push(Token::Star); i += 1; }
+            ',' => {
+                tokens.push(Token::Comma);
+                i += 1;
+            }
+            '.' => {
+                tokens.push(Token::Dot);
+                i += 1;
+            }
+            '-' => {
+                tokens.push(Token::Minus);
+                i += 1;
+            }
+            '+' => {
+                tokens.push(Token::Plus);
+                i += 1;
+            }
+            ';' => {
+                tokens.push(Token::Semicolon);
+                i += 1;
+            }
+            '/' => {
+                tokens.push(Token::Slash);
+                i += 1;
+            }
+            '*' => {
+                tokens.push(Token::Star);
+                i += 1;
+            }
 
             '!' => {
                 if i + 1 < len && chars[i + 1] == '=' {
@@ -115,19 +146,19 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 let (name, j) = lex_identifier(&chars, i);
 
                 let tok = match name.as_str() {
-                    "and"    => Token::And,
-                    "else"   => Token::Else,
-                    "false"  => Token::False,
-                    "fn"   => Token::Func,
-                    "for"    => Token::For,
-                    "if"     => Token::If,
-                    "or"     => Token::Or,
-                    "print"  => Token::Print,
+                    "and" => Token::And,
+                    "else" => Token::Else,
+                    "false" => Token::False,
+                    "fn" => Token::Func,
+                    "for" => Token::For,
+                    "if" => Token::If,
+                    "or" => Token::Or,
+                    "print" => Token::Print,
                     "return" => Token::Return,
-                    "true"   => Token::True,
-                    "var"    => Token::Var,
-                    "while"  => Token::While,
-                    _        => Token::Identifier(name),
+                    "true" => Token::True,
+                    "var" => Token::Var,
+                    "while" => Token::While,
+                    _ => Token::Identifier(name),
                 };
 
                 tokens.push(tok);

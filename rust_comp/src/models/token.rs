@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, PartialEq)]
-pub enum Token {
+pub enum TokenType {
     // Single-character tokens
     LeftParen,
     RightParen,
@@ -24,9 +24,9 @@ pub enum Token {
     LessEqual,
 
     // Literals
-    Identifier(String),
-    String(String),
-    Number(i64),
+    Identifier,
+    String,
+    Number,
 
     // Keywords
     And,
@@ -44,4 +44,15 @@ pub enum Token {
 
     // End of file
     EOF,
+}
+
+pub enum TokenMetadata {
+    Int(i64),
+    String(String),
+}
+
+struct Token {
+    token_type: TokenType,
+    line_number: usize,
+    metadata: Option<TokenMetadata>,
 }
