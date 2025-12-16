@@ -46,13 +46,33 @@ pub enum TokenType {
     EOF,
 }
 
+#[derive(PartialEq, Debug)]
 pub enum TokenMetadata {
     Int(i64),
     String(String),
 }
 
-struct Token {
-    token_type: TokenType,
-    line_number: usize,
-    metadata: Option<TokenMetadata>,
+impl Token {
+    pub fn expect_int(&self) -> i64 {
+        match &self.metadata {
+            Some(TokenMetadata::Int(n)) => *n,
+            Some(other) => panic!("expected Int metadata, found {:?}", other),
+            None => panic!("expected Int metadata, found None"),
+        }
+    }
+
+    pub fn expect_str(&self) -> String {
+        match &self.metadata {
+            Some(TokenMetadata::String(s)) => s.to_string(),
+            Some(other) => panic!("expected String metadata, found {:?}", other),
+            None => panic!("expected String metadata, found None"),
+        }
+    }
+}
+
+#[derive(PartialEq, Debug)]
+pub struct Token {
+    pub token_type: TokenType,
+    pub line_number: usize,
+    pub metadata: Option<TokenMetadata>,
 }

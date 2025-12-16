@@ -1,4 +1,4 @@
-use crate::models::token::Token;
+use crate::models::token::{Token, TokenMetadata, TokenType};
 
 fn is_digit(c: char) -> bool {
     c >= '0' && c <= '9'
@@ -12,7 +12,7 @@ fn is_alpha_numeric(c: char) -> bool {
     is_alpha(c) || is_digit(c)
 }
 
-fn lex_number(chars: &[char], mut i: usize) -> (Token, usize) {
+fn lex_number(chars: &[char], mut i: usize) -> (i64, usize) {
     let mut acc = String::new();
 
     while i < chars.len() && is_digit(chars[i]) {
@@ -20,7 +20,7 @@ fn lex_number(chars: &[char], mut i: usize) -> (Token, usize) {
         i += 1;
     }
 
-    (Token::Number(acc.parse::<i64>().unwrap()), i)
+    (acc.parse::<i64>().unwrap(), i)
 }
 
 fn lex_identifier(chars: &[char], mut i: usize) -> (String, usize) {
@@ -40,128 +40,225 @@ pub fn tokenize(s: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
 
     let mut i = 0;
+    let mut line_number: usize = 1;
     while i < len {
         let c = chars[i];
 
         match c {
-            ' ' | '\n' | '\t' => {
+            '\n' => {
+                line_number += 1;
+                i += 1;
+            }
+            ' ' | '\t' => {
                 i += 1;
             }
 
             '(' => {
-                tokens.push(Token::LeftParen);
+                tokens.push(Token {
+                    token_type: TokenType::LeftParen,
+                    line_number: line_number,
+                    metadata: None,
+                });
                 i += 1;
             }
             ')' => {
-                tokens.push(Token::RightParen);
+                tokens.push(Token {
+                    token_type: TokenType::RightParen,
+                    line_number: line_number,
+                    metadata: None,
+                });
                 i += 1;
             }
 
-            // FIXED: correct brace handling `{` and `}`
             '{' => {
-                tokens.push(Token::LeftBrace);
+                tokens.push(Token {
+                    token_type: TokenType::LeftBrace,
+                    line_number: line_number,
+                    metadata: None,
+                });
                 i += 1;
             }
             '}' => {
-                tokens.push(Token::RightBrace);
+                tokens.push(Token {
+                    token_type: TokenType::RightBrace,
+                    line_number: line_number,
+                    metadata: None,
+                });
                 i += 1;
             }
 
             ',' => {
-                tokens.push(Token::Comma);
+                tokens.push(Token {
+                    token_type: TokenType::Comma,
+                    line_number: line_number,
+                    metadata: None,
+                });
                 i += 1;
             }
             '.' => {
-                tokens.push(Token::Dot);
+                tokens.push(Token {
+                    token_type: TokenType::Dot,
+                    line_number: line_number,
+                    metadata: None,
+                });
                 i += 1;
             }
             '-' => {
-                tokens.push(Token::Minus);
+                tokens.push(Token {
+                    token_type: TokenType::Minus,
+                    line_number: line_number,
+                    metadata: None,
+                });
                 i += 1;
             }
             '+' => {
-                tokens.push(Token::Plus);
+                tokens.push(Token {
+                    token_type: TokenType::Plus,
+                    line_number: line_number,
+                    metadata: None,
+                });
                 i += 1;
             }
             ';' => {
-                tokens.push(Token::Semicolon);
+                tokens.push(Token {
+                    token_type: TokenType::Semicolon,
+                    line_number: line_number,
+                    metadata: None,
+                });
                 i += 1;
             }
             '/' => {
-                tokens.push(Token::Slash);
+                tokens.push(Token {
+                    token_type: TokenType::Slash,
+                    line_number: line_number,
+                    metadata: None,
+                });
                 i += 1;
             }
             '*' => {
-                tokens.push(Token::Star);
+                tokens.push(Token {
+                    token_type: TokenType::Star,
+                    line_number: line_number,
+                    metadata: None,
+                });
                 i += 1;
             }
 
             '!' => {
                 if i + 1 < len && chars[i + 1] == '=' {
-                    tokens.push(Token::BangEqual);
+                    tokens.push(Token {
+                        token_type: TokenType::BangEqual,
+                        line_number: line_number,
+                        metadata: None,
+                    });
                     i += 2;
                 } else {
-                    tokens.push(Token::Bang);
+                    tokens.push(Token {
+                        token_type: TokenType::Bang,
+                        line_number: line_number,
+                        metadata: None,
+                    });
                     i += 1;
                 }
             }
 
             '=' => {
                 if i + 1 < len && chars[i + 1] == '=' {
-                    tokens.push(Token::EqualEqual);
+                    tokens.push(Token {
+                        token_type: TokenType::EqualEqual,
+                        line_number: line_number,
+                        metadata: None,
+                    });
                     i += 2;
                 } else {
-                    tokens.push(Token::Equal);
+                    tokens.push(Token {
+                        token_type: TokenType::Equal,
+                        line_number: line_number,
+                        metadata: None,
+                    });
                     i += 1;
                 }
             }
 
             '>' => {
                 if i + 1 < len && chars[i + 1] == '=' {
-                    tokens.push(Token::GreaterEqual);
+                    tokens.push(Token {
+                        token_type: TokenType::GreaterEqual,
+                        line_number: line_number,
+                        metadata: None,
+                    });
                     i += 2;
                 } else {
-                    tokens.push(Token::Greater);
+                    tokens.push(Token {
+                        token_type: TokenType::Greater,
+                        line_number: line_number,
+                        metadata: None,
+                    });
                     i += 1;
                 }
             }
 
             '<' => {
                 if i + 1 < len && chars[i + 1] == '=' {
-                    tokens.push(Token::LessEqual);
+                    tokens.push(Token {
+                        token_type: TokenType::LessEqual,
+                        line_number: line_number,
+                        metadata: None,
+                    });
                     i += 2;
                 } else {
-                    tokens.push(Token::Less);
+                    tokens.push(Token {
+                        token_type: TokenType::Less,
+                        line_number: line_number,
+                        metadata: None,
+                    });
                     i += 1;
                 }
             }
 
             c if is_digit(c) => {
-                let (tok, j) = lex_number(&chars, i);
-                tokens.push(tok);
+                let (num, j) = lex_number(&chars, i);
+                tokens.push(Token {
+                    token_type: TokenType::Less,
+                    line_number: line_number,
+                    metadata: Some(TokenMetadata::Int(num)),
+                });
                 i = j;
             }
 
             c if is_alpha(c) => {
                 let (name, j) = lex_identifier(&chars, i);
 
-                let tok = match name.as_str() {
-                    "and" => Token::And,
-                    "else" => Token::Else,
-                    "false" => Token::False,
-                    "fn" => Token::Func,
-                    "for" => Token::For,
-                    "if" => Token::If,
-                    "or" => Token::Or,
-                    "print" => Token::Print,
-                    "return" => Token::Return,
-                    "true" => Token::True,
-                    "var" => Token::Var,
-                    "while" => Token::While,
-                    _ => Token::Identifier(name),
+                let tok_type = match name.as_str() {
+                    "and" => TokenType::And,
+                    "else" => TokenType::Else,
+                    "false" => TokenType::False,
+                    "fn" => TokenType::Func,
+                    "for" => TokenType::For,
+                    "if" => TokenType::If,
+                    "or" => TokenType::Or,
+                    "print" => TokenType::Print,
+                    "return" => TokenType::Return,
+                    "true" => TokenType::True,
+                    "var" => TokenType::Var,
+                    "while" => TokenType::While,
+                    _ => TokenType::Identifier,
                 };
 
-                tokens.push(tok);
+                if tok_type == TokenType::Identifier {
+                    tokens.push(Token {
+                        token_type: tok_type,
+                        line_number: line_number,
+                        metadata: Some(TokenMetadata::String(name)),
+                    });
+                } else {
+                    tokens.push(Token {
+                        token_type: tok_type,
+                        line_number: line_number,
+                        metadata: None,
+                    });
+                }
+
                 i = j;
             }
 
@@ -172,7 +269,11 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 while j < len {
                     match chars[j] {
                         '"' => {
-                            tokens.push(Token::String(acc));
+                            tokens.push(Token {
+                                token_type: TokenType::String,
+                                line_number: line_number,
+                                metadata: Some(TokenMetadata::String(acc)),
+                            });
                             i = j + 1;
                             break;
                         }
@@ -192,6 +293,10 @@ pub fn tokenize(s: &str) -> Vec<Token> {
         }
     }
 
-    tokens.push(Token::EOF);
+    tokens.push(Token {
+        token_type: TokenType::String,
+        line_number: line_number,
+        metadata: None,
+    });
     tokens
 }
