@@ -294,7 +294,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
     }
 
     tokens.push(Token {
-        token_type: TokenType::String,
+        token_type: TokenType::EOF,
         line_number: line_number,
         metadata: None,
     });

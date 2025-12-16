@@ -27,12 +27,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Cronyx.md",
+                "file": "Useful Commands.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Cronyx"
+              "title": "Useful Commands"
             }
           }
         ],
@@ -213,8 +213,8 @@
   },
   "active": "0055d96ee12b81b4",
   "lastOpenFiles": [
-    "Useful Commands.md",
     "Cronyx.md",
+    "Useful Commands.md",
     "Untitled"
   ]
 }
