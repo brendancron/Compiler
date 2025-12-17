@@ -1,6 +1,13 @@
 use crate::models::ast::{Expr, Stmt};
 use crate::models::token::{Token, TokenType};
 
+fn check(tokens: &[Token], pos: usize, expected: TokenType) -> bool {
+    matches!(
+        tokens.get(pos),
+        Some(t) if t.token_type == expected
+    )
+}
+
 fn consume<'a>(tokens: &'a [Token], pos: &mut usize, expected: TokenType) -> &'a Token {
     match tokens.get(*pos) {
         Some(t) if t.token_type == expected => consume_next(tokens, pos),
@@ -19,6 +26,37 @@ fn consume_next<'a>(tokens: &'a [Token], pos: &mut usize) -> &'a Token {
     *pos += 1;
     println!("Consumed: {:?}", tok);
     tok
+}
+
+fn parse_separated<T>(
+    tokens: &[Token],
+    pos: &mut usize,
+    separator: TokenType,
+    terminator: TokenType,
+    mut parse_item: impl FnMut(&[Token], &mut usize) -> T,
+) -> Vec<T> {
+    let mut items = Vec::new();
+
+    if check(tokens, *pos, terminator) {
+        return items;
+    }
+
+    loop {
+        let before = *pos;
+        items.push(parse_item(tokens, pos));
+
+        if *pos == before {
+            panic!("parser made no progress in comma-separated list");
+        }
+
+        if check(tokens, *pos, separator) {
+            consume(tokens, pos, separator);
+        } else {
+            break;
+        }
+    }
+
+    items
 }
 
 pub fn parse(tokens: &[Token]) -> Stmt {
@@ -42,11 +80,6 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     Expr::Bool(true)
                 }
 
-                TokenType::Identifier => {
-                    consume_next(tokens, pos);
-                    Expr::Variable(tok.expect_str())
-                }
-
                 TokenType::False => {
                     consume_next(tokens, pos);
                     Expr::Bool(false)
@@ -57,6 +90,29 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     let expr = parse_expr(tokens, pos);
                     consume(tokens, pos, TokenType::RightParen);
                     expr
+                }
+
+                TokenType::Identifier => {
+                    let name = consume_next(tokens, pos).expect_str();
+
+                    if check(tokens, *pos, TokenType::LeftParen) {
+                        consume(tokens, pos, TokenType::LeftParen);
+                        let args = parse_separated(
+                            tokens,
+                            pos,
+                            TokenType::Comma,
+                            TokenType::RightParen,
+                            parse_expr,
+                        );
+                        consume(tokens, pos, TokenType::RightParen);
+
+                        Expr::Call {
+                            callee: Box::new(Expr::Variable(name)),
+                            args,
+                        }
+                    } else {
+                        Expr::Variable(name)
+                    }
                 }
 
                 _ => panic!("expected literal or '('"),
@@ -103,13 +159,13 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     TokenType::Minus => {
                         *pos += 1;
                         let right = parse_term(tokens, pos);
-                        left = Expr::Equals(Box::new(left), Box::new(right));
+                        left = Expr::Sub(Box::new(left), Box::new(right));
                     }
 
                     TokenType::EqualEqual => {
                         *pos += 1;
                         let right = parse_term(tokens, pos);
-                        left = Expr::Sub(Box::new(left), Box::new(right));
+                        left = Expr::Equals(Box::new(left), Box::new(right));
                     }
 
                     _ => return left,
@@ -120,6 +176,12 @@ pub fn parse(tokens: &[Token]) -> Stmt {
     }
 
     fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize) -> Stmt {
+        fn parse_expr_stmt<'a>(tokens: &'a [Token], pos: &mut usize) -> Stmt {
+            let expr = parse_expr(tokens, pos);
+            consume(tokens, pos, TokenType::Semicolon);
+            Stmt::ExprStmt(Box::new(expr))
+        }
+
         match tokens.get(*pos) {
             Some(tok) => match tok.token_type {
                 TokenType::Print => {
@@ -139,7 +201,10 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     consume(tokens, pos, TokenType::LeftBrace);
                     let inner = parse_stmt(tokens, pos);
                     consume(tokens, pos, TokenType::RightBrace);
-                    Stmt::If(Box::new(conditional), Box::new(inner))
+                    Stmt::If {
+                        cond: Box::new(conditional),
+                        body: Box::new(inner),
+                    }
                 }
 
                 TokenType::Var => {
@@ -148,16 +213,52 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     consume(tokens, pos, TokenType::Equal);
                     let expr = parse_expr(tokens, pos);
                     consume(tokens, pos, TokenType::Semicolon);
-                    Stmt::Assignment(id.expect_str(), Box::new(expr))
+                    Stmt::Assignment {
+                        name: id.expect_str(),
+                        expr: Box::new(expr),
+                    }
                 }
 
-                _ => Stmt::ExprStmt(Box::new(parse_expr(tokens, pos))),
+                TokenType::Func => {
+                    consume(tokens, pos, TokenType::Func);
+                    let name = consume(tokens, pos, TokenType::Identifier).expect_str();
+                    consume(tokens, pos, TokenType::LeftParen);
+                    let params = parse_separated(
+                        tokens,
+                        pos,
+                        TokenType::Comma,
+                        TokenType::RightParen,
+                        |tokens, pos| consume(tokens, pos, TokenType::Identifier).expect_str(),
+                    );
+                    consume(tokens, pos, TokenType::RightParen);
+                    consume(tokens, pos, TokenType::LeftBrace);
+                    let body = parse_block(tokens, pos);
+                    consume(tokens, pos, TokenType::RightBrace);
+
+                    Stmt::FnDecl {
+                        name,
+                        params,
+                        body: Box::new(body),
+                    }
+                }
+
+                _ => parse_expr_stmt(tokens, pos),
             },
-            _ => Stmt::ExprStmt(Box::new(parse_expr(tokens, pos))),
+            _ => parse_expr_stmt(tokens, pos),
         }
     }
 
-    pub fn parse_program(tokens: &[Token], pos: &mut usize) -> Stmt {
+    pub fn parse_block(tokens: &[Token], pos: &mut usize) -> Stmt {
+        let mut stmts = Vec::new();
+
+        while *pos < tokens.len() && tokens[*pos].token_type != TokenType::RightBrace {
+            stmts.push(parse_stmt(tokens, pos));
+        }
+
+        Stmt::Block(stmts)
+    }
+
+    fn parse_program(tokens: &[Token], pos: &mut usize) -> Stmt {
         let mut stmts = Vec::new();
 
         while *pos < tokens.len() && tokens[*pos].token_type != TokenType::EOF {

@@ -1,4 +1,4 @@
-use crate::models::ast::{Expr, Stmt};
+use crate::models::ast::{Expr, Function, Stmt};
 use crate::models::environment::Env;
 use crate::models::value::Value;
 
@@ -38,8 +38,30 @@ pub fn eval_expr(expr: &Expr, env: &mut Env) -> Value {
             _ => panic!("type error: == mismatched types"),
         },
 
-        _ => {
-            panic!("Expression not handled!");
+        Expr::Call { callee, args } => {
+            let callee_val = eval_expr(callee, env);
+            let func = match callee_val {
+                Value::Function(f) => f,
+                _ => panic!("attempted to call a non-function"),
+            };
+
+            if func.params.len() != args.len() {
+                panic!("wrong number of arguments");
+            }
+
+            let arg_vals: Vec<Value> = args.iter().map(|a| eval_expr(a, env)).collect();
+
+            env.push_scope();
+
+            for (param, value) in func.params.iter().zip(arg_vals) {
+                env.set(param.clone(), value);
+            }
+
+            eval_stmt(&func.body, env);
+
+            env.pop_scope();
+
+            Value::None
         }
     }
 }
@@ -51,10 +73,10 @@ pub fn eval_stmt(stmt: &Stmt, env: &mut Env) {
             println!("{}", value);
         }
 
-        Stmt::If(cond, inner) => match eval_expr(cond, env) {
+        Stmt::If { cond, body } => match eval_expr(cond, env) {
             Value::Bool(b) => {
                 if b {
-                    eval_stmt(inner, env)
+                    eval_stmt(body, env)
                 }
             }
             _ => panic!("type error: expected bool expr"),
@@ -64,7 +86,7 @@ pub fn eval_stmt(stmt: &Stmt, env: &mut Env) {
             eval_expr(expr, env);
         }
 
-        Stmt::Assignment(name, expr) => {
+        Stmt::Assignment { name, expr } => {
             let value = eval_expr(expr, env);
             env.set(name.clone(), value);
         }
@@ -75,6 +97,15 @@ pub fn eval_stmt(stmt: &Stmt, env: &mut Env) {
                 eval_stmt(stmt, env);
             }
             env.pop_scope();
+        }
+
+        Stmt::FnDecl { name, params, body } => {
+            let func = Value::Function(Function {
+                params: params.clone(),
+                body: *body.clone(),
+            });
+
+            env.set(name.clone(), func);
         }
     }
 }

@@ -1,3 +1,4 @@
+use crate::models::ast::Function;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -6,6 +7,8 @@ pub enum Value {
     String(String),
     Bool(bool),
     None,
+
+    Function(Function),
 }
 
 impl fmt::Display for Value {
@@ -15,6 +18,7 @@ impl fmt::Display for Value {
             Value::String(s) => write!(f, "{s}"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::None => write!(f, ""),
+            _ => write!(f, ""),
         }
     }
 }

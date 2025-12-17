@@ -10,13 +10,33 @@ pub enum Expr {
     Mult(Box<Expr>, Box<Expr>),
     Div(Box<Expr>, Box<Expr>),
     Equals(Box<Expr>, Box<Expr>),
+
+    Call { callee: Box<Expr>, args: Vec<Expr> },
 }
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
     ExprStmt(Box<Expr>),
-    Assignment(String, Box<Expr>),
+    Assignment {
+        name: String,
+        expr: Box<Expr>,
+    },
     Print(Box<Expr>),
-    If(Box<Expr>, Box<Stmt>),
+    If {
+        cond: Box<Expr>,
+        body: Box<Stmt>,
+    },
     Block(Vec<Stmt>),
+
+    FnDecl {
+        name: String,
+        params: Vec<String>,
+        body: Box<Stmt>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub params: Vec<String>,
+    pub body: Stmt,
 }
