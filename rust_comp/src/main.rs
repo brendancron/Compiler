@@ -1,20 +1,23 @@
 use std::io::{self, Read};
 
 mod components {
+    pub mod interpreter;
     pub mod lexer;
     pub mod parser;
-    pub mod interpreter;
 }
 
 mod models {
-    pub mod token;
     pub mod ast;
+    pub mod environment;
+    pub mod token;
     pub mod value;
 }
 
+use components::interpreter;
 use components::lexer;
 use components::parser;
-use components::interpreter;
+
+use models::environment::Env;
 
 fn main() {
     let mut buf = String::new();
@@ -31,6 +34,7 @@ fn main() {
     println!("\nExpr");
     let code = parser::parse(&tokens);
     println!("{:#?}", code);
-    
-    interpreter::eval(&code);
+
+    let mut env = Env::new();
+    interpreter::eval_stmt(&code, &mut env);
 }

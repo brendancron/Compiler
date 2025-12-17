@@ -1,30 +1,32 @@
-use crate::models::ast::Expr;
-use crate::models::token::{Token, TokenMetadata, TokenType};
+use crate::models::ast::{Expr, Stmt};
+use crate::models::token::{Token, TokenType};
 
-fn peek<'a>(tokens: &'a [Token], pos: usize) -> Option<&'a Token> {
-    tokens.get(pos)
-}
-
-fn consume<'a>(tokens: &'a [Token], pos: &mut usize, expected: TokenType) -> Option<&'a Token> {
+fn consume<'a>(tokens: &'a [Token], pos: &mut usize, expected: TokenType) -> &'a Token {
     match tokens.get(*pos) {
         Some(t) if t.token_type == expected => consume_next(tokens, pos),
-        _ => panic!("expected {:?}", expected),
+        Some(t) => panic!(
+            "expected {:?}, found {:?} at position {}",
+            expected, t.token_type, pos
+        ),
+        None => panic!("expected {:?}, found EOF at position {}", expected, pos),
     }
 }
 
-fn consume_next<'a>(tokens: &'a [Token], pos: &mut usize) -> Option<&'a Token> {
-    let tok = tokens.get(*pos)?;
+fn consume_next<'a>(tokens: &'a [Token], pos: &mut usize) -> &'a Token {
+    let tok = tokens
+        .get(*pos)
+        .expect("internal error: consume_next out of bounds");
     *pos += 1;
     println!("Consumed: {:?}", tok);
-    Some(tok)
+    tok
 }
 
-pub fn parse(tokens: &[Token]) -> Expr {
+pub fn parse(tokens: &[Token]) -> Stmt {
     let mut pos = 0;
 
     fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize) -> Expr {
         match tokens.get(*pos) {
-            Some(tok) => match (tok.token_type) {
+            Some(tok) => match tok.token_type {
                 TokenType::Number => {
                     consume_next(tokens, pos);
                     Expr::Int(tok.expect_int())
@@ -38,6 +40,11 @@ pub fn parse(tokens: &[Token]) -> Expr {
                 TokenType::True => {
                     consume_next(tokens, pos);
                     Expr::Bool(true)
+                }
+
+                TokenType::Identifier => {
+                    consume_next(tokens, pos);
+                    Expr::Variable(tok.expect_str())
                 }
 
                 TokenType::False => {
@@ -112,16 +119,16 @@ pub fn parse(tokens: &[Token]) -> Expr {
         }
     }
 
-    fn parse_keyword<'a>(tokens: &'a [Token], pos: &mut usize) -> Expr {
+    fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize) -> Stmt {
         match tokens.get(*pos) {
             Some(tok) => match tok.token_type {
                 TokenType::Print => {
                     consume(tokens, pos, TokenType::Print);
                     consume(tokens, pos, TokenType::LeftParen);
-                    let expr = parse_keyword(tokens, pos);
+                    let expr = parse_expr(tokens, pos);
                     consume(tokens, pos, TokenType::RightParen);
                     consume(tokens, pos, TokenType::Semicolon);
-                    Expr::Print(Box::new(expr))
+                    Stmt::Print(Box::new(expr))
                 }
 
                 TokenType::If => {
@@ -130,25 +137,35 @@ pub fn parse(tokens: &[Token]) -> Expr {
                     let conditional = parse_expr(tokens, pos);
                     consume(tokens, pos, TokenType::RightParen);
                     consume(tokens, pos, TokenType::LeftBrace);
-                    let inner = parse_keyword(tokens, pos);
+                    let inner = parse_stmt(tokens, pos);
                     consume(tokens, pos, TokenType::RightBrace);
-                    Expr::If(Box::new(conditional), Box::new(inner))
+                    Stmt::If(Box::new(conditional), Box::new(inner))
                 }
 
                 TokenType::Var => {
                     consume(tokens, pos, TokenType::Var);
-                    consume(tokens, pos, TokenType::Identifier);
+                    let id = consume(tokens, pos, TokenType::Identifier);
                     consume(tokens, pos, TokenType::Equal);
-                    let expr = parse_keyword(tokens, pos);
+                    let expr = parse_expr(tokens, pos);
                     consume(tokens, pos, TokenType::Semicolon);
-                    Expr::Assignment(tok.expect_str(), Box::new(expr))
+                    Stmt::Assignment(id.expect_str(), Box::new(expr))
                 }
 
-                _ => parse_expr(tokens, pos),
+                _ => Stmt::ExprStmt(Box::new(parse_expr(tokens, pos))),
             },
-            _ => parse_expr(tokens, pos),
+            _ => Stmt::ExprStmt(Box::new(parse_expr(tokens, pos))),
         }
     }
 
-    parse_keyword(tokens, &mut pos)
+    pub fn parse_program(tokens: &[Token], pos: &mut usize) -> Stmt {
+        let mut stmts = Vec::new();
+
+        while *pos < tokens.len() && tokens[*pos].token_type != TokenType::EOF {
+            stmts.push(parse_stmt(tokens, pos));
+        }
+
+        Stmt::Block(stmts)
+    }
+
+    parse_program(tokens, &mut pos)
 }

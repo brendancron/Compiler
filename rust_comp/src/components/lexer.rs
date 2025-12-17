@@ -219,7 +219,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
             c if is_digit(c) => {
                 let (num, j) = lex_number(&chars, i);
                 tokens.push(Token {
-                    token_type: TokenType::Less,
+                    token_type: TokenType::Number,
                     line_number: line_number,
                     metadata: Some(TokenMetadata::Int(num)),
                 });

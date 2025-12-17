@@ -1,0 +1,10 @@
+fn greet_brendan() {
+    print("Hello brendan");
+}
+
+fn greet_John() {
+    print("Hello John");
+}
+
+greet_brendan()
+greet_john()

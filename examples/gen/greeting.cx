@@ -1,0 +1,19 @@
+meta fn gen_greeting(name: String) {
+    let fn_name =
+        ident("greet_" + name);
+
+    let message =
+        "Hello " + name;
+
+    gen fn fn_name() {
+        return message;
+    };
+}
+
+meta {
+    gen_greeting("brendan");
+    gen_greeting("John");
+}
+
+greet_brendan()
+greet_john()

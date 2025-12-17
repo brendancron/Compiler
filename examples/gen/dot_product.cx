@@ -1,0 +1,29 @@
+meta fn gen_dot(size: int) {
+
+    var expr = null;
+
+    for i in 0..size {
+        let term = a[i] * b[i];
+
+        expr =
+            if expr == null {
+                term
+            } else {
+                expr + term
+            };
+    }
+
+    gen fn dot(a: [f32; size], b: [f32; size]) -> f32 {
+        return expr;
+    };
+}
+
+meta {
+    gen_dot(3);
+}
+
+var a: [f32; 3] = [1.0, 2.0, 3.0]
+var b: [f32; 3] = [4.0, 5.0, 6.0]
+var res = dot(a, b);
+
+assert(res = 32.0);
