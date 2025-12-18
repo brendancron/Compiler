@@ -1,5 +1,6 @@
 use crate::models::ast::{Expr, Function, Stmt};
 use crate::models::environment::Env;
+use crate::models::result::ExecResult;
 use crate::models::value::Value;
 
 pub fn eval_expr(expr: &Expr, env: &mut Env) -> Value {
@@ -57,46 +58,63 @@ pub fn eval_expr(expr: &Expr, env: &mut Env) -> Value {
                 env.set(param.clone(), value);
             }
 
-            eval_stmt(&func.body, env);
+            let result = match eval_stmt(&func.body, env) {
+                ExecResult::Return(v) => v,
+                ExecResult::Continue => Value::Unit,
+            };
 
             env.pop_scope();
 
-            Value::None
+            result
         }
     }
 }
 
-pub fn eval_stmt(stmt: &Stmt, env: &mut Env) {
+pub fn eval_stmt(stmt: &Stmt, env: &mut Env) -> ExecResult {
     match stmt {
         Stmt::Print(expr) => {
             let value = eval_expr(expr, env);
             println!("{}", value);
+            ExecResult::Continue
         }
 
-        Stmt::If { cond, body } => match eval_expr(cond, env) {
-            Value::Bool(b) => {
-                if b {
-                    eval_stmt(body, env)
-                }
-            }
+        Stmt::If {
+            cond,
+            body,
+            else_branch,
+        } => match eval_expr(cond, env) {
+            Value::Bool(true) => eval_stmt(body, env),
+            Value::Bool(false) => match else_branch {
+                Some(else_stmt) => eval_stmt(else_stmt, env),
+                None => ExecResult::Continue,
+            },
             _ => panic!("type error: expected bool expr"),
         },
 
         Stmt::ExprStmt(expr) => {
             eval_expr(expr, env);
+            ExecResult::Continue
         }
 
         Stmt::Assignment { name, expr } => {
             let value = eval_expr(expr, env);
             env.set(name.clone(), value);
+            ExecResult::Continue
         }
 
         Stmt::Block(stmts) => {
             env.push_scope();
             for stmt in stmts {
-                eval_stmt(stmt, env);
+                match eval_stmt(stmt, env) {
+                    ExecResult::Continue => {}
+                    ExecResult::Return(v) => {
+                        env.pop_scope();
+                        return ExecResult::Return(v);
+                    }
+                }
             }
             env.pop_scope();
+            ExecResult::Continue
         }
 
         Stmt::FnDecl { name, params, body } => {
@@ -106,6 +124,15 @@ pub fn eval_stmt(stmt: &Stmt, env: &mut Env) {
             });
 
             env.set(name.clone(), func);
+            ExecResult::Continue
         }
+
+        Stmt::Return(opt_expr) => match opt_expr {
+            None => ExecResult::Return(Value::Unit),
+            Some(expr) => {
+                let result = eval_expr(expr, env);
+                ExecResult::Return(result)
+            }
+        },
     }
 }

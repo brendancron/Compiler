@@ -1,3 +1,10 @@
-if (false) {
-    print("hello world");
+fn cond(b) {
+    if (b) {
+        print("hello");
+    } else {
+        print("world");
+    }
 }
+
+cond(true);
+cond(false);

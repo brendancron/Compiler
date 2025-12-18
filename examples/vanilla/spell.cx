@@ -1,0 +1,59 @@
+fn fireball() {
+    print("🔥 You cast Fireball!");
+}
+
+fn heal() {
+    print("✨ You cast Heal!");
+}
+
+fn fizz() {
+    print("💥 fizz");
+}
+
+fn buzz() {
+    print("⚡ buzz");
+}
+
+fn fizzbuzz() {
+    print("💣 FIZZBUZZ");
+}
+
+fn cast_spell(spell) {
+    if (spell == 1) {
+        fireball();
+    }
+
+    if (spell == 2) {
+        heal();
+    }
+
+    if (spell == 3) {
+        fizz();
+    }
+
+    if (spell == 5) {
+        buzz();
+    }
+
+    if (spell == 15) {
+        fizzbuzz();
+    }
+}
+
+print("Welcome, wizard.");
+print("Casting spells...");
+
+var a = 1;
+var b = 2;
+var c = 3;
+var d = 5;
+var e = 15;
+
+cast_spell(a);
+cast_spell(b);
+cast_spell(c);
+cast_spell(d);
+cast_spell(e);
+
+print("Spell sequence complete.");
+

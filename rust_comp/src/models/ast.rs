@@ -25,6 +25,7 @@ pub enum Stmt {
     If {
         cond: Box<Expr>,
         body: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>,
     },
     Block(Vec<Stmt>),
 
@@ -33,6 +34,8 @@ pub enum Stmt {
         params: Vec<String>,
         body: Box<Stmt>,
     },
+
+    Return(Option<Box<Expr>>),
 }
 
 #[derive(Debug, Clone)]

@@ -201,9 +201,24 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     consume(tokens, pos, TokenType::LeftBrace);
                     let inner = parse_stmt(tokens, pos);
                     consume(tokens, pos, TokenType::RightBrace);
+                    let else_branch = if check(tokens, *pos, TokenType::Else) {
+                        consume(tokens, pos, TokenType::Else);
+                        if check(tokens, *pos, TokenType::If) {
+                            Some(Box::new(parse_stmt(tokens, pos)))
+                        } else {
+                            consume(tokens, pos, TokenType::LeftBrace);
+                            let stmt = parse_stmt(tokens, pos);
+                            consume(tokens, pos, TokenType::RightBrace);
+                            Some(Box::new(stmt))
+                        }
+                    } else {
+                        None
+                    };
+
                     Stmt::If {
                         cond: Box::new(conditional),
                         body: Box::new(inner),
+                        else_branch: else_branch,
                     }
                 }
 
@@ -240,6 +255,17 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                         params,
                         body: Box::new(body),
                     }
+                }
+
+                TokenType::Return => {
+                    consume(tokens, pos, TokenType::Return);
+                    let opt_expr = if check(tokens, *pos, TokenType::Semicolon) {
+                        None
+                    } else {
+                        Some(Box::new(parse_expr(tokens, pos)))
+                    };
+                    consume(tokens, pos, TokenType::Semicolon);
+                    Stmt::Return(opt_expr)
                 }
 
                 _ => parse_expr_stmt(tokens, pos),

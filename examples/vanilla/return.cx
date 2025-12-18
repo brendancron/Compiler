@@ -1,0 +1,6 @@
+fn get_name() {
+    return "Brendan";
+    print("unreachable");
+}
+
+print(get_name());

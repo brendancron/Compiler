@@ -9,6 +9,7 @@ mod components {
 mod models {
     pub mod ast;
     pub mod environment;
+    pub mod result;
     pub mod token;
     pub mod value;
 }
