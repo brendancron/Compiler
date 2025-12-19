@@ -1,0 +1,10 @@
+meta {
+    fn fib(n) {
+        print(n);
+        if (n == 1) {
+            return 1;
+        }
+        return fib(n-1) * 2;
+    }
+    gen print(fib(5));
+}
