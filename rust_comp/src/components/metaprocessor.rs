@@ -1,5 +1,8 @@
 use crate::models::ast::{LoweredExpr, LoweredStmt, ParsedExpr, ParsedStmt};
 
+use crate::components::interpreter;
+use crate::models::environment::Env;
+
 pub fn lower_expr(expr: &ParsedExpr) -> LoweredExpr {
     match expr {
         ParsedExpr::Int(i) => LoweredExpr::Int(*i),
@@ -61,8 +64,11 @@ pub fn lower_stmt(stmt: &ParsedStmt) -> LoweredStmt {
             LoweredStmt::Return(expr.as_ref().map(|e| Box::new(lower_expr(e))))
         }
 
-        ParsedStmt::MetaStmt(_) => {
-            panic!("MetaStmt reached lowering phase — meta execution should have removed it");
+        ParsedStmt::MetaStmt(parsed_stmt) => {
+            let lowered_code = lower_stmt(parsed_stmt);
+            let mut env = Env::new();
+            interpreter::eval_stmt(&lowered_code, &mut env);
+            LoweredStmt::Block(vec![])
         }
     }
 }
