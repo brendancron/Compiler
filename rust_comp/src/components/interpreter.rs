@@ -54,7 +54,7 @@ pub fn eval_expr(expr: &LoweredExpr, env: &mut Env, ctx: &mut Option<&mut MetaCo
 
             let arg_vals: Vec<Value> = args.iter().map(|a| eval_expr(a, env, ctx)).collect();
 
-            let mut callee_env = env.new_call_env();
+            let mut callee_env = func.env.new_call_env();
             callee_env.push_scope();
 
             for (param, value) in func.params.iter().zip(arg_vals) {
@@ -121,6 +121,7 @@ pub fn eval_stmt(
             let func = Value::Function(Function {
                 params: params.clone(),
                 body: *body.clone(),
+                env: env.clone(),
             });
 
             env.set(name.clone(), func);

@@ -1,0 +1,11 @@
+var x = 5;
+
+fn foo() {
+    var y = 8;
+    fn bar() {
+        print(x);
+        print(y);
+    }
+    bar();
+}
+foo();

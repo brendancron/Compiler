@@ -1,4 +1,5 @@
 use crate::models::ast::LoweredStmt;
+use crate::models::environment::Env;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -15,6 +16,7 @@ pub enum Value {
 pub struct Function {
     pub params: Vec<String>,
     pub body: LoweredStmt,
+    pub env: Env,
 }
 
 impl fmt::Display for Value {

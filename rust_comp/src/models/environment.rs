@@ -1,7 +1,7 @@
 use crate::models::value::Value;
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Env {
     scopes: Vec<HashMap<String, Value>>,
 }
@@ -50,8 +50,8 @@ impl Env {
 
 impl Env {
     pub fn new_call_env(&self) -> Self {
-        let mut env = Env::new();
-        env.scopes[0] = self.scopes[0].clone();
-        env
+        Env {
+            scopes: self.scopes.clone(),
+        }
     }
 }
