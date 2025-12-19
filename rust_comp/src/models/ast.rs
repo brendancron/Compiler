@@ -1,45 +1,89 @@
 #[derive(Debug, Clone)]
-pub enum Expr {
+pub enum ParsedExpr {
     Int(i64),
     String(String),
     Bool(bool),
     Variable(String),
 
-    Add(Box<Expr>, Box<Expr>),
-    Sub(Box<Expr>, Box<Expr>),
-    Mult(Box<Expr>, Box<Expr>),
-    Div(Box<Expr>, Box<Expr>),
-    Equals(Box<Expr>, Box<Expr>),
+    Add(Box<ParsedExpr>, Box<ParsedExpr>),
+    Sub(Box<ParsedExpr>, Box<ParsedExpr>),
+    Mult(Box<ParsedExpr>, Box<ParsedExpr>),
+    Div(Box<ParsedExpr>, Box<ParsedExpr>),
+    Equals(Box<ParsedExpr>, Box<ParsedExpr>),
 
-    Call { callee: Box<Expr>, args: Vec<Expr> },
+    Call {
+        callee: Box<ParsedExpr>,
+        args: Vec<ParsedExpr>,
+    },
 }
 
 #[derive(Debug, Clone)]
-pub enum Stmt {
-    ExprStmt(Box<Expr>),
+pub enum ParsedStmt {
+    ExprStmt(Box<ParsedExpr>),
     Assignment {
         name: String,
-        expr: Box<Expr>,
+        expr: Box<ParsedExpr>,
     },
-    Print(Box<Expr>),
+    Print(Box<ParsedExpr>),
     If {
-        cond: Box<Expr>,
-        body: Box<Stmt>,
-        else_branch: Option<Box<Stmt>>,
+        cond: Box<ParsedExpr>,
+        body: Box<ParsedStmt>,
+        else_branch: Option<Box<ParsedStmt>>,
     },
-    Block(Vec<Stmt>),
+    Block(Vec<ParsedStmt>),
 
     FnDecl {
         name: String,
         params: Vec<String>,
-        body: Box<Stmt>,
+        body: Box<ParsedStmt>,
     },
 
-    Return(Option<Box<Expr>>),
+    Return(Option<Box<ParsedExpr>>),
+
+    MetaStmt(Box<ParsedStmt>),
+}
+
+// --- LOWERED AST ---
+
+#[derive(Debug, Clone)]
+pub enum LoweredExpr {
+    Int(i64),
+    String(String),
+    Bool(bool),
+    Variable(String),
+
+    Add(Box<LoweredExpr>, Box<LoweredExpr>),
+    Sub(Box<LoweredExpr>, Box<LoweredExpr>),
+    Mult(Box<LoweredExpr>, Box<LoweredExpr>),
+    Div(Box<LoweredExpr>, Box<LoweredExpr>),
+    Equals(Box<LoweredExpr>, Box<LoweredExpr>),
+
+    Call {
+        callee: Box<LoweredExpr>,
+        args: Vec<LoweredExpr>,
+    },
 }
 
 #[derive(Debug, Clone)]
-pub struct Function {
-    pub params: Vec<String>,
-    pub body: Stmt,
+pub enum LoweredStmt {
+    ExprStmt(Box<LoweredExpr>),
+    Assignment {
+        name: String,
+        expr: Box<LoweredExpr>,
+    },
+    Print(Box<LoweredExpr>),
+    If {
+        cond: Box<LoweredExpr>,
+        body: Box<LoweredStmt>,
+        else_branch: Option<Box<LoweredStmt>>,
+    },
+    Block(Vec<LoweredStmt>),
+
+    FnDecl {
+        name: String,
+        params: Vec<String>,
+        body: Box<LoweredStmt>,
+    },
+
+    Return(Option<Box<LoweredExpr>>),
 }

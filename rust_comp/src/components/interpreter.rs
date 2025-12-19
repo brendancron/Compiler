@@ -1,45 +1,45 @@
-use crate::models::ast::{Expr, Function, Stmt};
+use crate::models::ast::{LoweredExpr, LoweredStmt};
 use crate::models::environment::Env;
 use crate::models::result::ExecResult;
-use crate::models::value::Value;
+use crate::models::value::{Function, Value};
 
-pub fn eval_expr(expr: &Expr, env: &mut Env) -> Value {
+pub fn eval_expr(expr: &LoweredExpr, env: &mut Env) -> Value {
     match expr {
-        Expr::Int(n) => Value::Int(*n),
-        Expr::String(s) => Value::String(s.clone()),
-        Expr::Bool(b) => Value::Bool(*b),
-        Expr::Variable(name) => env
+        LoweredExpr::Int(n) => Value::Int(*n),
+        LoweredExpr::String(s) => Value::String(s.clone()),
+        LoweredExpr::Bool(b) => Value::Bool(*b),
+        LoweredExpr::Variable(name) => env
             .get(name)
             .unwrap_or_else(|| panic!("undefined variable: {}", name)),
 
-        Expr::Add(a, b) => match (eval_expr(a, env), eval_expr(b, env)) {
+        LoweredExpr::Add(a, b) => match (eval_expr(a, env), eval_expr(b, env)) {
             (Value::Int(x), Value::Int(y)) => Value::Int(x + y),
             _ => panic!("type error: + expects ints"),
         },
 
-        Expr::Sub(a, b) => match (eval_expr(a, env), eval_expr(b, env)) {
+        LoweredExpr::Sub(a, b) => match (eval_expr(a, env), eval_expr(b, env)) {
             (Value::Int(x), Value::Int(y)) => Value::Int(x - y),
             _ => panic!("type error: - expects ints"),
         },
 
-        Expr::Mult(a, b) => match (eval_expr(a, env), eval_expr(b, env)) {
+        LoweredExpr::Mult(a, b) => match (eval_expr(a, env), eval_expr(b, env)) {
             (Value::Int(x), Value::Int(y)) => Value::Int(x * y),
             _ => panic!("type error: * expects ints"),
         },
 
-        Expr::Div(a, b) => match (eval_expr(a, env), eval_expr(b, env)) {
+        LoweredExpr::Div(a, b) => match (eval_expr(a, env), eval_expr(b, env)) {
             (Value::Int(x), Value::Int(y)) => Value::Int(x / y),
             _ => panic!("type error: / expects ints"),
         },
 
-        Expr::Equals(a, b) => match (eval_expr(a, env), eval_expr(b, env)) {
+        LoweredExpr::Equals(a, b) => match (eval_expr(a, env), eval_expr(b, env)) {
             (Value::Int(x), Value::Int(y)) => Value::Bool(x == y),
             (Value::String(x), Value::String(y)) => Value::Bool(x == y),
             (Value::Bool(x), Value::Bool(y)) => Value::Bool(x == y),
             _ => panic!("type error: == mismatched types"),
         },
 
-        Expr::Call { callee, args } => {
+        LoweredExpr::Call { callee, args } => {
             let callee_val = eval_expr(callee, env);
             let func = match callee_val {
                 Value::Function(f) => f,
@@ -70,15 +70,15 @@ pub fn eval_expr(expr: &Expr, env: &mut Env) -> Value {
     }
 }
 
-pub fn eval_stmt(stmt: &Stmt, env: &mut Env) -> ExecResult {
+pub fn eval_stmt(stmt: &LoweredStmt, env: &mut Env) -> ExecResult {
     match stmt {
-        Stmt::Print(expr) => {
+        LoweredStmt::Print(expr) => {
             let value = eval_expr(expr, env);
             println!("{}", value);
             ExecResult::Continue
         }
 
-        Stmt::If {
+        LoweredStmt::If {
             cond,
             body,
             else_branch,
@@ -91,18 +91,18 @@ pub fn eval_stmt(stmt: &Stmt, env: &mut Env) -> ExecResult {
             _ => panic!("type error: expected bool expr"),
         },
 
-        Stmt::ExprStmt(expr) => {
+        LoweredStmt::ExprStmt(expr) => {
             eval_expr(expr, env);
             ExecResult::Continue
         }
 
-        Stmt::Assignment { name, expr } => {
+        LoweredStmt::Assignment { name, expr } => {
             let value = eval_expr(expr, env);
             env.set(name.clone(), value);
             ExecResult::Continue
         }
 
-        Stmt::Block(stmts) => {
+        LoweredStmt::Block(stmts) => {
             env.push_scope();
             for stmt in stmts {
                 match eval_stmt(stmt, env) {
@@ -117,7 +117,7 @@ pub fn eval_stmt(stmt: &Stmt, env: &mut Env) -> ExecResult {
             ExecResult::Continue
         }
 
-        Stmt::FnDecl { name, params, body } => {
+        LoweredStmt::FnDecl { name, params, body } => {
             let func = Value::Function(Function {
                 params: params.clone(),
                 body: *body.clone(),
@@ -127,7 +127,7 @@ pub fn eval_stmt(stmt: &Stmt, env: &mut Env) -> ExecResult {
             ExecResult::Continue
         }
 
-        Stmt::Return(opt_expr) => match opt_expr {
+        LoweredStmt::Return(opt_expr) => match opt_expr {
             None => ExecResult::Return(Value::Unit),
             Some(expr) => {
                 let result = eval_expr(expr, env);

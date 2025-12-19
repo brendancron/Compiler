@@ -1,4 +1,4 @@
-use crate::models::ast::{Expr, Stmt};
+use crate::models::ast::{ParsedExpr, ParsedStmt};
 use crate::models::token::{Token, TokenType};
 
 fn check(tokens: &[Token], pos: usize, expected: TokenType) -> bool {
@@ -59,30 +59,30 @@ fn parse_separated<T>(
     items
 }
 
-pub fn parse(tokens: &[Token]) -> Stmt {
+pub fn parse(tokens: &[Token]) -> ParsedStmt {
     let mut pos = 0;
 
-    fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize) -> Expr {
+    fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize) -> ParsedExpr {
         match tokens.get(*pos) {
             Some(tok) => match tok.token_type {
                 TokenType::Number => {
                     consume_next(tokens, pos);
-                    Expr::Int(tok.expect_int())
+                    ParsedExpr::Int(tok.expect_int())
                 }
 
                 TokenType::String => {
                     consume_next(tokens, pos);
-                    Expr::String(tok.expect_str())
+                    ParsedExpr::String(tok.expect_str())
                 }
 
                 TokenType::True => {
                     consume_next(tokens, pos);
-                    Expr::Bool(true)
+                    ParsedExpr::Bool(true)
                 }
 
                 TokenType::False => {
                     consume_next(tokens, pos);
-                    Expr::Bool(false)
+                    ParsedExpr::Bool(false)
                 }
 
                 TokenType::LeftParen => {
@@ -106,12 +106,12 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                         );
                         consume(tokens, pos, TokenType::RightParen);
 
-                        Expr::Call {
-                            callee: Box::new(Expr::Variable(name)),
+                        ParsedExpr::Call {
+                            callee: Box::new(ParsedExpr::Variable(name)),
                             args,
                         }
                     } else {
-                        Expr::Variable(name)
+                        ParsedExpr::Variable(name)
                     }
                 }
 
@@ -121,7 +121,7 @@ pub fn parse(tokens: &[Token]) -> Stmt {
         }
     }
 
-    fn parse_term<'a>(tokens: &'a [Token], pos: &mut usize) -> Expr {
+    fn parse_term<'a>(tokens: &'a [Token], pos: &mut usize) -> ParsedExpr {
         let mut left = parse_factor(tokens, pos);
 
         loop {
@@ -130,12 +130,12 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     TokenType::Star => {
                         *pos += 1;
                         let right = parse_factor(tokens, pos);
-                        left = Expr::Mult(Box::new(left), Box::new(right));
+                        left = ParsedExpr::Mult(Box::new(left), Box::new(right));
                     }
                     TokenType::Slash => {
                         *pos += 1;
                         let right = parse_factor(tokens, pos);
-                        left = Expr::Div(Box::new(left), Box::new(right));
+                        left = ParsedExpr::Div(Box::new(left), Box::new(right));
                     }
                     _ => return left,
                 },
@@ -144,7 +144,7 @@ pub fn parse(tokens: &[Token]) -> Stmt {
         }
     }
 
-    fn parse_expr<'a>(tokens: &'a [Token], pos: &mut usize) -> Expr {
+    fn parse_expr<'a>(tokens: &'a [Token], pos: &mut usize) -> ParsedExpr {
         let mut left = parse_term(tokens, pos);
 
         loop {
@@ -153,19 +153,19 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     TokenType::Plus => {
                         *pos += 1;
                         let right = parse_term(tokens, pos);
-                        left = Expr::Add(Box::new(left), Box::new(right));
+                        left = ParsedExpr::Add(Box::new(left), Box::new(right));
                     }
 
                     TokenType::Minus => {
                         *pos += 1;
                         let right = parse_term(tokens, pos);
-                        left = Expr::Sub(Box::new(left), Box::new(right));
+                        left = ParsedExpr::Sub(Box::new(left), Box::new(right));
                     }
 
                     TokenType::EqualEqual => {
                         *pos += 1;
                         let right = parse_term(tokens, pos);
-                        left = Expr::Equals(Box::new(left), Box::new(right));
+                        left = ParsedExpr::Equals(Box::new(left), Box::new(right));
                     }
 
                     _ => return left,
@@ -175,11 +175,11 @@ pub fn parse(tokens: &[Token]) -> Stmt {
         }
     }
 
-    fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize) -> Stmt {
-        fn parse_expr_stmt<'a>(tokens: &'a [Token], pos: &mut usize) -> Stmt {
+    fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize) -> ParsedStmt {
+        fn parse_expr_stmt<'a>(tokens: &'a [Token], pos: &mut usize) -> ParsedStmt {
             let expr = parse_expr(tokens, pos);
             consume(tokens, pos, TokenType::Semicolon);
-            Stmt::ExprStmt(Box::new(expr))
+            ParsedStmt::ExprStmt(Box::new(expr))
         }
 
         match tokens.get(*pos) {
@@ -190,7 +190,7 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     let expr = parse_expr(tokens, pos);
                     consume(tokens, pos, TokenType::RightParen);
                     consume(tokens, pos, TokenType::Semicolon);
-                    Stmt::Print(Box::new(expr))
+                    ParsedStmt::Print(Box::new(expr))
                 }
 
                 TokenType::If => {
@@ -215,7 +215,7 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                         None
                     };
 
-                    Stmt::If {
+                    ParsedStmt::If {
                         cond: Box::new(conditional),
                         body: Box::new(inner),
                         else_branch: else_branch,
@@ -228,7 +228,7 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     consume(tokens, pos, TokenType::Equal);
                     let expr = parse_expr(tokens, pos);
                     consume(tokens, pos, TokenType::Semicolon);
-                    Stmt::Assignment {
+                    ParsedStmt::Assignment {
                         name: id.expect_str(),
                         expr: Box::new(expr),
                     }
@@ -250,7 +250,7 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                     let body = parse_block(tokens, pos);
                     consume(tokens, pos, TokenType::RightBrace);
 
-                    Stmt::FnDecl {
+                    ParsedStmt::FnDecl {
                         name,
                         params,
                         body: Box::new(body),
@@ -265,7 +265,20 @@ pub fn parse(tokens: &[Token]) -> Stmt {
                         Some(Box::new(parse_expr(tokens, pos)))
                     };
                     consume(tokens, pos, TokenType::Semicolon);
-                    Stmt::Return(opt_expr)
+                    ParsedStmt::Return(opt_expr)
+                }
+
+                TokenType::Meta => {
+                    consume(tokens, pos, TokenType::Meta);
+                    let stmt = if check(tokens, *pos, TokenType::LeftBrace) {
+                        consume(tokens, pos, TokenType::LeftBrace);
+                        let block = parse_block(tokens, pos);
+                        consume(tokens, pos, TokenType::RightBrace);
+                        block
+                    } else {
+                        parse_stmt(tokens, pos)
+                    };
+                    ParsedStmt::MetaStmt(Box::new(stmt))
                 }
 
                 _ => parse_expr_stmt(tokens, pos),
@@ -274,24 +287,24 @@ pub fn parse(tokens: &[Token]) -> Stmt {
         }
     }
 
-    pub fn parse_block(tokens: &[Token], pos: &mut usize) -> Stmt {
+    pub fn parse_block(tokens: &[Token], pos: &mut usize) -> ParsedStmt {
         let mut stmts = Vec::new();
 
         while *pos < tokens.len() && tokens[*pos].token_type != TokenType::RightBrace {
             stmts.push(parse_stmt(tokens, pos));
         }
 
-        Stmt::Block(stmts)
+        ParsedStmt::Block(stmts)
     }
 
-    fn parse_program(tokens: &[Token], pos: &mut usize) -> Stmt {
+    fn parse_program(tokens: &[Token], pos: &mut usize) -> ParsedStmt {
         let mut stmts = Vec::new();
 
         while *pos < tokens.len() && tokens[*pos].token_type != TokenType::EOF {
             stmts.push(parse_stmt(tokens, pos));
         }
 
-        Stmt::Block(stmts)
+        ParsedStmt::Block(stmts)
     }
 
     parse_program(tokens, &mut pos)

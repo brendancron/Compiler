@@ -1,0 +1,5 @@
+print("Top");
+meta {
+    print("Middle");
+}
+print("Bottom");

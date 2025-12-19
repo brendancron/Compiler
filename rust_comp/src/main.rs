@@ -3,6 +3,7 @@ use std::io::{self, Read};
 mod components {
     pub mod interpreter;
     pub mod lexer;
+    pub mod metaprocessor;
     pub mod parser;
 }
 
@@ -16,6 +17,7 @@ mod models {
 
 use components::interpreter;
 use components::lexer;
+use components::metaprocessor;
 use components::parser;
 
 use models::environment::Env;
@@ -33,9 +35,12 @@ fn main() {
     }
 
     println!("\nExpr");
-    let code = parser::parse(&tokens);
-    println!("{:#?}", code);
+    let parsed_code = parser::parse(&tokens);
+    println!("{:#?}", parsed_code);
+
+    let lowered_code = metaprocessor::lower_stmt(&parsed_code);
+    println!("{:#?}", lowered_code);
 
     let mut env = Env::new();
-    interpreter::eval_stmt(&code, &mut env);
+    interpreter::eval_stmt(&lowered_code, &mut env);
 }

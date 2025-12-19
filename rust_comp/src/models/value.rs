@@ -1,4 +1,4 @@
-use crate::models::ast::Function;
+use crate::models::ast::LoweredStmt;
 use std::fmt;
 
 #[derive(Debug, Clone)]
@@ -9,6 +9,12 @@ pub enum Value {
     Unit,
 
     Function(Function),
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub params: Vec<String>,
+    pub body: LoweredStmt,
 }
 
 impl fmt::Display for Value {
