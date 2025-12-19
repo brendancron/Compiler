@@ -40,6 +40,8 @@ pub enum ParsedStmt {
 
     Return(Option<Box<ParsedExpr>>),
 
+    Gen(Vec<ParsedStmt>),
+
     MetaStmt(Box<ParsedStmt>),
 }
 
@@ -86,4 +88,6 @@ pub enum LoweredStmt {
     },
 
     Return(Option<Box<LoweredExpr>>),
+
+    Gen(Vec<LoweredStmt>),
 }

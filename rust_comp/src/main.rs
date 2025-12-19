@@ -38,9 +38,9 @@ fn main() {
     let parsed_code = parser::parse(&tokens);
     println!("{:#?}", parsed_code);
 
-    let lowered_code = metaprocessor::lower_stmt(&parsed_code);
+    let lowered_code = metaprocessor::lower(&parsed_code);
     println!("{:#?}", lowered_code);
 
     let mut env = Env::new();
-    interpreter::eval_stmt(&lowered_code, &mut env);
+    interpreter::eval(&lowered_code, &mut env, &mut None);
 }

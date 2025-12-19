@@ -59,7 +59,7 @@ fn parse_separated<T>(
     items
 }
 
-pub fn parse(tokens: &[Token]) -> ParsedStmt {
+pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
     let mut pos = 0;
 
     fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize) -> ParsedExpr {
@@ -268,6 +268,12 @@ pub fn parse(tokens: &[Token]) -> ParsedStmt {
                     ParsedStmt::Return(opt_expr)
                 }
 
+                TokenType::Gen => {
+                    consume(tokens, pos, TokenType::Gen);
+                    let stmt = parse_stmt(tokens, pos);
+                    ParsedStmt::Gen(vec![stmt])
+                }
+
                 TokenType::Meta => {
                     consume(tokens, pos, TokenType::Meta);
                     let stmt = if check(tokens, *pos, TokenType::LeftBrace) {
@@ -297,14 +303,14 @@ pub fn parse(tokens: &[Token]) -> ParsedStmt {
         ParsedStmt::Block(stmts)
     }
 
-    fn parse_program(tokens: &[Token], pos: &mut usize) -> ParsedStmt {
+    fn parse_program(tokens: &[Token], pos: &mut usize) -> Vec<ParsedStmt> {
         let mut stmts = Vec::new();
 
         while *pos < tokens.len() && tokens[*pos].token_type != TokenType::EOF {
             stmts.push(parse_stmt(tokens, pos));
         }
 
-        ParsedStmt::Block(stmts)
+        stmts
     }
 
     parse_program(tokens, &mut pos)
