@@ -85,7 +85,7 @@ pub fn lower_stmt(stmt: &ParsedStmt) -> Vec<LoweredStmt> {
 
         ParsedStmt::MetaStmt(parsed_stmt) => {
             let lowered_code = lower_stmt(parsed_stmt);
-            let mut env = Env::new();
+            let env = Env::new();
             let mut ctx = MetaContext {
                 emitted: Vec::new(),
             };
@@ -94,7 +94,7 @@ pub fn lower_stmt(stmt: &ParsedStmt) -> Vec<LoweredStmt> {
                 File::create("../out/meta_code.txt").expect("failed to create output file");
             writeln!(file, "{:#?}", lowered_code).expect("failed to write parsed AST");
 
-            interpreter::eval(&lowered_code, &mut env, &mut Some(&mut ctx));
+            interpreter::eval(&lowered_code, env, &mut Some(&mut ctx));
 
             ctx.emitted
         }

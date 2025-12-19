@@ -1,8 +1,8 @@
 use crate::models::ast::{LoweredExpr, LoweredStmt};
-use crate::models::environment::Env;
+use crate::models::environment::EnvRef;
 use crate::models::value::Value;
 
-fn subst_expr(expr: &LoweredExpr, env: &Env) -> LoweredExpr {
+fn subst_expr(expr: &LoweredExpr, env: &EnvRef) -> LoweredExpr {
     match expr {
         LoweredExpr::Int(n) => LoweredExpr::Int(*n),
 
@@ -10,7 +10,7 @@ fn subst_expr(expr: &LoweredExpr, env: &Env) -> LoweredExpr {
 
         LoweredExpr::Bool(b) => LoweredExpr::Bool(*b),
 
-        LoweredExpr::Variable(name) => match env.get(name) {
+        LoweredExpr::Variable(name) => match env.borrow().get(name) {
             Some(Value::Int(n)) => LoweredExpr::Int(n),
             Some(Value::String(s)) => LoweredExpr::String(s.clone()),
             Some(Value::Bool(b)) => LoweredExpr::Bool(b),
@@ -45,7 +45,7 @@ fn subst_expr(expr: &LoweredExpr, env: &Env) -> LoweredExpr {
     }
 }
 
-fn subst_stmt(stmt: &LoweredStmt, env: &Env) -> LoweredStmt {
+fn subst_stmt(stmt: &LoweredStmt, env: &EnvRef) -> LoweredStmt {
     match stmt {
         LoweredStmt::ExprStmt(e) => LoweredStmt::ExprStmt(Box::new(subst_expr(e, env))),
 
@@ -86,6 +86,6 @@ fn subst_stmt(stmt: &LoweredStmt, env: &Env) -> LoweredStmt {
     }
 }
 
-pub fn subst_stmts(stmts: &[LoweredStmt], env: &Env) -> Vec<LoweredStmt> {
+pub fn subst_stmts(stmts: &[LoweredStmt], env: &EnvRef) -> Vec<LoweredStmt> {
     stmts.iter().map(|s| subst_stmt(s, env)).collect()
 }

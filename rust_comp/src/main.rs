@@ -48,6 +48,6 @@ fn main() {
     let mut file = File::create("../out/lowered_ast.txt").expect("failed to create output file");
     writeln!(file, "{:#?}", lowered_code).expect("failed to write lowered AST");
 
-    let mut env = Env::new();
-    interpreter::eval(&lowered_code, &mut env, &mut None);
+    let env = Env::new();
+    interpreter::eval(&lowered_code, env, &mut None);
 }

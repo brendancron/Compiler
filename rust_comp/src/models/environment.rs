@@ -1,18 +1,33 @@
 use crate::models::value::Value;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
+
+pub type EnvRef = Rc<RefCell<Env>>;
 
 #[derive(Debug, Clone)]
 pub struct Env {
     scopes: Vec<HashMap<String, Value>>,
+    parent: Option<EnvRef>,
 }
 
 impl Env {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> EnvRef {
+        Rc::new(RefCell::new(Env {
             scopes: vec![HashMap::new()],
-        }
+            parent: None,
+        }))
+    }
+
+    pub fn new_child(parent: EnvRef) -> EnvRef {
+        Rc::new(RefCell::new(Env {
+            scopes: vec![HashMap::new()],
+            parent: Some(parent),
+        }))
     }
 }
+
+/* ---------------- Scope management (blocks) ---------------- */
 
 impl Env {
     pub fn push_scope(&mut self) {
@@ -24,6 +39,8 @@ impl Env {
     }
 }
 
+/* ---------------- Variable lookup ---------------- */
+
 impl Env {
     pub fn get(&self, name: &str) -> Option<Value> {
         for scope in self.scopes.iter().rev() {
@@ -31,12 +48,23 @@ impl Env {
                 return Some(v.clone());
             }
         }
+
+        if let Some(parent) = &self.parent {
+            return parent.borrow().get(name);
+        }
+
         None
     }
 }
 
+/* ---------------- Variable definition vs assignment ---------------- */
+
 impl Env {
-    pub fn set(&mut self, name: String, value: Value) {
+    pub fn define(&mut self, name: String, value: Value) {
+        self.scopes.last_mut().unwrap().insert(name, value);
+    }
+
+    pub fn assign(&mut self, name: String, value: Value) {
         for scope in self.scopes.iter_mut().rev() {
             if scope.contains_key(&name) {
                 scope.insert(name, value);
@@ -44,14 +72,11 @@ impl Env {
             }
         }
 
-        self.scopes.last_mut().unwrap().insert(name, value);
-    }
-}
-
-impl Env {
-    pub fn new_call_env(&self) -> Self {
-        Env {
-            scopes: self.scopes.clone(),
+        if let Some(parent) = &self.parent {
+            parent.borrow_mut().assign(name, value);
+            return;
         }
+
+        panic!("assignment to undefined variable: {}", name);
     }
 }

@@ -1,6 +1,7 @@
 use crate::models::ast::LoweredStmt;
-use crate::models::environment::Env;
+use crate::models::environment::EnvRef;
 use std::fmt;
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -9,14 +10,14 @@ pub enum Value {
     Bool(bool),
     Unit,
 
-    Function(Function),
+    Function(Rc<Function>),
 }
 
 #[derive(Debug, Clone)]
 pub struct Function {
     pub params: Vec<String>,
     pub body: LoweredStmt,
-    pub env: Env,
+    pub env: EnvRef,
 }
 
 impl fmt::Display for Value {
