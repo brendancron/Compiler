@@ -24,7 +24,7 @@ fn consume_next<'a>(tokens: &'a [Token], pos: &mut usize) -> &'a Token {
         .get(*pos)
         .expect("internal error: consume_next out of bounds");
     *pos += 1;
-    println!("Consumed: {:?}", tok);
+    //println!("Consumed: {:?}", tok);
     tok
 }
 
@@ -199,7 +199,7 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
                     let conditional = parse_expr(tokens, pos);
                     consume(tokens, pos, TokenType::RightParen);
                     consume(tokens, pos, TokenType::LeftBrace);
-                    let inner = parse_stmt(tokens, pos);
+                    let inner = parse_block(tokens, pos);
                     consume(tokens, pos, TokenType::RightBrace);
                     let else_branch = if check(tokens, *pos, TokenType::Else) {
                         consume(tokens, pos, TokenType::Else);

@@ -1,4 +1,5 @@
-use std::io::{self, Read};
+use std::fs::File;
+use std::io::{self, Read, Write};
 
 mod components {
     pub mod interpreter;
@@ -25,21 +26,26 @@ use models::environment::Env;
 fn main() {
     let mut buf = String::new();
     io::stdin().read_to_string(&mut buf).unwrap();
-    println!("\nSource Code");
-    print!("{}", buf);
+
+    let mut file = File::create("../out/source_code.txt").expect("failed to create output file");
+    writeln!(file, "{:#?}", buf).expect("failed to write parsed AST");
 
     let tokens = lexer::tokenize(&buf);
-    println!("\nTokens");
+
+    let mut file = File::create("../out/tokens.txt").expect("failed to create tokens file");
+
     for tok in &tokens {
-        println!("{:?}", tok);
+        writeln!(file, "{:?}", tok).expect("failed to write token");
     }
 
-    println!("\nExpr");
     let parsed_code = parser::parse(&tokens);
-    println!("{:#?}", parsed_code);
+
+    let mut file = File::create("../out/parsed_ast.txt").expect("failed to create output file");
+    writeln!(file, "{:#?}", parsed_code).expect("failed to write parsed AST");
 
     let lowered_code = metaprocessor::lower(&parsed_code);
-    println!("{:#?}", lowered_code);
+    let mut file = File::create("../out/lowered_ast.txt").expect("failed to create output file");
+    writeln!(file, "{:#?}", parsed_code).expect("failed to write lowered AST");
 
     let mut env = Env::new();
     interpreter::eval(&lowered_code, &mut env, &mut None);
