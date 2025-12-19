@@ -1,0 +1,52 @@
+print("start");
+
+meta {
+    print("lowering meta 1");
+    gen var a = 1;
+    gen print(a);
+
+    meta {
+        print("lowering meta 2");
+        gen var b = a + 1;
+        gen print(b);
+
+        meta {
+            print("lowering meta 3");
+            gen var c = b + 1;
+            gen print(c);
+        }
+
+        gen print(b * 10);
+    }
+
+    gen print(a * 10);
+}
+
+print("after meta");
+print(a);
+print(b);
+print(c);
+
+if (a + b + c == 6) {
+    print("sum ok");
+
+    meta {
+        print("lowering meta 4");
+        gen print("inside if meta 1");
+        gen print(a + b + c);
+
+        meta {
+            print("lowering meta 5");
+            gen print("nested if meta");
+            gen var d = a + b + c;
+        }
+
+        gen print(d * 2);
+    }
+
+    print(d);
+} else {
+    print("sum bad");
+}
+
+print("end");

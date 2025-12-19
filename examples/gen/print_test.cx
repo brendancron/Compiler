@@ -1,0 +1,15 @@
+print("A");
+
+meta {
+    print("B");
+    gen print("C");
+
+    meta {
+        print("D");
+        gen print("E");
+    }
+
+    print("F");
+}
+
+print("G");

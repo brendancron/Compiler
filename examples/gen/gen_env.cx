@@ -1,4 +1,5 @@
+var y = 4;
 meta {
-    gen var x = 5;
+    gen var x = y + 5;
 }
 print(x);

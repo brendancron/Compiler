@@ -1,4 +1,5 @@
 use crate::components::metaprocessor::MetaContext;
+use crate::components::substitution::subst_stmts;
 use crate::models::ast::{LoweredExpr, LoweredStmt};
 use crate::models::environment::Env;
 use crate::models::result::ExecResult;
@@ -134,7 +135,8 @@ pub fn eval_stmt(
 
         LoweredStmt::Gen(stmts) => {
             let meta = ctx.as_deref_mut().expect("gen outside meta");
-            for stmt in stmts {
+            let substituted = subst_stmts(stmts, env);
+            for stmt in substituted {
                 meta.emitted.push(stmt.clone());
             }
             ExecResult::Continue
