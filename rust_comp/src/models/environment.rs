@@ -47,3 +47,11 @@ impl Env {
         self.scopes.last_mut().unwrap().insert(name, value);
     }
 }
+
+impl Env {
+    pub fn new_call_env(&self) -> Self {
+        let mut env = Env::new();
+        env.scopes[0] = self.scopes[0].clone();
+        env
+    }
+}

@@ -54,18 +54,20 @@ pub fn eval_expr(expr: &LoweredExpr, env: &mut Env, ctx: &mut Option<&mut MetaCo
 
             let arg_vals: Vec<Value> = args.iter().map(|a| eval_expr(a, env, ctx)).collect();
 
-            env.push_scope();
+            let mut callee_env = env.new_call_env();
+            callee_env.push_scope();
 
             for (param, value) in func.params.iter().zip(arg_vals) {
-                env.set(param.clone(), value);
+                callee_env.set(param.clone(), value);
             }
 
-            let result = match eval_stmt(&func.body, env, ctx) {
+            let result = match eval_stmt(&func.body, &mut callee_env, ctx) {
                 ExecResult::Return(v) => v,
                 ExecResult::Continue => Value::Unit,
             };
 
-            env.pop_scope();
+            // We can skip this since we don't use it again
+            // callee_env.pop_scope();
 
             result
         }
@@ -125,13 +127,13 @@ pub fn eval_stmt(
             ExecResult::Continue
         }
 
-        LoweredStmt::Return(opt_expr) => match opt_expr {
-            None => ExecResult::Return(Value::Unit),
-            Some(expr) => {
-                let result = eval_expr(expr, env, ctx);
-                ExecResult::Return(result)
-            }
-        },
+        LoweredStmt::Return(opt_expr) => {
+            let val = match opt_expr {
+                None => Value::Unit,
+                Some(expr) => eval_expr(expr, env, ctx),
+            };
+            ExecResult::Return(val)
+        }
 
         LoweredStmt::Gen(stmts) => {
             let meta = ctx.as_deref_mut().expect("gen outside meta");
