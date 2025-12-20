@@ -18,6 +18,8 @@ fn subst_expr(expr: &LoweredExpr, env: &EnvRef) -> LoweredExpr {
             _ => LoweredExpr::Variable(name.clone()),
         },
 
+        LoweredExpr::List(exprs) => LoweredExpr::List(exprs.clone()),
+
         LoweredExpr::Add(a, b) => {
             LoweredExpr::Add(Box::new(subst_expr(a, env)), Box::new(subst_expr(b, env)))
         }
@@ -64,6 +66,16 @@ fn subst_stmt(stmt: &LoweredStmt, env: &EnvRef) -> LoweredStmt {
             cond: Box::new(subst_expr(cond, env)),
             body: Box::new(subst_stmt(body, env)),
             else_branch: else_branch.as_ref().map(|b| Box::new(subst_stmt(b, env))),
+        },
+
+        LoweredStmt::ForEach {
+            var,
+            iterable,
+            body,
+        } => LoweredStmt::ForEach {
+            var: var.clone(),
+            iterable: Box::new(subst_expr(iterable, env)),
+            body: Box::new(subst_stmt(body, env)),
         },
 
         LoweredStmt::Block(stmts) => {

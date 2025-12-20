@@ -4,6 +4,7 @@ use crate::models::ast::{LoweredExpr, LoweredStmt};
 use crate::models::environment::{Env, EnvRef};
 use crate::models::result::ExecResult;
 use crate::models::value::{Function, Value};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaContext>) -> Value {
@@ -15,6 +16,15 @@ pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaCont
             .borrow()
             .get(name)
             .unwrap_or_else(|| panic!("undefined variable: {}", name)),
+
+        LoweredExpr::List(exprs) => {
+            let values = exprs
+                .iter()
+                .map(|e| eval_expr(e, env.clone(), ctx))
+                .collect();
+
+            Value::List(Rc::new(RefCell::new(values)))
+        }
 
         LoweredExpr::Add(a, b) => match (
             eval_expr(a, env.clone(), ctx),
@@ -120,6 +130,31 @@ pub fn eval_stmt(
             },
             _ => panic!("type error: expected bool expr"),
         },
+
+        LoweredStmt::ForEach {
+            var,
+            iterable,
+            body,
+        } => {
+            let value = eval_expr(iterable, env.clone(), ctx);
+
+            for elem in value.enumerate().iter() {
+                env.borrow_mut().push_scope();
+                env.borrow_mut().define(var.clone(), elem.clone());
+
+                match eval_stmt(body, env.clone(), ctx) {
+                    ExecResult::Return(v) => {
+                        env.borrow_mut().pop_scope();
+                        return ExecResult::Return(v);
+                    }
+                    ExecResult::Continue => {}
+                }
+
+                env.borrow_mut().pop_scope();
+            }
+
+            ExecResult::Continue
+        }
 
         LoweredStmt::ExprStmt(expr) => {
             eval_expr(expr, env.clone(), ctx);

@@ -1,5 +1,6 @@
 use crate::models::ast::LoweredStmt;
 use crate::models::environment::EnvRef;
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
@@ -8,9 +9,12 @@ pub enum Value {
     Int(i64),
     String(String),
     Bool(bool),
-    Unit,
+
+    List(Rc<RefCell<Vec<Value>>>),
 
     Function(Rc<Function>),
+
+    Unit,
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +24,15 @@ pub struct Function {
     pub env: EnvRef,
 }
 
+impl Value {
+    pub fn enumerate(&self) -> std::cell::Ref<'_, Vec<Value>> {
+        match self {
+            Value::List(list) => list.borrow(),
+            _ => panic!("iterable expeced"),
+        }
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -27,6 +40,18 @@ impl fmt::Display for Value {
             Value::String(s) => write!(f, "{s}"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Unit => write!(f, ""),
+            Value::List(list) => {
+                let elems = list.borrow();
+                write!(f, "[")?;
+                for (i, v) in elems.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{v}")?;
+                }
+                write!(f, "]")
+            }
+
             _ => write!(f, ""),
         }
     }

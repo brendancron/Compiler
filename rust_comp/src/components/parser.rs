@@ -115,6 +115,22 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
                     }
                 }
 
+                TokenType::LeftBracket => {
+                    consume(tokens, pos, TokenType::LeftBracket);
+
+                    let elems = parse_separated(
+                        tokens,
+                        pos,
+                        TokenType::Comma,
+                        TokenType::RightBracket,
+                        parse_expr,
+                    );
+
+                    consume(tokens, pos, TokenType::RightBracket);
+
+                    ParsedExpr::List(elems)
+                }
+
                 _ => panic!("expected literal or '('"),
             },
             None => panic!("Unexpected EOF"),
@@ -219,6 +235,23 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
                         cond: Box::new(conditional),
                         body: Box::new(inner),
                         else_branch: else_branch,
+                    }
+                }
+
+                TokenType::For => {
+                    consume(tokens, pos, TokenType::For);
+                    consume(tokens, pos, TokenType::LeftParen);
+                    let name = consume(tokens, pos, TokenType::Identifier).expect_str();
+                    consume(tokens, pos, TokenType::In);
+                    let iter = Box::new(parse_expr(tokens, pos));
+                    consume(tokens, pos, TokenType::RightParen);
+                    consume(tokens, pos, TokenType::LeftBrace);
+                    let inner = Box::new(parse_block(tokens, pos));
+                    consume(tokens, pos, TokenType::RightBrace);
+                    ParsedStmt::ForEach {
+                        var: name,
+                        iterable: iter,
+                        body: inner,
                     }
                 }
 

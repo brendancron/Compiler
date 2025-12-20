@@ -15,6 +15,8 @@ pub fn lower_expr(expr: &ParsedExpr) -> LoweredExpr {
         ParsedExpr::Bool(b) => LoweredExpr::Bool(*b),
         ParsedExpr::Variable(name) => LoweredExpr::Variable(name.clone()),
 
+        ParsedExpr::List(exprs) => LoweredExpr::List(lower_exprs(exprs)),
+
         ParsedExpr::Add(a, b) => LoweredExpr::Add(Box::new(lower_expr(a)), Box::new(lower_expr(b))),
 
         ParsedExpr::Sub(a, b) => LoweredExpr::Sub(Box::new(lower_expr(a)), Box::new(lower_expr(b))),
@@ -34,6 +36,16 @@ pub fn lower_expr(expr: &ParsedExpr) -> LoweredExpr {
             args: args.iter().map(lower_expr).collect(),
         },
     }
+}
+
+pub fn lower_exprs(exprs: &Vec<ParsedExpr>) -> Vec<LoweredExpr> {
+    let mut out = Vec::new();
+
+    for expr in exprs {
+        out.push(lower_expr(expr));
+    }
+
+    out
 }
 
 pub fn lower_stmt(stmt: &ParsedStmt) -> Vec<LoweredStmt> {
@@ -57,6 +69,16 @@ pub fn lower_stmt(stmt: &ParsedStmt) -> Vec<LoweredStmt> {
             else_branch: else_branch
                 .as_ref()
                 .map(|stmt| Box::new(LoweredStmt::Block(lower_stmt(stmt)))),
+        }],
+
+        ParsedStmt::ForEach {
+            var,
+            iterable,
+            body,
+        } => vec![LoweredStmt::ForEach {
+            var: var.clone(),
+            iterable: Box::new(lower_expr(iterable)),
+            body: Box::new(lower_to_block(body)),
         }],
 
         ParsedStmt::Block(stmts) => {

@@ -87,6 +87,24 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 i += 1;
             }
 
+            '[' => {
+                tokens.push(Token {
+                    token_type: TokenType::LeftBracket,
+                    line_number: line_number,
+                    metadata: None,
+                });
+                i += 1;
+            }
+
+            ']' => {
+                tokens.push(Token {
+                    token_type: TokenType::RightBracket,
+                    line_number: line_number,
+                    metadata: None,
+                });
+                i += 1;
+            }
+
             ',' => {
                 tokens.push(Token {
                     token_type: TokenType::Comma,
@@ -237,6 +255,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                     "for" => TokenType::For,
                     "gen" => TokenType::Gen,
                     "if" => TokenType::If,
+                    "in" => TokenType::In,
                     "meta" => TokenType::Meta,
                     "or" => TokenType::Or,
                     "print" => TokenType::Print,

@@ -5,6 +5,8 @@ pub enum ParsedExpr {
     Bool(bool),
     Variable(String),
 
+    List(Vec<ParsedExpr>),
+
     Add(Box<ParsedExpr>, Box<ParsedExpr>),
     Sub(Box<ParsedExpr>, Box<ParsedExpr>),
     Mult(Box<ParsedExpr>, Box<ParsedExpr>),
@@ -25,11 +27,19 @@ pub enum ParsedStmt {
         expr: Box<ParsedExpr>,
     },
     Print(Box<ParsedExpr>),
+
     If {
         cond: Box<ParsedExpr>,
         body: Box<ParsedStmt>,
         else_branch: Option<Box<ParsedStmt>>,
     },
+
+    ForEach {
+        var: String,
+        iterable: Box<ParsedExpr>,
+        body: Box<ParsedStmt>,
+    },
+
     Block(Vec<ParsedStmt>),
 
     FnDecl {
@@ -53,6 +63,8 @@ pub enum LoweredExpr {
     String(String),
     Bool(bool),
     Variable(String),
+
+    List(Vec<LoweredExpr>),
 
     Add(Box<LoweredExpr>, Box<LoweredExpr>),
     Sub(Box<LoweredExpr>, Box<LoweredExpr>),
@@ -79,6 +91,13 @@ pub enum LoweredStmt {
         body: Box<LoweredStmt>,
         else_branch: Option<Box<LoweredStmt>>,
     },
+
+    ForEach {
+        var: String,
+        iterable: Box<LoweredExpr>,
+        body: Box<LoweredStmt>,
+    },
+
     Block(Vec<LoweredStmt>),
 
     FnDecl {
