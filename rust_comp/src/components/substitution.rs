@@ -2,6 +2,13 @@ use crate::models::ast::{LoweredExpr, LoweredStmt};
 use crate::models::environment::EnvRef;
 use crate::models::value::Value;
 
+fn subst_str(name: &str, env: &EnvRef) -> String {
+    match env.borrow().get(name) {
+        Some(Value::String(s)) => s.clone(),
+        _ => name.to_string(),
+    }
+}
+
 fn subst_expr(expr: &LoweredExpr, env: &EnvRef) -> LoweredExpr {
     match expr {
         LoweredExpr::Int(n) => LoweredExpr::Int(*n),
@@ -52,7 +59,7 @@ fn subst_stmt(stmt: &LoweredStmt, env: &EnvRef) -> LoweredStmt {
         LoweredStmt::ExprStmt(e) => LoweredStmt::ExprStmt(Box::new(subst_expr(e, env))),
 
         LoweredStmt::Assignment { name, expr } => LoweredStmt::Assignment {
-            name: name.clone(),
+            name: subst_str(name, env),
             expr: Box::new(subst_expr(expr, env)),
         },
 
@@ -73,7 +80,7 @@ fn subst_stmt(stmt: &LoweredStmt, env: &EnvRef) -> LoweredStmt {
             iterable,
             body,
         } => LoweredStmt::ForEach {
-            var: var.clone(),
+            var: subst_str(var, env),
             iterable: Box::new(subst_expr(iterable, env)),
             body: Box::new(subst_stmt(body, env)),
         },
@@ -83,7 +90,7 @@ fn subst_stmt(stmt: &LoweredStmt, env: &EnvRef) -> LoweredStmt {
         }
 
         LoweredStmt::FnDecl { name, params, body } => LoweredStmt::FnDecl {
-            name: name.clone(),
+            name: subst_str(name, env),
             params: params.clone(),
             body: Box::new(subst_stmt(body, env)),
         },

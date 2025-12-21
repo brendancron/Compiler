@@ -13,6 +13,7 @@ pub fn lower_expr(expr: &ParsedExpr) -> LoweredExpr {
         ParsedExpr::Int(i) => LoweredExpr::Int(*i),
         ParsedExpr::String(s) => LoweredExpr::String(s.clone()),
         ParsedExpr::Bool(b) => LoweredExpr::Bool(*b),
+
         ParsedExpr::Variable(name) => LoweredExpr::Variable(name.clone()),
 
         ParsedExpr::List(exprs) => LoweredExpr::List(lower_exprs(exprs)),

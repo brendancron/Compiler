@@ -12,8 +12,8 @@ fn consume<'a>(tokens: &'a [Token], pos: &mut usize, expected: TokenType) -> &'a
     match tokens.get(*pos) {
         Some(t) if t.token_type == expected => consume_next(tokens, pos),
         Some(t) => panic!(
-            "expected {:?}, found {:?} at position {}",
-            expected, t.token_type, pos
+            "expected {:?}, found {:?} on line {} at position {}",
+            expected, t.token_type, t.line_number, pos
         ),
         None => panic!("expected {:?}, found EOF at position {}", expected, pos),
     }

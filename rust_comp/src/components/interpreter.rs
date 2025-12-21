@@ -12,6 +12,7 @@ pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaCont
         LoweredExpr::Int(n) => Value::Int(*n),
         LoweredExpr::String(s) => Value::String(s.clone()),
         LoweredExpr::Bool(b) => Value::Bool(*b),
+
         LoweredExpr::Variable(name) => env
             .borrow()
             .get(name)
@@ -31,6 +32,7 @@ pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaCont
             eval_expr(b, env.clone(), ctx),
         ) {
             (Value::Int(x), Value::Int(y)) => Value::Int(x + y),
+            (Value::String(x), Value::String(y)) => Value::String(x + &y),
             _ => panic!("type error: + expects ints"),
         },
 
