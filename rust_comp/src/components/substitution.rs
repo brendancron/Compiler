@@ -17,6 +17,11 @@ fn subst_expr(expr: &LoweredExpr, env: &EnvRef) -> LoweredExpr {
 
         LoweredExpr::Bool(b) => LoweredExpr::Bool(*b),
 
+        LoweredExpr::StructLiteral { type_name, fields } => LoweredExpr::StructLiteral {
+            type_name: subst_str(type_name, env),
+            fields: fields.clone(),
+        },
+
         LoweredExpr::Variable(name) => match env.borrow().get(name) {
             Some(Value::Int(n)) => LoweredExpr::Int(n),
             Some(Value::String(s)) => LoweredExpr::String(s.clone()),
@@ -93,6 +98,11 @@ fn subst_stmt(stmt: &LoweredStmt, env: &EnvRef) -> LoweredStmt {
             name: subst_str(name, env),
             params: params.clone(),
             body: Box::new(subst_stmt(body, env)),
+        },
+
+        LoweredStmt::StructDecl { name, fields } => LoweredStmt::StructDecl {
+            name: subst_str(name, env),
+            fields: fields.clone(),
         },
 
         LoweredStmt::Return(expr) => {

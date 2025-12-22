@@ -3,6 +3,12 @@ pub enum ParsedExpr {
     Int(i64),
     String(String),
     Bool(bool),
+
+    StructLiteral {
+        type_name: String,
+        fields: Vec<(String, Box<ParsedExpr>)>,
+    },
+
     Variable(String),
 
     List(Vec<ParsedExpr>),
@@ -48,6 +54,11 @@ pub enum ParsedStmt {
         body: Box<ParsedStmt>,
     },
 
+    StructDecl {
+        name: String,
+        fields: Vec<(String, TypeExpr)>,
+    },
+
     Return(Option<Box<ParsedExpr>>),
 
     Gen(Vec<ParsedStmt>),
@@ -62,6 +73,12 @@ pub enum LoweredExpr {
     Int(i64),
     String(String),
     Bool(bool),
+
+    StructLiteral {
+        type_name: String,
+        fields: Vec<(String, Box<LoweredExpr>)>,
+    },
+
     Variable(String),
 
     List(Vec<LoweredExpr>),
@@ -106,7 +123,20 @@ pub enum LoweredStmt {
         body: Box<LoweredStmt>,
     },
 
+    StructDecl {
+        name: String,
+        fields: Vec<(String, TypeExpr)>,
+    },
+
     Return(Option<Box<LoweredExpr>>),
 
     Gen(Vec<LoweredStmt>),
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeExpr {
+    Int,
+    String,
+    Bool,
+    Named(String),
 }

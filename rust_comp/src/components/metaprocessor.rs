@@ -14,6 +14,14 @@ pub fn lower_expr(expr: &ParsedExpr) -> LoweredExpr {
         ParsedExpr::String(s) => LoweredExpr::String(s.clone()),
         ParsedExpr::Bool(b) => LoweredExpr::Bool(*b),
 
+        ParsedExpr::StructLiteral { type_name, fields } => LoweredExpr::StructLiteral {
+            type_name: type_name.clone(),
+            fields: fields
+                .iter()
+                .map(|(name, expr)| (name.clone(), Box::new(lower_expr(expr))))
+                .collect(),
+        },
+
         ParsedExpr::Variable(name) => LoweredExpr::Variable(name.clone()),
 
         ParsedExpr::List(exprs) => LoweredExpr::List(lower_exprs(exprs)),
@@ -94,6 +102,11 @@ pub fn lower_stmt(stmt: &ParsedStmt) -> Vec<LoweredStmt> {
             name: name.clone(),
             params: params.clone(),
             body: Box::new(lower_to_block(body)),
+        }],
+
+        ParsedStmt::StructDecl { name, fields } => vec![LoweredStmt::StructDecl {
+            name: name.clone(),
+            fields: fields.clone(),
         }],
 
         ParsedStmt::Return(expr) => {

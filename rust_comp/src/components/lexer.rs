@@ -145,6 +145,14 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 });
                 i += 1;
             }
+            ':' => {
+                tokens.push(Token {
+                    token_type: TokenType::Colon,
+                    line_number: line_number,
+                    metadata: None,
+                });
+                i += 1;
+            }
             '/' => {
                 tokens.push(Token {
                     token_type: TokenType::Slash,
@@ -260,6 +268,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                     "or" => TokenType::Or,
                     "print" => TokenType::Print,
                     "return" => TokenType::Return,
+                    "struct" => TokenType::Struct,
                     "true" => TokenType::True,
                     "var" => TokenType::Var,
                     "while" => TokenType::While,

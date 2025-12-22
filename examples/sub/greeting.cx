@@ -11,3 +11,4 @@ meta {
 greet_alice();
 greet_bob();
 greet_charlie();
+

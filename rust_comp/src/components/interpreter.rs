@@ -1,10 +1,11 @@
 use crate::components::metaprocessor::MetaContext;
 use crate::components::substitution::subst_stmts;
 use crate::models::ast::{LoweredExpr, LoweredStmt};
-use crate::models::environment::{Env, EnvRef};
+use crate::models::environment::{Env, EnvRef, StructDef};
 use crate::models::result::ExecResult;
 use crate::models::value::{Function, Value};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaContext>) -> Value {
@@ -12,6 +13,25 @@ pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaCont
         LoweredExpr::Int(n) => Value::Int(*n),
         LoweredExpr::String(s) => Value::String(s.clone()),
         LoweredExpr::Bool(b) => Value::Bool(*b),
+
+        LoweredExpr::StructLiteral { type_name, fields } => {
+            let struct_def = env
+                .borrow()
+                .get_struct(type_name)
+                .unwrap_or_else(|| panic!("unknown struct type {}", type_name));
+
+            let mut map = HashMap::new();
+
+            for (field_name, expr) in fields {
+                let value = eval_expr(expr, env.clone(), ctx);
+                map.insert(field_name.clone(), value);
+            }
+
+            Value::Struct {
+                type_name: type_name.clone(),
+                fields: Rc::new(RefCell::new(map)),
+            }
+        }
 
         LoweredExpr::Variable(name) => env
             .borrow()
@@ -187,6 +207,16 @@ pub fn eval_stmt(
 
             env.borrow_mut().assign(name.clone(), Value::Function(func));
 
+            ExecResult::Continue
+        }
+
+        LoweredStmt::StructDecl { name, fields } => {
+            env.borrow_mut().define_struct(
+                name.clone(),
+                StructDef {
+                    fields: fields.clone(),
+                },
+            );
             ExecResult::Continue
         }
 

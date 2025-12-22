@@ -1,6 +1,7 @@
 use crate::models::ast::LoweredStmt;
 use crate::models::environment::EnvRef;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -9,6 +10,11 @@ pub enum Value {
     Int(i64),
     String(String),
     Bool(bool),
+
+    Struct {
+        type_name: String,
+        fields: Rc<RefCell<HashMap<String, Value>>>,
+    },
 
     List(Rc<RefCell<Vec<Value>>>),
 
@@ -50,6 +56,17 @@ impl fmt::Display for Value {
                     write!(f, "{v}")?;
                 }
                 write!(f, "]")
+            }
+            Value::Struct { type_name, fields } => {
+                let map = fields.borrow();
+                write!(f, "{} {{", type_name)?;
+                for (i, (k, v)) in map.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", k, v)?;
+                }
+                write!(f, "}}")
             }
 
             _ => write!(f, ""),

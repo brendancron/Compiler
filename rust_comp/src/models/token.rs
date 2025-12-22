@@ -12,6 +12,7 @@ pub enum TokenType {
     Minus,
     Plus,
     Semicolon,
+    Colon,
     Slash,
     Star,
 
@@ -43,6 +44,7 @@ pub enum TokenType {
     Or,
     Print,
     Return,
+    Struct,
     True,
     Var,
     While,

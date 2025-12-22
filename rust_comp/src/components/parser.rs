@@ -1,4 +1,4 @@
-use crate::models::ast::{ParsedExpr, ParsedStmt};
+use crate::models::ast::{ParsedExpr, ParsedStmt, TypeExpr};
 use crate::models::token::{Token, TokenType};
 
 fn check(tokens: &[Token], pos: usize, expected: TokenType) -> bool {
@@ -59,6 +59,17 @@ fn parse_separated<T>(
     items
 }
 
+fn parse_type(tokens: &[Token], pos: &mut usize) -> TypeExpr {
+    let name = consume(tokens, pos, TokenType::Identifier).expect_str();
+
+    match name.as_str() {
+        "int" => TypeExpr::Int,
+        "string" => TypeExpr::String,
+        "bool" => TypeExpr::Bool,
+        _ => TypeExpr::Named(name),
+    }
+}
+
 pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
     let mut pos = 0;
 
@@ -109,6 +120,29 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
                         ParsedExpr::Call {
                             callee: Box::new(ParsedExpr::Variable(name)),
                             args,
+                        }
+                    } else if check(tokens, *pos, TokenType::LeftBrace) {
+                        consume(tokens, pos, TokenType::LeftBrace);
+
+                        let fields = parse_separated(
+                            tokens,
+                            pos,
+                            TokenType::Comma,
+                            TokenType::RightBrace,
+                            |tokens, pos| {
+                                let field_name =
+                                    consume(tokens, pos, TokenType::Identifier).expect_str();
+                                consume(tokens, pos, TokenType::Colon);
+                                let expr = parse_expr(tokens, pos);
+                                (field_name, Box::new(expr))
+                            },
+                        );
+
+                        consume(tokens, pos, TokenType::RightBrace);
+
+                        ParsedExpr::StructLiteral {
+                            type_name: name,
+                            fields,
                         }
                     } else {
                         ParsedExpr::Variable(name)
@@ -288,6 +322,29 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
                         params,
                         body: Box::new(body),
                     }
+                }
+
+                TokenType::Struct => {
+                    consume(tokens, pos, TokenType::Struct);
+                    let name = consume(tokens, pos, TokenType::Identifier).expect_str();
+                    consume(tokens, pos, TokenType::LeftBrace);
+                    let fields = parse_separated(
+                        tokens,
+                        pos,
+                        TokenType::Semicolon,
+                        TokenType::RightBrace,
+                        |tokens, pos| {
+                            let field_name =
+                                consume(tokens, pos, TokenType::Identifier).expect_str();
+                            consume(tokens, pos, TokenType::Colon);
+                            let ty = parse_type(tokens, pos);
+                            (field_name, ty)
+                        },
+                    );
+
+                    consume(tokens, pos, TokenType::RightBrace);
+
+                    ParsedStmt::StructDecl { name, fields }
                 }
 
                 TokenType::Return => {
