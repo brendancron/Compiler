@@ -6,7 +6,7 @@ meta {
 
     meta {
         print("D");
-        gen print("E");
+        gen gen print("E");
     }
 
     print("F");

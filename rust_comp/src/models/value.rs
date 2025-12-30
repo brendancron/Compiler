@@ -26,7 +26,7 @@ pub enum Value {
 #[derive(Debug, Clone)]
 pub struct Function {
     pub params: Vec<String>,
-    pub body: LoweredStmt,
+    pub body: Box<LoweredStmt>,
     pub env: EnvRef,
 }
 

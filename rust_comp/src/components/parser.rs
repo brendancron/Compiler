@@ -1,11 +1,18 @@
-use crate::models::ast::{ParsedExpr, ParsedStmt, TypeExpr};
+use crate::models::ast::{ParsedExpr, ParsedFuncType, ParsedStmt, TypeExpr};
 use crate::models::token::{Token, TokenType};
 
+fn peek(tokens: &[Token], pos: usize) -> Option<TokenType> {
+    match tokens.get(pos) {
+        None => None,
+        Some(t) => Some(t.token_type),
+    }
+}
+
 fn check(tokens: &[Token], pos: usize, expected: TokenType) -> bool {
-    matches!(
-        tokens.get(pos),
-        Some(t) if t.token_type == expected
-    )
+    match peek(tokens, pos) {
+        None => false,
+        Some(token_type) => token_type == expected,
+    }
 }
 
 fn consume<'a>(tokens: &'a [Token], pos: &mut usize, expected: TokenType) -> &'a Token {
@@ -301,28 +308,7 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
                     }
                 }
 
-                TokenType::Func => {
-                    consume(tokens, pos, TokenType::Func);
-                    let name = consume(tokens, pos, TokenType::Identifier).expect_str();
-                    consume(tokens, pos, TokenType::LeftParen);
-                    let params = parse_separated(
-                        tokens,
-                        pos,
-                        TokenType::Comma,
-                        TokenType::RightParen,
-                        |tokens, pos| consume(tokens, pos, TokenType::Identifier).expect_str(),
-                    );
-                    consume(tokens, pos, TokenType::RightParen);
-                    consume(tokens, pos, TokenType::LeftBrace);
-                    let body = parse_block(tokens, pos);
-                    consume(tokens, pos, TokenType::RightBrace);
-
-                    ParsedStmt::FnDecl {
-                        name,
-                        params,
-                        body: Box::new(body),
-                    }
-                }
+                TokenType::Func => parse_fn_decl(tokens, pos, ParsedFuncType::Normal),
 
                 TokenType::Struct => {
                     consume(tokens, pos, TokenType::Struct);
@@ -364,18 +350,7 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
                     ParsedStmt::Gen(vec![stmt])
                 }
 
-                TokenType::Meta => {
-                    consume(tokens, pos, TokenType::Meta);
-                    let stmt = if check(tokens, *pos, TokenType::LeftBrace) {
-                        consume(tokens, pos, TokenType::LeftBrace);
-                        let block = parse_block(tokens, pos);
-                        consume(tokens, pos, TokenType::RightBrace);
-                        block
-                    } else {
-                        parse_stmt(tokens, pos)
-                    };
-                    ParsedStmt::MetaStmt(Box::new(stmt))
-                }
+                TokenType::Meta => parse_meta_stmt(tokens, pos),
 
                 _ => parse_expr_stmt(tokens, pos),
             },
@@ -383,7 +358,52 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
         }
     }
 
-    pub fn parse_block(tokens: &[Token], pos: &mut usize) -> ParsedStmt {
+    fn parse_meta_stmt(tokens: &[Token], pos: &mut usize) -> ParsedStmt {
+        consume(tokens, pos, TokenType::Meta);
+
+        match peek(tokens, *pos) {
+            Some(TokenType::Func) => parse_fn_decl(tokens, pos, ParsedFuncType::Meta),
+            _ => {
+                let stmt = if check(tokens, *pos, TokenType::LeftBrace) {
+                    consume(tokens, pos, TokenType::LeftBrace);
+                    let block = parse_block(tokens, pos);
+                    consume(tokens, pos, TokenType::RightBrace);
+                    block
+                } else {
+                    parse_stmt(tokens, pos)
+                };
+                ParsedStmt::MetaStmt(Box::new(stmt))
+            }
+        }
+    }
+
+    fn parse_fn_decl(tokens: &[Token], pos: &mut usize, func_type: ParsedFuncType) -> ParsedStmt {
+        consume(tokens, pos, TokenType::Func);
+        let name = consume(tokens, pos, TokenType::Identifier).expect_str();
+
+        consume(tokens, pos, TokenType::LeftParen);
+        let params = parse_separated(
+            tokens,
+            pos,
+            TokenType::Comma,
+            TokenType::RightParen,
+            |tokens, pos| consume(tokens, pos, TokenType::Identifier).expect_str(),
+        );
+        consume(tokens, pos, TokenType::RightParen);
+
+        consume(tokens, pos, TokenType::LeftBrace);
+        let body = parse_block(tokens, pos);
+        consume(tokens, pos, TokenType::RightBrace);
+
+        ParsedStmt::FnDecl {
+            name,
+            func_type,
+            params,
+            body: Box::new(body),
+        }
+    }
+
+    fn parse_block(tokens: &[Token], pos: &mut usize) -> ParsedStmt {
         let mut stmts = Vec::new();
 
         while *pos < tokens.len() && tokens[*pos].token_type != TokenType::RightBrace {

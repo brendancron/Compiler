@@ -78,6 +78,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 });
                 i += 1;
             }
+
             '}' => {
                 tokens.push(Token {
                     token_type: TokenType::RightBrace,
@@ -113,6 +114,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 });
                 i += 1;
             }
+
             '.' => {
                 tokens.push(Token {
                     token_type: TokenType::Dot,
@@ -121,6 +123,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 });
                 i += 1;
             }
+
             '-' => {
                 tokens.push(Token {
                     token_type: TokenType::Minus,
@@ -129,6 +132,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 });
                 i += 1;
             }
+
             '+' => {
                 tokens.push(Token {
                     token_type: TokenType::Plus,
@@ -137,6 +141,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 });
                 i += 1;
             }
+
             ';' => {
                 tokens.push(Token {
                     token_type: TokenType::Semicolon,
@@ -145,6 +150,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 });
                 i += 1;
             }
+
             ':' => {
                 tokens.push(Token {
                     token_type: TokenType::Colon,
@@ -153,6 +159,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 });
                 i += 1;
             }
+
             '/' => {
                 tokens.push(Token {
                     token_type: TokenType::Slash,
@@ -161,6 +168,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 });
                 i += 1;
             }
+
             '*' => {
                 tokens.push(Token {
                     token_type: TokenType::Star,
