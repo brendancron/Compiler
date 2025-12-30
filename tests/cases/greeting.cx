@@ -1,0 +1,13 @@
+meta {
+    var names = ["alice", "bob", "charlie"];
+    for (name in names) {
+        var fn_name = "greet_" + name;
+        gen fn fn_name() {
+            print("Hello " + name);
+        }
+    }
+}
+
+greet_alice();
+greet_bob();
+greet_charlie();

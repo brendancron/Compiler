@@ -50,6 +50,7 @@ pub enum ParsedStmt {
 
     FnDecl {
         name: String,
+        func_type: ParsedFuncType,
         params: Vec<String>,
         body: Box<ParsedStmt>,
     },
@@ -131,6 +132,31 @@ pub enum LoweredStmt {
     Return(Option<Box<LoweredExpr>>),
 
     Gen(Vec<LoweredStmt>),
+}
+
+#[derive(Debug, Clone)]
+pub enum ParsedFuncType {
+    Normal,
+    Meta,
+    Pure,
+}
+
+impl ParsedFuncType {
+    pub fn can_execute_at_meta(&self) -> bool {
+        match self {
+            ParsedFuncType::Meta => true,
+            ParsedFuncType::Pure => true,
+            ParsedFuncType::Normal => false,
+        }
+    }
+
+    pub fn can_execute_at_runtime(&self) -> bool {
+        match self {
+            ParsedFuncType::Normal => true,
+            ParsedFuncType::Pure => true,
+            ParsedFuncType::Meta => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

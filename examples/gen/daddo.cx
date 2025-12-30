@@ -1,0 +1,12 @@
+var x = 3;
+if (x == 3) {
+    meta {
+        print("1");
+        gen print("A");
+    }
+} else {
+    meta {
+        print("2");
+        gen print("B");
+    }
+}

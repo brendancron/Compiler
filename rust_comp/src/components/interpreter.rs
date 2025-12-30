@@ -6,9 +6,15 @@ use crate::models::result::ExecResult;
 use crate::models::value::{Function, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::Write;
 use std::rc::Rc;
 
-pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaContext>) -> Value {
+pub fn eval_expr<W: Write>(
+    expr: &LoweredExpr,
+    env: EnvRef,
+    ctx: &mut Option<&mut MetaContext>,
+    out: &mut W,
+) -> Value {
     match expr {
         LoweredExpr::Int(n) => Value::Int(*n),
         LoweredExpr::String(s) => Value::String(s.clone()),
@@ -23,7 +29,7 @@ pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaCont
             let mut map = HashMap::new();
 
             for (field_name, expr) in fields {
-                let value = eval_expr(expr, env.clone(), ctx);
+                let value = eval_expr(expr, env.clone(), ctx, out);
                 map.insert(field_name.clone(), value);
             }
 
@@ -41,15 +47,15 @@ pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaCont
         LoweredExpr::List(exprs) => {
             let values = exprs
                 .iter()
-                .map(|e| eval_expr(e, env.clone(), ctx))
+                .map(|e| eval_expr(e, env.clone(), ctx, out))
                 .collect();
 
             Value::List(Rc::new(RefCell::new(values)))
         }
 
         LoweredExpr::Add(a, b) => match (
-            eval_expr(a, env.clone(), ctx),
-            eval_expr(b, env.clone(), ctx),
+            eval_expr(a, env.clone(), ctx, out),
+            eval_expr(b, env.clone(), ctx, out),
         ) {
             (Value::Int(x), Value::Int(y)) => Value::Int(x + y),
             (Value::String(x), Value::String(y)) => Value::String(x + &y),
@@ -57,32 +63,32 @@ pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaCont
         },
 
         LoweredExpr::Sub(a, b) => match (
-            eval_expr(a, env.clone(), ctx),
-            eval_expr(b, env.clone(), ctx),
+            eval_expr(a, env.clone(), ctx, out),
+            eval_expr(b, env.clone(), ctx, out),
         ) {
             (Value::Int(x), Value::Int(y)) => Value::Int(x - y),
             _ => panic!("type error: - expects ints"),
         },
 
         LoweredExpr::Mult(a, b) => match (
-            eval_expr(a, env.clone(), ctx),
-            eval_expr(b, env.clone(), ctx),
+            eval_expr(a, env.clone(), ctx, out),
+            eval_expr(b, env.clone(), ctx, out),
         ) {
             (Value::Int(x), Value::Int(y)) => Value::Int(x * y),
             _ => panic!("type error: * expects ints"),
         },
 
         LoweredExpr::Div(a, b) => match (
-            eval_expr(a, env.clone(), ctx),
-            eval_expr(b, env.clone(), ctx),
+            eval_expr(a, env.clone(), ctx, out),
+            eval_expr(b, env.clone(), ctx, out),
         ) {
             (Value::Int(x), Value::Int(y)) => Value::Int(x / y),
             _ => panic!("type error: / expects ints"),
         },
 
         LoweredExpr::Equals(a, b) => match (
-            eval_expr(a, env.clone(), ctx),
-            eval_expr(b, env.clone(), ctx),
+            eval_expr(a, env.clone(), ctx, out),
+            eval_expr(b, env.clone(), ctx, out),
         ) {
             (Value::Int(x), Value::Int(y)) => Value::Bool(x == y),
             (Value::String(x), Value::String(y)) => Value::Bool(x == y),
@@ -91,7 +97,7 @@ pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaCont
         },
 
         LoweredExpr::Call { callee, args } => {
-            let callee_val = eval_expr(callee, env.clone(), ctx);
+            let callee_val = eval_expr(callee, env.clone(), ctx, out);
             let func = match callee_val {
                 Value::Function(f) => f,
                 _ => panic!("attempted to call a non-function"),
@@ -103,7 +109,7 @@ pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaCont
 
             let arg_vals: Vec<Value> = args
                 .iter()
-                .map(|a| eval_expr(a, env.clone(), ctx))
+                .map(|a| eval_expr(a, env.clone(), ctx, out))
                 .collect();
 
             let callee_env = Env::new_child(Rc::clone(&func.env));
@@ -115,7 +121,7 @@ pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaCont
                 }
             }
 
-            let result = match eval_stmt(&func.body, callee_env, ctx) {
+            let result = match eval_stmt(&func.body, callee_env, ctx, out) {
                 ExecResult::Return(v) => v,
                 ExecResult::Continue => Value::Unit,
             };
@@ -128,15 +134,16 @@ pub fn eval_expr(expr: &LoweredExpr, env: EnvRef, ctx: &mut Option<&mut MetaCont
     }
 }
 
-pub fn eval_stmt(
+pub fn eval_stmt<W: Write>(
     stmt: &LoweredStmt,
     env: EnvRef,
     ctx: &mut Option<&mut MetaContext>,
+    out: &mut W,
 ) -> ExecResult {
     match stmt {
         LoweredStmt::Print(expr) => {
-            let value = eval_expr(expr, env.clone(), ctx);
-            println!("{}", value);
+            let value = eval_expr(expr, env.clone(), ctx, out);
+            writeln!(out, "{}", value).unwrap();
             ExecResult::Continue
         }
 
@@ -144,10 +151,10 @@ pub fn eval_stmt(
             cond,
             body,
             else_branch,
-        } => match eval_expr(cond, env.clone(), ctx) {
-            Value::Bool(true) => eval_stmt(body, env.clone(), ctx),
+        } => match eval_expr(cond, env.clone(), ctx, out) {
+            Value::Bool(true) => eval_stmt(body, env.clone(), ctx, out),
             Value::Bool(false) => match else_branch {
-                Some(else_stmt) => eval_stmt(else_stmt, env.clone(), ctx),
+                Some(else_stmt) => eval_stmt(else_stmt, env.clone(), ctx, out),
                 None => ExecResult::Continue,
             },
             _ => panic!("type error: expected bool expr"),
@@ -158,13 +165,13 @@ pub fn eval_stmt(
             iterable,
             body,
         } => {
-            let value = eval_expr(iterable, env.clone(), ctx);
+            let value = eval_expr(iterable, env.clone(), ctx, out);
 
             for elem in value.enumerate().iter() {
                 env.borrow_mut().push_scope();
                 env.borrow_mut().define(var.clone(), elem.clone());
 
-                match eval_stmt(body, env.clone(), ctx) {
+                match eval_stmt(body, env.clone(), ctx, out) {
                     ExecResult::Return(v) => {
                         env.borrow_mut().pop_scope();
                         return ExecResult::Return(v);
@@ -179,33 +186,31 @@ pub fn eval_stmt(
         }
 
         LoweredStmt::ExprStmt(expr) => {
-            eval_expr(expr, env.clone(), ctx);
+            eval_expr(expr, env.clone(), ctx, out);
             ExecResult::Continue
         }
 
         LoweredStmt::Assignment { name, expr } => {
-            let value = eval_expr(expr, env.clone(), ctx);
+            let value = eval_expr(expr, env.clone(), ctx, out);
             env.borrow_mut().define(name.clone(), value);
             ExecResult::Continue
         }
 
         LoweredStmt::Block(stmts) => {
             env.borrow_mut().push_scope();
-            let res = eval(stmts, env.clone(), ctx);
+            let res = eval(stmts, env.clone(), ctx, out);
             env.borrow_mut().pop_scope();
             res
         }
 
         LoweredStmt::FnDecl { name, params, body } => {
-            env.borrow_mut().define(name.clone(), Value::Unit);
-
             let func = Rc::new(Function {
                 params: params.clone(),
-                body: *body.clone(),
+                body: body.clone(),
                 env: Rc::clone(&env),
             });
 
-            env.borrow_mut().assign(name.clone(), Value::Function(func));
+            env.borrow_mut().define(name.clone(), Value::Function(func));
 
             ExecResult::Continue
         }
@@ -223,7 +228,7 @@ pub fn eval_stmt(
         LoweredStmt::Return(opt_expr) => {
             let val = match opt_expr {
                 None => Value::Unit,
-                Some(expr) => eval_expr(expr, env, ctx),
+                Some(expr) => eval_expr(expr, env, ctx, out),
             };
             ExecResult::Return(val)
         }
@@ -239,13 +244,14 @@ pub fn eval_stmt(
     }
 }
 
-pub fn eval(
+pub fn eval<W: Write>(
     stmts: &Vec<LoweredStmt>,
     env: EnvRef,
     ctx: &mut Option<&mut MetaContext>,
+    out: &mut W,
 ) -> ExecResult {
     for stmt in stmts {
-        match eval_stmt(stmt, env.clone(), ctx) {
+        match eval_stmt(stmt, env.clone(), ctx, out) {
             ExecResult::Continue => {}
             ExecResult::Return(v) => {
                 return ExecResult::Return(v);
