@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 
 mod components {
+    pub mod formatter;
     pub mod interpreter;
     pub mod lexer;
     pub mod metaprocessor;
@@ -17,6 +18,7 @@ mod models {
     pub mod value;
 }
 
+use components::formatter;
 use components::interpreter;
 use components::lexer;
 use components::metaprocessor;
@@ -47,6 +49,10 @@ fn main() {
     let lowered_code = metaprocessor::lower(&parsed_code);
     let mut file = File::create("../out/lowered_ast.txt").expect("failed to create output file");
     writeln!(file, "{:#?}", lowered_code).expect("failed to write lowered AST");
+
+    let formatted_code = formatter::format_stmts_default(&lowered_code);
+    let mut file = File::create("../out/lowered_code.cx").expect("failed to create lowered_code.cx");
+    write!(file, "{}", formatted_code).expect("failed to write formatted code");
 
     let env = Env::new();
     interpreter::eval(&lowered_code, env, &mut None);
