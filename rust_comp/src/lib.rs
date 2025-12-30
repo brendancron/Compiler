@@ -1,4 +1,5 @@
-mod components {
+pub mod components {
+    pub mod executor;
     pub mod interpreter;
     pub mod lexer;
     pub mod metaprocessor;
@@ -6,7 +7,7 @@ mod components {
     pub mod substitution;
 }
 
-mod models {
+pub mod models {
     pub mod ast;
     pub mod environment;
     pub mod result;
@@ -14,26 +15,24 @@ mod models {
     pub mod value;
 }
 
-use components::{interpreter, lexer, metaprocessor, parser};
+use components::{executor, interpreter, lexer, metaprocessor, parser};
 use models::environment::Env;
 use std::io::Write;
 
-/// Run a Cronyx program and return its stdout
-pub fn run_source<M, E>(source: &str, meta_out: &mut M, eval_out: &mut E)
+pub fn default_executor<M, E>(mut meta_out: M, mut eval_out: E) -> executor::Executor<String, ()>
 where
-    M: Write,
-    E: Write,
+    M: Write + 'static,
+    E: Write + 'static,
 {
-    // Lex
-    let tokens = lexer::tokenize(source);
-
-    // Parse
-    let parsed_code = parser::parse(&tokens);
-
-    // Meta-lowering
-    let meta_env = Env::new();
-    let lowered_code = metaprocessor::lower(&parsed_code, meta_env, meta_out);
-
-    let env = Env::new();
-    interpreter::eval(&lowered_code, env, &mut None, eval_out);
+    executor::Executor::new()
+        .then(|source: String| lexer::tokenize(&source))
+        .then(|tokens| parser::parse(&tokens))
+        .then(move |parsed| {
+            let meta_env = Env::new();
+            metaprocessor::lower(&parsed, meta_env, &mut meta_out)
+        })
+        .then(move |lowered| {
+            let env = Env::new();
+            interpreter::eval(&lowered, env, &mut None, &mut eval_out);
+        })
 }
