@@ -128,11 +128,6 @@ pub enum LoweredStmt {
         body: Box<LoweredStmt>,
     },
 
-    StructDecl {
-        name: String,
-        fields: Vec<(String, TypeExpr)>,
-    },
-
     Return(Option<Box<LoweredExpr>>),
 
     Gen(Vec<LoweredStmt>),

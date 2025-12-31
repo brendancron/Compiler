@@ -1,4 +1,4 @@
-use crate::models::ast::{LoweredExpr, LoweredStmt, TypeExpr};
+use crate::models::ast::{LoweredExpr, LoweredStmt};
 
 #[derive(Debug, Clone)]
 pub struct FormatSettings {
@@ -236,39 +236,6 @@ impl Formatter {
                 result
             }
 
-            LoweredStmt::StructDecl { name, fields } => {
-                let mut result = format!(
-                    "{}struct {} {}",
-                    self.indent(),
-                    name,
-                    if self.settings.newline_after_block_open {
-                        format!("{{{}", self.settings.line_ending)
-                    } else {
-                        "{".to_string()
-                    }
-                );
-
-                self.indent_increase();
-                for (i, (field_name, field_type)) in fields.iter().enumerate() {
-                    result.push_str(&self.indent());
-                    result.push_str(field_name);
-                    result.push_str(": ");
-                    result.push_str(&self.format_type(field_type));
-                    if i < fields.len() - 1 {
-                        result.push(';');
-                    }
-                    result.push_str(&self.settings.line_ending);
-                }
-                self.indent_decrease();
-
-                if self.settings.newline_before_block_close {
-                    result.push_str(&self.indent());
-                }
-                result.push('}');
-
-                result
-            }
-
             LoweredStmt::Return(expr) => {
                 if let Some(expr) = expr {
                     format!("{}return {};", self.indent(), self.format_expr(expr))
@@ -427,15 +394,6 @@ impl Formatter {
                 };
                 format!("{}({}{}{})", callee, space_open, args_str, space_close)
             }
-        }
-    }
-
-    fn format_type(&self, ty: &TypeExpr) -> String {
-        match ty {
-            TypeExpr::Int => "int".to_string(),
-            TypeExpr::String => "string".to_string(),
-            TypeExpr::Bool => "bool".to_string(),
-            TypeExpr::Named(name) => name.clone(),
         }
     }
 }

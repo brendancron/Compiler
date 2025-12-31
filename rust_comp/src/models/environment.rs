@@ -1,8 +1,6 @@
-use crate::models::ast::TypeExpr;
 use crate::models::value::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt;
 use std::rc::Rc;
 
 pub type EnvRef = Rc<RefCell<Env>>;
@@ -10,20 +8,13 @@ pub type EnvRef = Rc<RefCell<Env>>;
 #[derive(Debug, Clone)]
 pub struct Env {
     scopes: Vec<HashMap<String, Value>>,
-    structs: HashMap<String, StructDef>,
     parent: Option<EnvRef>,
-}
-
-#[derive(Debug, Clone)]
-pub struct StructDef {
-    pub fields: Vec<(String, TypeExpr)>,
 }
 
 impl Env {
     pub fn new() -> EnvRef {
         Rc::new(RefCell::new(Env {
             scopes: vec![HashMap::new()],
-            structs: HashMap::new(),
             parent: None,
         }))
     }
@@ -31,7 +22,6 @@ impl Env {
     pub fn new_child(parent: EnvRef) -> EnvRef {
         Rc::new(RefCell::new(Env {
             scopes: vec![HashMap::new()],
-            structs: HashMap::new(),
             parent: Some(parent),
         }))
     }
@@ -88,34 +78,6 @@ impl Env {
         }
 
         panic!("assignment to undefined variable: {}", name);
-    }
-}
-
-impl Env {
-    pub fn define_struct(&mut self, name: String, def: StructDef) {
-        self.structs.insert(name, def);
-    }
-
-    pub fn get_struct(&self, name: &str) -> Option<StructDef> {
-        if let Some(def) = self.structs.get(name) {
-            return Some(def.clone());
-        }
-
-        if let Some(parent) = &self.parent {
-            return parent.borrow().get_struct(name);
-        }
-
-        None
-    }
-}
-
-impl fmt::Display for StructDef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "struct {{")?;
-        for (name, ty) in &self.fields {
-            writeln!(f, "    {}: {};", name, ty)?;
-        }
-        write!(f, "}}")
     }
 }
 

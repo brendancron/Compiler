@@ -100,11 +100,6 @@ fn subst_stmt(stmt: &LoweredStmt, env: &EnvRef) -> LoweredStmt {
             body: Box::new(subst_stmt(body, env)),
         },
 
-        LoweredStmt::StructDecl { name, fields } => LoweredStmt::StructDecl {
-            name: subst_str(name, env),
-            fields: fields.clone(),
-        },
-
         LoweredStmt::Return(expr) => {
             LoweredStmt::Return(expr.as_ref().map(|e| Box::new(subst_expr(e, env))))
         }
