@@ -1,17 +1,26 @@
 use rust_comp::components::{executor, formatter, interpreter, lexer, metaprocessor, parser};
 use rust_comp::models::environment::Env;
-use std::fs::File;
+use std::env;
+use std::fs::{self, File};
 use std::io::{self, Read, Write};
+use std::path::PathBuf;
 
 fn main() {
     let mut out1 = io::stdout();
     let mut out2 = io::stdout();
 
-    let mut source_file = File::create("../out/source_code.cx").unwrap();
-    let mut tok_file = File::create("../out/tokens.txt").unwrap();
-    let mut ast_file = File::create("../out/parsed_ast.txt").unwrap();
-    let mut lowered_file = File::create("../out/lowered_ast.txt").unwrap();
-    let mut full_lowered_file = File::create("../out/lowered_code.cx").unwrap();
+    let out_dir = env::args()
+        .skip_while(|a| a != "--out")
+        .nth(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("out"));
+
+    fs::create_dir_all(&out_dir).unwrap();
+    let mut source_file = File::create(out_dir.join("source_code.cx")).unwrap();
+    let mut tok_file = File::create(out_dir.join("../out/tokens.txt")).unwrap();
+    let mut ast_file = File::create(out_dir.join("../out/parsed_ast.txt")).unwrap();
+    let mut lowered_file = File::create(out_dir.join("../out/lowered_ast.txt")).unwrap();
+    let mut full_lowered_file = File::create(out_dir.join("../out/lowered_code.cx")).unwrap();
 
     let mut exec = executor::Executor::new()
         .tap(move |source| {

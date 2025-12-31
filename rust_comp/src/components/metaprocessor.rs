@@ -2,7 +2,6 @@ use crate::components::interpreter;
 use crate::models::ast::{LoweredExpr, LoweredStmt, ParsedExpr, ParsedStmt};
 use crate::models::environment::EnvRef;
 use crate::models::value::{Function, Value};
-use std::fs::File;
 use std::io::Write;
 use std::rc::Rc;
 
@@ -199,10 +198,6 @@ pub fn lower_stmt<W: Write>(stmt: &ParsedStmt, env: EnvRef, out: &mut W) -> Vec<
             let mut ctx = MetaContext {
                 emitted: Vec::new(),
             };
-
-            let mut file =
-                File::create("../out/meta_code.txt").expect("failed to create output file");
-            writeln!(file, "{:#?}", lowered_code).expect("failed to write parsed AST");
 
             interpreter::eval(&lowered_code, env, &mut Some(&mut ctx), out);
 
