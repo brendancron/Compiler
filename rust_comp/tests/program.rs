@@ -55,7 +55,10 @@ fn run_language_tests() {
 
         let name = path.file_stem().unwrap().to_string_lossy();
         let source = fs::read_to_string(&path).unwrap();
-        let expected_out = fs::read_to_string(expected.join(format!("{name}.out"))).unwrap();
+        let expected_path = expected.join(format!("{name}.out"));
+        let expected_out = fs::read_to_string(&expected_path).unwrap_or_else(|e| {
+            panic!("missing expected file: {} ({})", expected_path.display(), e)
+        });
 
         let meta_out = std::io::sink();
         let eval_buf = SharedBuf::new();

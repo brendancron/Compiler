@@ -1,6 +1,6 @@
 use crate::components::interpreter;
 use crate::models::ast::{LoweredExpr, LoweredStmt, ParsedExpr, ParsedStmt};
-use crate::models::environment::{Env, EnvRef};
+use crate::models::environment::EnvRef;
 use crate::models::value::{Function, Value};
 use std::fs::File;
 use std::io::Write;
@@ -8,6 +8,16 @@ use std::rc::Rc;
 
 pub struct MetaContext {
     pub emitted: Vec<LoweredStmt>,
+}
+
+pub fn value_to_literal(val: Value) -> LoweredExpr {
+    match val {
+        Value::Int(n) => LoweredExpr::Int(n),
+        Value::String(s) => LoweredExpr::String(s),
+        Value::Bool(b) => LoweredExpr::Bool(b),
+        Value::Unit => panic!("Unit has no literal representation"),
+        _ => panic!("non-primitive value not supported yet"),
+    }
 }
 
 pub fn lower_expr<W: Write>(expr: &ParsedExpr, env: EnvRef, out: &mut W) -> LoweredExpr {
@@ -24,7 +34,10 @@ pub fn lower_expr<W: Write>(expr: &ParsedExpr, env: EnvRef, out: &mut W) -> Lowe
                 .collect(),
         },
 
-        ParsedExpr::Variable(name) => LoweredExpr::Variable(name.clone()),
+        ParsedExpr::Variable(name) => match env.borrow().get(name) {
+            Some(x) => value_to_literal(x),
+            None => LoweredExpr::Variable(name.clone()),
+        },
 
         ParsedExpr::List(exprs) => LoweredExpr::List(lower_exprs(exprs, env.clone(), out)),
 
@@ -53,13 +66,23 @@ pub fn lower_expr<W: Write>(expr: &ParsedExpr, env: EnvRef, out: &mut W) -> Lowe
             Box::new(lower_expr(b, env.clone(), out)),
         ),
 
-        ParsedExpr::Call { callee, args } => LoweredExpr::Call {
-            callee: Box::new(lower_expr(callee, env.clone(), out)),
-            args: args
-                .iter()
-                .map(|e| lower_expr(e, env.clone(), out))
-                .collect(),
-        },
+        ParsedExpr::Call { callee, args } => {
+            let call_expr = LoweredExpr::Call {
+                callee: callee.clone(),
+                args: args
+                    .iter()
+                    .map(|e| lower_expr(e, env.clone(), out))
+                    .collect(),
+            };
+
+            match env.borrow().get(&callee) {
+                Some(_) => {
+                    let val = interpreter::eval_expr(&call_expr, env.clone(), &mut None, out);
+                    value_to_literal(val)
+                }
+                None => call_expr,
+            }
+        }
     }
 }
 
@@ -141,7 +164,7 @@ pub fn lower_stmt<W: Write>(stmt: &ParsedStmt, env: EnvRef, out: &mut W) -> Vec<
                     body: Box::new(lowered_body.clone()),
                     env: Rc::clone(&env),
                 });
-                env.borrow_mut().assign(name.clone(), Value::Function(func));
+                env.borrow_mut().define(name.clone(), Value::Function(func));
             }
 
             if func_type.can_execute_at_runtime() {
@@ -173,7 +196,6 @@ pub fn lower_stmt<W: Write>(stmt: &ParsedStmt, env: EnvRef, out: &mut W) -> Vec<
 
         ParsedStmt::MetaStmt(parsed_stmt) => {
             let lowered_code = lower_stmt(parsed_stmt, env.clone(), out);
-            let env = Env::new();
             let mut ctx = MetaContext {
                 emitted: Vec::new(),
             };

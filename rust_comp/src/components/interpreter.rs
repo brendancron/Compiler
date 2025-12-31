@@ -21,7 +21,7 @@ pub fn eval_expr<W: Write>(
         LoweredExpr::Bool(b) => Value::Bool(*b),
 
         LoweredExpr::StructLiteral { type_name, fields } => {
-            let struct_def = env
+            let _struct_def = env
                 .borrow()
                 .get_struct(type_name)
                 .unwrap_or_else(|| panic!("unknown struct type {}", type_name));
@@ -97,9 +97,8 @@ pub fn eval_expr<W: Write>(
         },
 
         LoweredExpr::Call { callee, args } => {
-            let callee_val = eval_expr(callee, env.clone(), ctx, out);
-            let func = match callee_val {
-                Value::Function(f) => f,
+            let func = match env.borrow().get(callee) {
+                Some(Value::Function(f)) => f,
                 _ => panic!("attempted to call a non-function"),
             };
 
@@ -125,9 +124,6 @@ pub fn eval_expr<W: Write>(
                 ExecResult::Return(v) => v,
                 ExecResult::Continue => Value::Unit,
             };
-
-            // We can skip this since we don't use it again
-            // callee_env.pop_scope();
 
             result
         }

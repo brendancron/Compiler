@@ -124,10 +124,7 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
                         );
                         consume(tokens, pos, TokenType::RightParen);
 
-                        ParsedExpr::Call {
-                            callee: Box::new(ParsedExpr::Variable(name)),
-                            args,
-                        }
+                        ParsedExpr::Call { callee: name, args }
                     } else if check(tokens, *pos, TokenType::LeftBrace) {
                         consume(tokens, pos, TokenType::LeftBrace);
 
@@ -350,6 +347,13 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
                     ParsedStmt::Gen(vec![stmt])
                 }
 
+                TokenType::LeftBrace => {
+                    consume(tokens, pos, TokenType::LeftBrace);
+                    let body = parse_block(tokens, pos);
+                    consume(tokens, pos, TokenType::RightBrace);
+                    body
+                }
+
                 TokenType::Meta => parse_meta_stmt(tokens, pos),
 
                 _ => parse_expr_stmt(tokens, pos),
@@ -364,14 +368,7 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
         match peek(tokens, *pos) {
             Some(TokenType::Func) => parse_fn_decl(tokens, pos, ParsedFuncType::Meta),
             _ => {
-                let stmt = if check(tokens, *pos, TokenType::LeftBrace) {
-                    consume(tokens, pos, TokenType::LeftBrace);
-                    let block = parse_block(tokens, pos);
-                    consume(tokens, pos, TokenType::RightBrace);
-                    block
-                } else {
-                    parse_stmt(tokens, pos)
-                };
+                let stmt = parse_stmt(tokens, pos);
                 ParsedStmt::MetaStmt(Box::new(stmt))
             }
         }

@@ -1,0 +1,5 @@
+meta fn hello_world() {
+    return "Returned from meta fn";
+}
+
+print(hello_world());

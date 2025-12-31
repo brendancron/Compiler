@@ -45,9 +45,7 @@ impl Formatter {
     }
 
     fn indent(&self) -> String {
-        self.settings
-            .indent_string
-            .repeat(self.current_indent)
+        self.settings.indent_string.repeat(self.current_indent)
     }
 
     fn indent_increase(&mut self) {
@@ -67,7 +65,12 @@ impl Formatter {
             }
 
             LoweredStmt::Assignment { name, expr } => {
-                format!("{}var {} = {};", self.indent(), name, self.format_expr(expr))
+                format!(
+                    "{}var {} = {};",
+                    self.indent(),
+                    name,
+                    self.format_expr(expr)
+                )
             }
 
             LoweredStmt::Print(expr) => {
@@ -110,7 +113,7 @@ impl Formatter {
                             self.current_indent = 0;
                             let mut else_str = self.format_stmt(else_stmt);
                             self.current_indent = saved_indent;
-                            
+
                             // Remove any leading indent and replace "if" with nothing (we already added "else")
                             let indent_prefix = self.settings.indent_string.repeat(saved_indent);
                             if else_str.starts_with(&indent_prefix) {
@@ -150,7 +153,11 @@ impl Formatter {
                 result
             }
 
-            LoweredStmt::ForEach { var, iterable, body } => {
+            LoweredStmt::ForEach {
+                var,
+                iterable,
+                body,
+            } => {
                 let mut result = format!(
                     "{}for ({} in {}) {}",
                     self.indent(),
@@ -299,19 +306,14 @@ impl Formatter {
                 } else {
                     let fields_str = fields
                         .iter()
-                        .map(|(name, expr)| {
-                            format!("{}: {}", name, self.format_expr(expr))
-                        })
+                        .map(|(name, expr)| format!("{}: {}", name, self.format_expr(expr)))
                         .collect::<Vec<_>>()
                         .join(&format!(",{}", self.settings.line_ending));
 
                     // For struct literals, we want multi-line format with proper indentation
                     format!(
                         "{} {{{}{}{}}}",
-                        type_name,
-                        self.settings.line_ending,
-                        fields_str,
-                        self.settings.line_ending
+                        type_name, self.settings.line_ending, fields_str, self.settings.line_ending
                     )
                 }
             }
@@ -323,8 +325,16 @@ impl Formatter {
                     .collect::<Vec<_>>()
                     .join(", ");
 
-                let space_open = if self.settings.spaces_inside_brackets { " " } else { "" };
-                let space_close = if self.settings.spaces_inside_brackets { " " } else { "" };
+                let space_open = if self.settings.spaces_inside_brackets {
+                    " "
+                } else {
+                    ""
+                };
+                let space_close = if self.settings.spaces_inside_brackets {
+                    " "
+                } else {
+                    ""
+                };
                 format!("[{}{}{}]", space_open, items_str, space_close)
             }
 
@@ -334,7 +344,12 @@ impl Formatter {
                 } else {
                     "+"
                 };
-                format!("{}{}{}", self.format_expr(left), op, self.format_expr(right))
+                format!(
+                    "{}{}{}",
+                    self.format_expr(left),
+                    op,
+                    self.format_expr(right)
+                )
             }
 
             LoweredExpr::Sub(left, right) => {
@@ -343,7 +358,12 @@ impl Formatter {
                 } else {
                     "-"
                 };
-                format!("{}{}{}", self.format_expr(left), op, self.format_expr(right))
+                format!(
+                    "{}{}{}",
+                    self.format_expr(left),
+                    op,
+                    self.format_expr(right)
+                )
             }
 
             LoweredExpr::Mult(left, right) => {
@@ -352,7 +372,12 @@ impl Formatter {
                 } else {
                     "*"
                 };
-                format!("{}{}{}", self.format_expr(left), op, self.format_expr(right))
+                format!(
+                    "{}{}{}",
+                    self.format_expr(left),
+                    op,
+                    self.format_expr(right)
+                )
             }
 
             LoweredExpr::Div(left, right) => {
@@ -361,7 +386,12 @@ impl Formatter {
                 } else {
                     "/"
                 };
-                format!("{}{}{}", self.format_expr(left), op, self.format_expr(right))
+                format!(
+                    "{}{}{}",
+                    self.format_expr(left),
+                    op,
+                    self.format_expr(right)
+                )
             }
 
             LoweredExpr::Equals(left, right) => {
@@ -370,7 +400,12 @@ impl Formatter {
                 } else {
                     "=="
                 };
-                format!("{}{}{}", self.format_expr(left), op, self.format_expr(right))
+                format!(
+                    "{}{}{}",
+                    self.format_expr(left),
+                    op,
+                    self.format_expr(right)
+                )
             }
 
             LoweredExpr::Call { callee, args } => {
@@ -380,15 +415,17 @@ impl Formatter {
                     .collect::<Vec<_>>()
                     .join(", ");
 
-                let space_open = if self.settings.spaces_inside_parens { " " } else { "" };
-                let space_close = if self.settings.spaces_inside_parens { " " } else { "" };
-                format!(
-                    "{}({}{}{})",
-                    self.format_expr(callee),
-                    space_open,
-                    args_str,
-                    space_close
-                )
+                let space_open = if self.settings.spaces_inside_parens {
+                    " "
+                } else {
+                    ""
+                };
+                let space_close = if self.settings.spaces_inside_parens {
+                    " "
+                } else {
+                    ""
+                };
+                format!("{}({}{}{})", callee, space_open, args_str, space_close)
             }
         }
     }
@@ -406,7 +443,8 @@ impl Formatter {
 // Convenience functions
 pub fn format_stmts(stmts: &[LoweredStmt], settings: FormatSettings) -> String {
     let mut formatter = Formatter::new(settings);
-    stmts.iter()
+    stmts
+        .iter()
         .map(|stmt| formatter.format_stmt(stmt))
         .collect::<Vec<_>>()
         .join(&formatter.settings.line_ending)
@@ -425,4 +463,3 @@ pub fn format_expr(expr: &LoweredExpr, settings: FormatSettings) -> String {
 pub fn format_expr_default(expr: &LoweredExpr) -> String {
     format_expr(expr, FormatSettings::default())
 }
-

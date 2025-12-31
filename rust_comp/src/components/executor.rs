@@ -17,7 +17,7 @@ where
     I: 'static,
     O: 'static,
 {
-    pub fn then<N>(mut self, mut g: impl FnMut(O) -> N + 'static) -> Executor<I, N>
+    pub fn then<N>(self, mut g: impl FnMut(O) -> N + 'static) -> Executor<I, N>
     where
         N: 'static,
     {

@@ -53,7 +53,7 @@ fn subst_expr(expr: &LoweredExpr, env: &EnvRef) -> LoweredExpr {
         }
 
         LoweredExpr::Call { callee, args } => LoweredExpr::Call {
-            callee: Box::new(subst_expr(callee, env)),
+            callee: subst_str(callee, env),
             args: args.iter().map(|a| subst_expr(a, env)).collect(),
         },
     }

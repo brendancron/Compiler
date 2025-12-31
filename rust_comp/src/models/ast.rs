@@ -20,7 +20,7 @@ pub enum ParsedExpr {
     Equals(Box<ParsedExpr>, Box<ParsedExpr>),
 
     Call {
-        callee: Box<ParsedExpr>,
+        callee: String,
         args: Vec<ParsedExpr>,
     },
 }
@@ -91,7 +91,7 @@ pub enum LoweredExpr {
     Equals(Box<LoweredExpr>, Box<LoweredExpr>),
 
     Call {
-        callee: Box<LoweredExpr>,
+        callee: String,
         args: Vec<LoweredExpr>,
     },
 }
