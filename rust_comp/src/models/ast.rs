@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug, Clone)]
 pub enum ParsedExpr {
     Int(i64),
@@ -23,6 +25,8 @@ pub enum ParsedExpr {
         callee: String,
         args: Vec<ParsedExpr>,
     },
+
+    Typeof(String),
 }
 
 #[derive(Debug, Clone)]
@@ -165,4 +169,15 @@ pub enum TypeExpr {
     String,
     Bool,
     Named(String),
+}
+
+impl fmt::Display for TypeExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TypeExpr::Int => write!(f, "int"),
+            TypeExpr::String => write!(f, "string"),
+            TypeExpr::Bool => write!(f, "bool"),
+            TypeExpr::Named(name) => write!(f, "{name}"),
+        }
+    }
 }

@@ -1,0 +1,6 @@
+struct Person {
+    name: string;
+    age: int
+}
+
+print(typeof(Person));

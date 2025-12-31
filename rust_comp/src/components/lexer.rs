@@ -263,6 +263,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
             c if is_alpha(c) => {
                 let (name, j) = lex_identifier(&chars, i);
 
+                // Keywords
                 let tok_type = match name.as_str() {
                     "and" => TokenType::And,
                     "else" => TokenType::Else,
@@ -278,6 +279,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                     "return" => TokenType::Return,
                     "struct" => TokenType::Struct,
                     "true" => TokenType::True,
+                    "typeof" => TokenType::Typeof,
                     "var" => TokenType::Var,
                     "while" => TokenType::While,
                     _ => TokenType::Identifier,

@@ -110,6 +110,14 @@ pub fn parse(tokens: &[Token]) -> Vec<ParsedStmt> {
                     expr
                 }
 
+                TokenType::Typeof => {
+                    consume(tokens, pos, TokenType::Typeof);
+                    consume(tokens, pos, TokenType::LeftParen);
+                    let id = consume(tokens, pos, TokenType::Identifier).expect_str();
+                    consume(tokens, pos, TokenType::RightParen);
+                    ParsedExpr::Typeof(id)
+                }
+
                 TokenType::Identifier => {
                     let name = consume_next(tokens, pos).expect_str();
 

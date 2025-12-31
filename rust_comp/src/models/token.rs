@@ -46,6 +46,7 @@ pub enum TokenType {
     Return,
     Struct,
     True,
+    Typeof,
     Var,
     While,
 

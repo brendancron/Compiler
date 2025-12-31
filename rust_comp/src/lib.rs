@@ -10,6 +10,7 @@ pub mod components {
 
 pub mod models {
     pub mod ast;
+    pub mod decl_env;
     pub mod environment;
     pub mod result;
     pub mod token;

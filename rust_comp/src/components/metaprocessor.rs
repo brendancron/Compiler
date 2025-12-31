@@ -82,6 +82,11 @@ pub fn lower_expr<W: Write>(expr: &ParsedExpr, env: EnvRef, out: &mut W) -> Lowe
                 None => call_expr,
             }
         }
+
+        ParsedExpr::Typeof(id) => {
+            println!("{:#?}", env.borrow().flat_vars());
+            LoweredExpr::String(id.clone())
+        }
     }
 }
 

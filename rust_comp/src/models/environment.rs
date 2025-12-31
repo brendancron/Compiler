@@ -2,6 +2,7 @@ use crate::models::ast::TypeExpr;
 use crate::models::value::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt;
 use std::rc::Rc;
 
 pub type EnvRef = Rc<RefCell<Env>>;
@@ -105,5 +106,33 @@ impl Env {
         }
 
         None
+    }
+}
+
+impl fmt::Display for StructDef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "struct {{")?;
+        for (name, ty) in &self.fields {
+            writeln!(f, "    {}: {};", name, ty)?;
+        }
+        write!(f, "}}")
+    }
+}
+
+impl Env {
+    pub fn flat_vars(&self) -> HashMap<String, Value> {
+        let mut map = HashMap::new();
+
+        if let Some(parent) = &self.parent {
+            map.extend(parent.borrow().flat_vars());
+        }
+
+        for scope in &self.scopes {
+            for (k, v) in scope {
+                map.insert(k.clone(), v.clone());
+            }
+        }
+
+        map
     }
 }
