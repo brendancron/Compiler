@@ -1,6 +1,6 @@
 use crate::components::metaprocessor::MetaContext;
 use crate::components::substitution::subst_stmts;
-use crate::models::ast::{LoweredExpr, LoweredStmt};
+use crate::models::ast::{ExpandedExpr, ExpandedStmt};
 use crate::models::decl_registry::DeclRegistryRef;
 use crate::models::environment::{Env, EnvRef};
 use crate::models::result::ExecResult;
@@ -11,18 +11,18 @@ use std::io::Write;
 use std::rc::Rc;
 
 pub fn eval_expr<W: Write>(
-    expr: &LoweredExpr,
+    expr: &ExpandedExpr,
     env: EnvRef,
     decls: DeclRegistryRef,
     ctx: &mut Option<&mut MetaContext>,
     out: &mut W,
 ) -> Value {
     match expr {
-        LoweredExpr::Int(n) => Value::Int(*n),
-        LoweredExpr::String(s) => Value::String(s.clone()),
-        LoweredExpr::Bool(b) => Value::Bool(*b),
+        ExpandedExpr::Int(n) => Value::Int(*n),
+        ExpandedExpr::String(s) => Value::String(s.clone()),
+        ExpandedExpr::Bool(b) => Value::Bool(*b),
 
-        LoweredExpr::StructLiteral { type_name, fields } => {
+        ExpandedExpr::StructLiteral { type_name, fields } => {
             let _struct_def = decls
                 .borrow()
                 .get_struct(type_name)
@@ -41,12 +41,12 @@ pub fn eval_expr<W: Write>(
             }
         }
 
-        LoweredExpr::Variable(name) => env
+        ExpandedExpr::Variable(name) => env
             .borrow()
             .get(name)
             .unwrap_or_else(|| panic!("undefined variable: {}", name)),
 
-        LoweredExpr::List(exprs) => {
+        ExpandedExpr::List(exprs) => {
             let values = exprs
                 .iter()
                 .map(|e| eval_expr(e, env.clone(), decls.clone(), ctx, out))
@@ -55,7 +55,7 @@ pub fn eval_expr<W: Write>(
             Value::List(Rc::new(RefCell::new(values)))
         }
 
-        LoweredExpr::Add(a, b) => match (
+        ExpandedExpr::Add(a, b) => match (
             eval_expr(a, env.clone(), decls.clone(), ctx, out),
             eval_expr(b, env.clone(), decls, ctx, out),
         ) {
@@ -64,7 +64,7 @@ pub fn eval_expr<W: Write>(
             _ => panic!("type error: + expects ints"),
         },
 
-        LoweredExpr::Sub(a, b) => match (
+        ExpandedExpr::Sub(a, b) => match (
             eval_expr(a, env.clone(), decls.clone(), ctx, out),
             eval_expr(b, env.clone(), decls, ctx, out),
         ) {
@@ -72,7 +72,7 @@ pub fn eval_expr<W: Write>(
             _ => panic!("type error: - expects ints"),
         },
 
-        LoweredExpr::Mult(a, b) => match (
+        ExpandedExpr::Mult(a, b) => match (
             eval_expr(a, env.clone(), decls.clone(), ctx, out),
             eval_expr(b, env.clone(), decls, ctx, out),
         ) {
@@ -80,7 +80,7 @@ pub fn eval_expr<W: Write>(
             _ => panic!("type error: * expects ints"),
         },
 
-        LoweredExpr::Div(a, b) => match (
+        ExpandedExpr::Div(a, b) => match (
             eval_expr(a, env.clone(), decls.clone(), ctx, out),
             eval_expr(b, env.clone(), decls, ctx, out),
         ) {
@@ -88,7 +88,7 @@ pub fn eval_expr<W: Write>(
             _ => panic!("type error: / expects ints"),
         },
 
-        LoweredExpr::Equals(a, b) => match (
+        ExpandedExpr::Equals(a, b) => match (
             eval_expr(a, env.clone(), decls.clone(), ctx, out),
             eval_expr(b, env.clone(), decls, ctx, out),
         ) {
@@ -98,7 +98,7 @@ pub fn eval_expr<W: Write>(
             _ => panic!("type error: == mismatched types"),
         },
 
-        LoweredExpr::Call { callee, args } => {
+        ExpandedExpr::Call { callee, args } => {
             let func = match env.borrow().get(callee) {
                 Some(Value::Function(f)) => f,
                 _ => panic!("attempted to call a non-function"),
@@ -133,20 +133,20 @@ pub fn eval_expr<W: Write>(
 }
 
 pub fn eval_stmt<W: Write>(
-    stmt: &LoweredStmt,
+    stmt: &ExpandedStmt,
     env: EnvRef,
     decls: DeclRegistryRef,
     ctx: &mut Option<&mut MetaContext>,
     out: &mut W,
 ) -> ExecResult {
     match stmt {
-        LoweredStmt::Print(expr) => {
+        ExpandedStmt::Print(expr) => {
             let value = eval_expr(expr, env.clone(), decls, ctx, out);
             writeln!(out, "{}", value).unwrap();
             ExecResult::Continue
         }
 
-        LoweredStmt::If {
+        ExpandedStmt::If {
             cond,
             body,
             else_branch,
@@ -159,7 +159,7 @@ pub fn eval_stmt<W: Write>(
             _ => panic!("type error: expected bool expr"),
         },
 
-        LoweredStmt::ForEach {
+        ExpandedStmt::ForEach {
             var,
             iterable,
             body,
@@ -184,25 +184,25 @@ pub fn eval_stmt<W: Write>(
             ExecResult::Continue
         }
 
-        LoweredStmt::ExprStmt(expr) => {
+        ExpandedStmt::ExprStmt(expr) => {
             eval_expr(expr, env.clone(), decls, ctx, out);
             ExecResult::Continue
         }
 
-        LoweredStmt::Assignment { name, expr } => {
+        ExpandedStmt::Assignment { name, expr } => {
             let value = eval_expr(expr, env.clone(), decls, ctx, out);
             env.borrow_mut().define(name.clone(), value);
             ExecResult::Continue
         }
 
-        LoweredStmt::Block(stmts) => {
+        ExpandedStmt::Block(stmts) => {
             env.borrow_mut().push_scope();
             let res = eval(stmts, env.clone(), decls, ctx, out);
             env.borrow_mut().pop_scope();
             res
         }
 
-        LoweredStmt::FnDecl { name, params, body } => {
+        ExpandedStmt::FnDecl { name, params, body } => {
             let func = Rc::new(Function {
                 params: params.clone(),
                 body: body.clone(),
@@ -214,7 +214,7 @@ pub fn eval_stmt<W: Write>(
             ExecResult::Continue
         }
 
-        LoweredStmt::Return(opt_expr) => {
+        ExpandedStmt::Return(opt_expr) => {
             let val = match opt_expr {
                 None => Value::Unit,
                 Some(expr) => eval_expr(expr, env, decls, ctx, out),
@@ -222,7 +222,7 @@ pub fn eval_stmt<W: Write>(
             ExecResult::Return(val)
         }
 
-        LoweredStmt::Gen(stmts) => {
+        ExpandedStmt::Gen(stmts) => {
             let meta = ctx.as_deref_mut().expect("gen outside meta");
             let substituted = subst_stmts(stmts, &env);
             for stmt in substituted {
@@ -234,7 +234,7 @@ pub fn eval_stmt<W: Write>(
 }
 
 pub fn eval<W: Write>(
-    stmts: &Vec<LoweredStmt>,
+    stmts: &Vec<ExpandedStmt>,
     env: EnvRef,
     decls: DeclRegistryRef,
     ctx: &mut Option<&mut MetaContext>,

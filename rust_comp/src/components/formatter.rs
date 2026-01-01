@@ -1,4 +1,4 @@
-use crate::models::ast::{LoweredExpr, LoweredStmt};
+use crate::models::ast::{ExpandedExpr, ExpandedStmt};
 
 #[derive(Debug, Clone)]
 pub struct FormatSettings {
@@ -58,13 +58,13 @@ impl Formatter {
         }
     }
 
-    pub fn format_stmt(&mut self, stmt: &LoweredStmt) -> String {
+    pub fn format_stmt(&mut self, stmt: &ExpandedStmt) -> String {
         match stmt {
-            LoweredStmt::ExprStmt(expr) => {
+            ExpandedStmt::ExprStmt(expr) => {
                 format!("{}{};", self.indent(), self.format_expr(expr))
             }
 
-            LoweredStmt::Assignment { name, expr } => {
+            ExpandedStmt::Assignment { name, expr } => {
                 format!(
                     "{}var {} = {};",
                     self.indent(),
@@ -73,11 +73,11 @@ impl Formatter {
                 )
             }
 
-            LoweredStmt::Print(expr) => {
+            ExpandedStmt::Print(expr) => {
                 format!("{}print({});", self.indent(), self.format_expr(expr))
             }
 
-            LoweredStmt::If {
+            ExpandedStmt::If {
                 cond,
                 body,
                 else_branch,
@@ -106,7 +106,7 @@ impl Formatter {
 
                     // Handle else-if chains
                     match else_stmt.as_ref() {
-                        LoweredStmt::If { .. } => {
+                        ExpandedStmt::If { .. } => {
                             // For else-if, format recursively but replace leading "if" with "else if"
                             result.push_str(" else ");
                             let saved_indent = self.current_indent;
@@ -153,7 +153,7 @@ impl Formatter {
                 result
             }
 
-            LoweredStmt::ForEach {
+            ExpandedStmt::ForEach {
                 var,
                 iterable,
                 body,
@@ -183,7 +183,7 @@ impl Formatter {
                 result
             }
 
-            LoweredStmt::Block(stmts) => {
+            ExpandedStmt::Block(stmts) => {
                 if stmts.is_empty() {
                     return format!("{}{{}}", self.indent());
                 }
@@ -209,7 +209,7 @@ impl Formatter {
                 result
             }
 
-            LoweredStmt::FnDecl { name, params, body } => {
+            ExpandedStmt::FnDecl { name, params, body } => {
                 let params_str = params.join(", ");
                 let mut result = format!(
                     "{}fn {}({}) {}",
@@ -236,7 +236,7 @@ impl Formatter {
                 result
             }
 
-            LoweredStmt::Return(expr) => {
+            ExpandedStmt::Return(expr) => {
                 if let Some(expr) = expr {
                     format!("{}return {};", self.indent(), self.format_expr(expr))
                 } else {
@@ -244,7 +244,7 @@ impl Formatter {
                 }
             }
 
-            LoweredStmt::Gen(stmts) => {
+            ExpandedStmt::Gen(stmts) => {
                 let mut result = format!("{}gen ", self.indent());
                 for (i, stmt) in stmts.iter().enumerate() {
                     if i > 0 {
@@ -258,16 +258,16 @@ impl Formatter {
         }
     }
 
-    pub fn format_expr(&self, expr: &LoweredExpr) -> String {
+    pub fn format_expr(&self, expr: &ExpandedExpr) -> String {
         match expr {
-            LoweredExpr::Int(n) => n.to_string(),
-            LoweredExpr::String(s) => format!("\"{}\"", s),
-            LoweredExpr::Bool(true) => "true".to_string(),
-            LoweredExpr::Bool(false) => "false".to_string(),
+            ExpandedExpr::Int(n) => n.to_string(),
+            ExpandedExpr::String(s) => format!("\"{}\"", s),
+            ExpandedExpr::Bool(true) => "true".to_string(),
+            ExpandedExpr::Bool(false) => "false".to_string(),
 
-            LoweredExpr::Variable(name) => name.clone(),
+            ExpandedExpr::Variable(name) => name.clone(),
 
-            LoweredExpr::StructLiteral { type_name, fields } => {
+            ExpandedExpr::StructLiteral { type_name, fields } => {
                 if fields.is_empty() {
                     format!("{} {{}}", type_name)
                 } else {
@@ -285,7 +285,7 @@ impl Formatter {
                 }
             }
 
-            LoweredExpr::List(exprs) => {
+            ExpandedExpr::List(exprs) => {
                 let items_str = exprs
                     .iter()
                     .map(|e| self.format_expr(e))
@@ -305,7 +305,7 @@ impl Formatter {
                 format!("[{}{}{}]", space_open, items_str, space_close)
             }
 
-            LoweredExpr::Add(left, right) => {
+            ExpandedExpr::Add(left, right) => {
                 let op = if self.settings.spaces_around_binary_ops {
                     " + "
                 } else {
@@ -319,7 +319,7 @@ impl Formatter {
                 )
             }
 
-            LoweredExpr::Sub(left, right) => {
+            ExpandedExpr::Sub(left, right) => {
                 let op = if self.settings.spaces_around_binary_ops {
                     " - "
                 } else {
@@ -333,7 +333,7 @@ impl Formatter {
                 )
             }
 
-            LoweredExpr::Mult(left, right) => {
+            ExpandedExpr::Mult(left, right) => {
                 let op = if self.settings.spaces_around_binary_ops {
                     " * "
                 } else {
@@ -347,7 +347,7 @@ impl Formatter {
                 )
             }
 
-            LoweredExpr::Div(left, right) => {
+            ExpandedExpr::Div(left, right) => {
                 let op = if self.settings.spaces_around_binary_ops {
                     " / "
                 } else {
@@ -361,7 +361,7 @@ impl Formatter {
                 )
             }
 
-            LoweredExpr::Equals(left, right) => {
+            ExpandedExpr::Equals(left, right) => {
                 let op = if self.settings.spaces_around_binary_ops {
                     " == "
                 } else {
@@ -375,7 +375,7 @@ impl Formatter {
                 )
             }
 
-            LoweredExpr::Call { callee, args } => {
+            ExpandedExpr::Call { callee, args } => {
                 let args_str = args
                     .iter()
                     .map(|e| self.format_expr(e))
@@ -399,7 +399,7 @@ impl Formatter {
 }
 
 // Convenience functions
-pub fn format_stmts(stmts: &[LoweredStmt], settings: FormatSettings) -> String {
+pub fn format_stmts(stmts: &[ExpandedStmt], settings: FormatSettings) -> String {
     let mut formatter = Formatter::new(settings);
     stmts
         .iter()
@@ -409,15 +409,15 @@ pub fn format_stmts(stmts: &[LoweredStmt], settings: FormatSettings) -> String {
         + &formatter.settings.line_ending
 }
 
-pub fn format_stmts_default(stmts: &[LoweredStmt]) -> String {
+pub fn format_stmts_default(stmts: &[ExpandedStmt]) -> String {
     format_stmts(stmts, FormatSettings::default())
 }
 
-pub fn format_expr(expr: &LoweredExpr, settings: FormatSettings) -> String {
+pub fn format_expr(expr: &ExpandedExpr, settings: FormatSettings) -> String {
     let formatter = Formatter::new(settings);
     formatter.format_expr(expr)
 }
 
-pub fn format_expr_default(expr: &LoweredExpr) -> String {
+pub fn format_expr_default(expr: &ExpandedExpr) -> String {
     format_expr(expr, FormatSettings::default())
 }

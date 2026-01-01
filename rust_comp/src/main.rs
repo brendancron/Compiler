@@ -19,35 +19,36 @@ fn main() {
     let mut source_file = File::create(out_dir.join("source_code.cx")).unwrap();
     let mut tok_file = File::create(out_dir.join("../out/tokens.txt")).unwrap();
     let mut ast_file = File::create(out_dir.join("../out/parsed_ast.txt")).unwrap();
-    let mut lowered_file = File::create(out_dir.join("../out/lowered_ast.txt")).unwrap();
-    let mut full_lowered_file = File::create(out_dir.join("../out/lowered_code.cx")).unwrap();
+    let mut expanded_file = File::create(out_dir.join("../out/expanded_ast.txt")).unwrap();
+    let mut full_expanded_file = File::create(out_dir.join("../out/expanded_code.cx")).unwrap();
 
     let mut exec = executor::Executor::new()
-        .tap(move |source| {
-            writeln!(source_file, "{source}").unwrap();
+        .tap(move |source: &String| {
+            writeln!(source_file, "{}", source).unwrap();
         })
         .then(|source: String| lexer::tokenize(&source))
-        .tap(move |tokens| {
-            writeln!(tok_file, "{tokens:#?}").unwrap();
+        .tap(move |tokens: &Vec<_>| {
+            writeln!(tok_file, "{:?}", tokens).unwrap();
         })
         .then(|tokens| parser::parse(&tokens))
-        .tap(move |parsed| {
-            writeln!(ast_file, "{parsed:#?}").unwrap();
+        .tap(move |blueprint: &Vec<_>| {
+            writeln!(ast_file, "{:?}", blueprint).unwrap();
         })
         .then(rust_comp::default_run_metaprocessor(out1))
-        .tap(move |(lowered, _)| {
-            writeln!(lowered_file, "{lowered:#?}").unwrap();
+        .tap(move |(expanded, _)| {
+            writeln!(expanded_file, "{:?}", expanded).unwrap();
         })
-        .tap(move |(lowered, _)| {
-            let formatted_code = formatter::format_stmts_default(&lowered);
-            writeln!(full_lowered_file, "{formatted_code}").unwrap();
+        .tap(move |(expanded, _)| {
+            let formatted = formatter::format_stmts_default(expanded);
+            writeln!(full_expanded_file, "{}", formatted).unwrap();
         })
-        .then(move |(lowered, decl_reg)| {
+        .then(move |(expanded, decl_reg)| {
             let env = Env::new();
-            interpreter::eval(&lowered, env, decl_reg, &mut None, &mut out2);
+            interpreter::eval(&expanded, env, decl_reg, &mut None, &mut out2);
+            ()
         });
 
     let mut buf = String::new();
     io::stdin().read_to_string(&mut buf).unwrap();
-    exec.run(buf);
+    exec.run(buf)
 }

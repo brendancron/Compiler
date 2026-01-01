@@ -1,62 +1,62 @@
 use std::fmt;
 
 #[derive(Debug, Clone)]
-pub enum ParsedExpr {
+pub enum BlueprintExpr {
     Int(i64),
     String(String),
     Bool(bool),
 
     StructLiteral {
         type_name: String,
-        fields: Vec<(String, Box<ParsedExpr>)>,
+        fields: Vec<(String, Box<BlueprintExpr>)>,
     },
 
     Variable(String),
 
-    List(Vec<ParsedExpr>),
+    List(Vec<BlueprintExpr>),
 
-    Add(Box<ParsedExpr>, Box<ParsedExpr>),
-    Sub(Box<ParsedExpr>, Box<ParsedExpr>),
-    Mult(Box<ParsedExpr>, Box<ParsedExpr>),
-    Div(Box<ParsedExpr>, Box<ParsedExpr>),
-    Equals(Box<ParsedExpr>, Box<ParsedExpr>),
+    Add(Box<BlueprintExpr>, Box<BlueprintExpr>),
+    Sub(Box<BlueprintExpr>, Box<BlueprintExpr>),
+    Mult(Box<BlueprintExpr>, Box<BlueprintExpr>),
+    Div(Box<BlueprintExpr>, Box<BlueprintExpr>),
+    Equals(Box<BlueprintExpr>, Box<BlueprintExpr>),
 
     Call {
         callee: String,
-        args: Vec<ParsedExpr>,
+        args: Vec<BlueprintExpr>,
     },
 
     Typeof(String),
 }
 
 #[derive(Debug, Clone)]
-pub enum ParsedStmt {
-    ExprStmt(Box<ParsedExpr>),
+pub enum BlueprintStmt {
+    ExprStmt(Box<BlueprintExpr>),
     Assignment {
         name: String,
-        expr: Box<ParsedExpr>,
+        expr: Box<BlueprintExpr>,
     },
-    Print(Box<ParsedExpr>),
+    Print(Box<BlueprintExpr>),
 
     If {
-        cond: Box<ParsedExpr>,
-        body: Box<ParsedStmt>,
-        else_branch: Option<Box<ParsedStmt>>,
+        cond: Box<BlueprintExpr>,
+        body: Box<BlueprintStmt>,
+        else_branch: Option<Box<BlueprintStmt>>,
     },
 
     ForEach {
         var: String,
-        iterable: Box<ParsedExpr>,
-        body: Box<ParsedStmt>,
+        iterable: Box<BlueprintExpr>,
+        body: Box<BlueprintStmt>,
     },
 
-    Block(Vec<ParsedStmt>),
+    Block(Vec<BlueprintStmt>),
 
     FnDecl {
         name: String,
-        func_type: ParsedFuncType,
+        func_type: BlueprintFuncType,
         params: Vec<String>,
-        body: Box<ParsedStmt>,
+        body: Box<BlueprintStmt>,
     },
 
     StructDecl {
@@ -64,96 +64,96 @@ pub enum ParsedStmt {
         fields: Vec<(String, TypeExpr)>,
     },
 
-    Return(Option<Box<ParsedExpr>>),
+    Return(Option<Box<BlueprintExpr>>),
 
-    Gen(Vec<ParsedStmt>),
+    Gen(Vec<BlueprintStmt>),
 
-    MetaStmt(Box<ParsedStmt>),
+    MetaStmt(Box<BlueprintStmt>),
 }
 
-// --- LOWERED AST ---
+// --- EXPANDED AST ---
 
 #[derive(Debug, Clone)]
-pub enum LoweredExpr {
+pub enum ExpandedExpr {
     Int(i64),
     String(String),
     Bool(bool),
 
     StructLiteral {
         type_name: String,
-        fields: Vec<(String, Box<LoweredExpr>)>,
+        fields: Vec<(String, Box<ExpandedExpr>)>,
     },
 
     Variable(String),
 
-    List(Vec<LoweredExpr>),
+    List(Vec<ExpandedExpr>),
 
-    Add(Box<LoweredExpr>, Box<LoweredExpr>),
-    Sub(Box<LoweredExpr>, Box<LoweredExpr>),
-    Mult(Box<LoweredExpr>, Box<LoweredExpr>),
-    Div(Box<LoweredExpr>, Box<LoweredExpr>),
-    Equals(Box<LoweredExpr>, Box<LoweredExpr>),
+    Add(Box<ExpandedExpr>, Box<ExpandedExpr>),
+    Sub(Box<ExpandedExpr>, Box<ExpandedExpr>),
+    Mult(Box<ExpandedExpr>, Box<ExpandedExpr>),
+    Div(Box<ExpandedExpr>, Box<ExpandedExpr>),
+    Equals(Box<ExpandedExpr>, Box<ExpandedExpr>),
 
     Call {
         callee: String,
-        args: Vec<LoweredExpr>,
+        args: Vec<ExpandedExpr>,
     },
 }
 
 #[derive(Debug, Clone)]
-pub enum LoweredStmt {
-    ExprStmt(Box<LoweredExpr>),
+pub enum ExpandedStmt {
+    ExprStmt(Box<ExpandedExpr>),
     Assignment {
         name: String,
-        expr: Box<LoweredExpr>,
+        expr: Box<ExpandedExpr>,
     },
-    Print(Box<LoweredExpr>),
+    Print(Box<ExpandedExpr>),
     If {
-        cond: Box<LoweredExpr>,
-        body: Box<LoweredStmt>,
-        else_branch: Option<Box<LoweredStmt>>,
+        cond: Box<ExpandedExpr>,
+        body: Box<ExpandedStmt>,
+        else_branch: Option<Box<ExpandedStmt>>,
     },
 
     ForEach {
         var: String,
-        iterable: Box<LoweredExpr>,
-        body: Box<LoweredStmt>,
+        iterable: Box<ExpandedExpr>,
+        body: Box<ExpandedStmt>,
     },
 
-    Block(Vec<LoweredStmt>),
+    Block(Vec<ExpandedStmt>),
 
     FnDecl {
         name: String,
         params: Vec<String>,
-        body: Box<LoweredStmt>,
+        body: Box<ExpandedStmt>,
     },
 
-    Return(Option<Box<LoweredExpr>>),
+    Return(Option<Box<ExpandedExpr>>),
 
-    Gen(Vec<LoweredStmt>),
+    Gen(Vec<ExpandedStmt>),
 }
 
 #[derive(Debug, Clone)]
-pub enum ParsedFuncType {
+pub enum BlueprintFuncType {
     Normal,
     Meta,
     Pure,
 }
 
-impl ParsedFuncType {
+impl BlueprintFuncType {
     pub fn can_execute_at_meta(&self) -> bool {
         match self {
-            ParsedFuncType::Meta => true,
-            ParsedFuncType::Pure => true,
-            ParsedFuncType::Normal => false,
+            BlueprintFuncType::Meta => true,
+            BlueprintFuncType::Pure => true,
+            BlueprintFuncType::Normal => false,
         }
     }
 
     pub fn can_execute_at_runtime(&self) -> bool {
         match self {
-            ParsedFuncType::Normal => true,
-            ParsedFuncType::Pure => true,
-            ParsedFuncType::Meta => false,
+            BlueprintFuncType::Normal => true,
+            BlueprintFuncType::Pure => true,
+            BlueprintFuncType::Meta => false,
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::components::interpreter;
-use crate::models::ast::{LoweredExpr, LoweredStmt, ParsedExpr, ParsedStmt};
+use crate::models::ast::{BlueprintExpr, BlueprintStmt, ExpandedExpr, ExpandedStmt};
 use crate::models::decl_registry::{DeclRegistryRef, StructDef};
 use crate::models::environment::EnvRef;
 use crate::models::value::{Function, Value};
@@ -7,81 +7,83 @@ use std::io::Write;
 use std::rc::Rc;
 
 pub struct MetaContext {
-    pub emitted: Vec<LoweredStmt>,
+    pub emitted: Vec<ExpandedStmt>,
 }
 
-pub fn value_to_literal(val: Value) -> LoweredExpr {
+pub fn value_to_literal(val: Value) -> ExpandedExpr {
     match val {
-        Value::Int(n) => LoweredExpr::Int(n),
-        Value::String(s) => LoweredExpr::String(s),
-        Value::Bool(b) => LoweredExpr::Bool(b),
+        Value::Int(n) => ExpandedExpr::Int(n),
+        Value::String(s) => ExpandedExpr::String(s),
+        Value::Bool(b) => ExpandedExpr::Bool(b),
         Value::Unit => panic!("Unit has no literal representation"),
         _ => panic!("non-primitive value not supported yet"),
     }
 }
 
-pub fn lower_expr<W: Write>(
-    expr: &ParsedExpr,
+pub fn process_expr<W: Write>(
+    expr: &BlueprintExpr,
     env: EnvRef,
     decls: DeclRegistryRef,
     out: &mut W,
-) -> LoweredExpr {
+) -> ExpandedExpr {
     match expr {
-        ParsedExpr::Int(i) => LoweredExpr::Int(*i),
-        ParsedExpr::String(s) => LoweredExpr::String(s.clone()),
-        ParsedExpr::Bool(b) => LoweredExpr::Bool(*b),
+        BlueprintExpr::Int(i) => ExpandedExpr::Int(*i),
+        BlueprintExpr::String(s) => ExpandedExpr::String(s.clone()),
+        BlueprintExpr::Bool(b) => ExpandedExpr::Bool(*b),
 
-        ParsedExpr::StructLiteral { type_name, fields } => LoweredExpr::StructLiteral {
+        BlueprintExpr::StructLiteral { type_name, fields } => ExpandedExpr::StructLiteral {
             type_name: type_name.clone(),
             fields: fields
                 .iter()
                 .map(|(name, expr)| {
                     (
                         name.clone(),
-                        Box::new(lower_expr(expr, env.clone(), decls.clone(), out)),
+                        Box::new(process_expr(expr, env.clone(), decls.clone(), out)),
                     )
                 })
                 .collect(),
         },
 
-        ParsedExpr::Variable(name) => match env.borrow().get(name) {
+        BlueprintExpr::Variable(name) => match env.borrow().get(name) {
             Some(x) => value_to_literal(x),
-            None => LoweredExpr::Variable(name.clone()),
+            None => ExpandedExpr::Variable(name.clone()),
         },
 
-        ParsedExpr::List(exprs) => LoweredExpr::List(lower_exprs(exprs, env.clone(), decls, out)),
+        BlueprintExpr::List(exprs) => {
+            ExpandedExpr::List(process_exprs(exprs, env.clone(), decls, out))
+        }
 
-        ParsedExpr::Add(a, b) => LoweredExpr::Add(
-            Box::new(lower_expr(a, env.clone(), decls.clone(), out)),
-            Box::new(lower_expr(b, env.clone(), decls, out)),
+        BlueprintExpr::Add(a, b) => ExpandedExpr::Add(
+            Box::new(process_expr(a, env.clone(), decls.clone(), out)),
+            Box::new(process_expr(b, env.clone(), decls, out)),
         ),
 
-        ParsedExpr::Sub(a, b) => LoweredExpr::Sub(
-            Box::new(lower_expr(a, env.clone(), decls.clone(), out)),
-            Box::new(lower_expr(b, env.clone(), decls, out)),
+        BlueprintExpr::Sub(a, b) => ExpandedExpr::Sub(
+            Box::new(process_expr(a, env.clone(), decls.clone(), out)),
+            Box::new(process_expr(b, env.clone(), decls, out)),
         ),
 
-        ParsedExpr::Mult(a, b) => LoweredExpr::Mult(
-            Box::new(lower_expr(a, env.clone(), decls.clone(), out)),
-            Box::new(lower_expr(b, env.clone(), decls, out)),
+        BlueprintExpr::Mult(a, b) => ExpandedExpr::Mult(
+            Box::new(process_expr(a, env.clone(), decls.clone(), out)),
+            Box::new(process_expr(b, env.clone(), decls, out)),
         ),
 
-        ParsedExpr::Div(a, b) => LoweredExpr::Div(
-            Box::new(lower_expr(a, env.clone(), decls.clone(), out)),
-            Box::new(lower_expr(b, env.clone(), decls, out)),
+        BlueprintExpr::Div(a, b) => ExpandedExpr::Div(
+            Box::new(process_expr(a, env.clone(), decls.clone(), out)),
+            Box::new(process_expr(b, env.clone(), decls, out)),
         ),
 
-        ParsedExpr::Equals(a, b) => LoweredExpr::Equals(
-            Box::new(lower_expr(a, env.clone(), decls.clone(), out)),
-            Box::new(lower_expr(b, env.clone(), decls, out)),
+        BlueprintExpr::Equals(a, b) => ExpandedExpr::Equals(
+            Box::new(process_expr(a, env.clone(), decls.clone(), out)),
+            Box::new(process_expr(b, env.clone(), decls, out)),
         ),
 
-        ParsedExpr::Call { callee, args } => {
-            let call_expr = LoweredExpr::Call {
+        BlueprintExpr::Call { callee, args } => {
+            let call_expr = ExpandedExpr::Call {
                 callee: callee.clone(),
                 args: args
                     .iter()
-                    .map(|e| lower_expr(e, env.clone(), decls.clone(), out))
+                    .map(|e| process_expr(e, env.clone(), decls.clone(), out))
                     .collect(),
             };
 
@@ -95,52 +97,52 @@ pub fn lower_expr<W: Write>(
             }
         }
 
-        ParsedExpr::Typeof(id) => {
+        BlueprintExpr::Typeof(id) => {
             let def = decls
                 .borrow()
                 .get_struct(id)
                 .unwrap_or_else(|| panic!("unknown type {}", id));
-            LoweredExpr::String(def.to_string())
+            ExpandedExpr::String(def.to_string())
         }
     }
 }
 
-pub fn lower_exprs<W: Write>(
-    exprs: &Vec<ParsedExpr>,
+pub fn process_exprs<W: Write>(
+    exprs: &Vec<BlueprintExpr>,
     env: EnvRef,
     decls: DeclRegistryRef,
     out: &mut W,
-) -> Vec<LoweredExpr> {
+) -> Vec<ExpandedExpr> {
     let mut output = Vec::new();
 
     for expr in exprs {
-        output.push(lower_expr(expr, env.clone(), decls.clone(), out));
+        output.push(process_expr(expr, env.clone(), decls.clone(), out));
     }
 
     output
 }
 
-pub fn lower_stmt<W: Write>(
-    stmt: &ParsedStmt,
+pub fn process_stmt<W: Write>(
+    stmt: &BlueprintStmt,
     env: EnvRef,
     decls: DeclRegistryRef,
     out: &mut W,
-) -> Vec<LoweredStmt> {
+) -> Vec<ExpandedStmt> {
     match stmt {
-        ParsedStmt::ExprStmt(expr) => vec![LoweredStmt::ExprStmt(Box::new(lower_expr(
+        BlueprintStmt::ExprStmt(expr) => vec![ExpandedStmt::ExprStmt(Box::new(process_expr(
             expr,
             env.clone(),
             decls,
             out,
         )))],
 
-        ParsedStmt::Assignment { name, expr } => vec![LoweredStmt::Assignment {
+        BlueprintStmt::Assignment { name, expr } => vec![ExpandedStmt::Assignment {
             name: name.clone(),
-            expr: Box::new(lower_expr(expr, env.clone(), decls, out)),
+            expr: Box::new(process_expr(expr, env.clone(), decls, out)),
         }],
 
-        ParsedStmt::Print(expr) => {
-            vec![LoweredStmt::Print(Box::new(lower_expr(
+        BlueprintStmt::Print(expr) => {
+            vec![ExpandedStmt::Print(Box::new(process_expr(
                 expr,
                 env.clone(),
                 decls,
@@ -148,15 +150,15 @@ pub fn lower_stmt<W: Write>(
             )))]
         }
 
-        ParsedStmt::If {
+        BlueprintStmt::If {
             cond,
             body,
             else_branch,
-        } => vec![LoweredStmt::If {
-            cond: Box::new(lower_expr(cond, env.clone(), decls.clone(), out)),
-            body: Box::new(lower_to_block(body, env.clone(), decls.clone(), out)),
+        } => vec![ExpandedStmt::If {
+            cond: Box::new(process_expr(cond, env.clone(), decls.clone(), out)),
+            body: Box::new(process_to_block(body, env.clone(), decls.clone(), out)),
             else_branch: else_branch.as_ref().map(|stmt| {
-                Box::new(LoweredStmt::Block(lower_stmt(
+                Box::new(ExpandedStmt::Block(process_stmt(
                     stmt,
                     env.clone(),
                     decls,
@@ -165,52 +167,52 @@ pub fn lower_stmt<W: Write>(
             }),
         }],
 
-        ParsedStmt::ForEach {
+        BlueprintStmt::ForEach {
             var,
             iterable,
             body,
-        } => vec![LoweredStmt::ForEach {
+        } => vec![ExpandedStmt::ForEach {
             var: var.clone(),
-            iterable: Box::new(lower_expr(iterable, env.clone(), decls.clone(), out)),
-            body: Box::new(lower_to_block(body, env.clone(), decls, out)),
+            iterable: Box::new(process_expr(iterable, env.clone(), decls.clone(), out)),
+            body: Box::new(process_to_block(body, env.clone(), decls, out)),
         }],
 
-        ParsedStmt::Block(stmts) => {
-            let mut lowered = Vec::new();
+        BlueprintStmt::Block(stmts) => {
+            let mut processed = Vec::new();
             for stmt in stmts {
-                lowered.extend(lower_stmt(stmt, env.clone(), decls.clone(), out));
+                processed.extend(process_stmt(stmt, env.clone(), decls.clone(), out));
             }
-            vec![LoweredStmt::Block(lowered)]
+            vec![ExpandedStmt::Block(processed)]
         }
 
-        ParsedStmt::FnDecl {
+        BlueprintStmt::FnDecl {
             name,
             func_type,
             params,
             body,
         } => {
-            let lowered_body = lower_to_block(body.as_ref(), env.clone(), decls, out);
+            let processed_body = process_to_block(body.as_ref(), env.clone(), decls, out);
             if func_type.can_execute_at_meta() {
                 let func = Rc::new(Function {
                     params: params.clone(),
-                    body: Box::new(lowered_body.clone()),
+                    body: Box::new(processed_body.clone()),
                     env: Rc::clone(&env),
                 });
                 env.borrow_mut().define(name.clone(), Value::Function(func));
             }
 
             if func_type.can_execute_at_runtime() {
-                let func_decl = LoweredStmt::FnDecl {
+                let func_decl = ExpandedStmt::FnDecl {
                     name: name.clone(),
                     params: params.clone(),
-                    body: Box::new(lowered_body.clone()),
+                    body: Box::new(processed_body.clone()),
                 };
                 return vec![func_decl];
             }
             vec![]
         }
 
-        ParsedStmt::StructDecl { name, fields } => {
+        BlueprintStmt::StructDecl { name, fields } => {
             decls.borrow_mut().define_struct(
                 name.clone(),
                 StructDef {
@@ -220,60 +222,60 @@ pub fn lower_stmt<W: Write>(
             vec![]
         }
 
-        ParsedStmt::Return(expr) => {
-            vec![LoweredStmt::Return(
+        BlueprintStmt::Return(expr) => {
+            vec![ExpandedStmt::Return(
                 expr.as_ref()
-                    .map(|e| Box::new(lower_expr(e, env.clone(), decls, out))),
+                    .map(|e| Box::new(process_expr(e, env.clone(), decls, out))),
             )]
         }
 
-        ParsedStmt::Gen(stmts) => {
-            vec![LoweredStmt::Gen(lower(stmts, env.clone(), decls, out))]
+        BlueprintStmt::Gen(stmts) => {
+            vec![ExpandedStmt::Gen(process(stmts, env.clone(), decls, out))]
         }
 
-        ParsedStmt::MetaStmt(parsed_stmt) => {
-            let lowered_code = lower_stmt(parsed_stmt, env.clone(), decls.clone(), out);
+        BlueprintStmt::MetaStmt(parsed_stmt) => {
+            let processed_code = process_stmt(parsed_stmt, env.clone(), decls.clone(), out);
             let mut ctx = MetaContext {
                 emitted: Vec::new(),
             };
 
-            interpreter::eval(&lowered_code, env, decls, &mut Some(&mut ctx), out);
+            interpreter::eval(&processed_code, env, decls, &mut Some(&mut ctx), out);
 
             ctx.emitted
         }
     }
 }
 
-fn lower_to_block<W: Write>(
-    stmt: &ParsedStmt,
+fn process_to_block<W: Write>(
+    stmt: &BlueprintStmt,
     env: EnvRef,
     decls: DeclRegistryRef,
     out: &mut W,
-) -> LoweredStmt {
+) -> ExpandedStmt {
     match stmt {
-        ParsedStmt::Block(_) => {
-            let lowered = lower_stmt(stmt, env.clone(), decls, out);
+        BlueprintStmt::Block(_) => {
+            let processed = process_stmt(stmt, env.clone(), decls, out);
             debug_assert!(
-                lowered.len() == 1,
-                "block lowering must produce exactly one statement"
+                processed.len() == 1,
+                "block processing must produce exactly one statement"
             );
-            lowered.into_iter().next().unwrap()
+            processed.into_iter().next().unwrap()
         }
 
-        _ => LoweredStmt::Block(lower_stmt(stmt, env.clone(), decls, out)),
+        _ => ExpandedStmt::Block(process_stmt(stmt, env.clone(), decls, out)),
     }
 }
 
-pub fn lower<W: Write>(
-    stmts: &Vec<ParsedStmt>,
+pub fn process<W: Write>(
+    stmts: &Vec<BlueprintStmt>,
     env: EnvRef,
     decls: DeclRegistryRef,
     out: &mut W,
-) -> Vec<LoweredStmt> {
+) -> Vec<ExpandedStmt> {
     let mut output = Vec::new();
 
     for stmt in stmts {
-        output.extend(lower_stmt(stmt, env.clone(), decls.clone(), out));
+        output.extend(process_stmt(stmt, env.clone(), decls.clone(), out));
     }
 
     output

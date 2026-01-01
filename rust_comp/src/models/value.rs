@@ -1,4 +1,4 @@
-use crate::models::ast::LoweredStmt;
+use crate::models::ast::ExpandedStmt;
 use crate::models::environment::EnvRef;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ pub enum Value {
 #[derive(Debug, Clone)]
 pub struct Function {
     pub params: Vec<String>,
-    pub body: Box<LoweredStmt>,
+    pub body: Box<ExpandedStmt>,
     pub env: EnvRef,
 }
 

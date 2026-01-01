@@ -14,23 +14,26 @@ pub mod models {
     pub mod environment;
     pub mod result;
     pub mod token;
+    pub mod types;
     pub mod value;
 }
 
 use components::{executor, interpreter, lexer, metaprocessor, parser};
-use models::ast::{LoweredStmt, ParsedStmt};
+use models::ast::{BlueprintStmt, ExpandedStmt};
 use models::decl_registry::{DeclRegistry, DeclRegistryRef};
 use models::environment::Env;
 use std::io::Write;
 
+pub type CompilerError = String;
+
 pub fn default_run_metaprocessor<W: Write + 'static>(
     mut out: W,
-) -> impl FnMut(Vec<ParsedStmt>) -> (Vec<LoweredStmt>, DeclRegistryRef) {
+) -> impl FnMut(Vec<BlueprintStmt>) -> (Vec<ExpandedStmt>, DeclRegistryRef) {
     move |parsed| {
         let meta_env = Env::new();
         let decl_reg = DeclRegistry::new();
-        let lowered = metaprocessor::lower(&parsed, meta_env, decl_reg.clone(), &mut out);
-        (lowered, decl_reg)
+        let processed = metaprocessor::process(&parsed, meta_env, decl_reg.clone(), &mut out);
+        (processed, decl_reg)
     }
 }
 
@@ -43,8 +46,9 @@ where
         .then(|source: String| lexer::tokenize(&source))
         .then(|tokens| parser::parse(&tokens))
         .then(default_run_metaprocessor(meta_out))
-        .then(move |(lowered, decl_reg)| {
+        .then(move |(expanded, decl_reg)| {
             let env = Env::new();
-            interpreter::eval(&lowered, env, decl_reg, &mut None, &mut eval_out);
+            interpreter::eval(&expanded, env, decl_reg, &mut None, &mut eval_out);
+            ()
         })
 }
