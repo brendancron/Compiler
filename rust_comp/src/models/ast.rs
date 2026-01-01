@@ -103,11 +103,14 @@ pub enum ExpandedExpr {
 #[derive(Debug, Clone)]
 pub enum ExpandedStmt {
     ExprStmt(Box<ExpandedExpr>),
+
     Assignment {
         name: String,
         expr: Box<ExpandedExpr>,
     },
+
     Print(Box<ExpandedExpr>),
+
     If {
         cond: Box<ExpandedExpr>,
         body: Box<ExpandedStmt>,

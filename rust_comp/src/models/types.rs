@@ -6,16 +6,4 @@ pub enum Type {
     Int,
     String,
     Bool,
-
-    Struct {
-        name: String,
-        fields: Vec<(String, Type)>,
-    },
-
-    Var(TypeVar),
-
-    Func {
-        params: Vec<Type>,
-        ret: Box<Type>,
-    },
 }
