@@ -64,8 +64,8 @@ fn run_language_tests() {
         let eval_buf = SharedBuf::new();
         let eval_handle = eval_buf.clone();
 
-        let mut exec = rust_comp::default_executor(meta_out, eval_handle);
-        exec.run(source);
+        let mut pipeline = rust_comp::default_pipeline(meta_out, eval_handle);
+        pipeline.run(source);
 
         let actual = String::from_utf8(eval_buf.into_inner().borrow().clone()).unwrap();
 

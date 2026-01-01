@@ -4,6 +4,8 @@ TEST_TARGETS := rust cronyx
 REQUESTED := $(filter $(TEST_TARGETS),$(MAKECMDGOALS))
 RUN := $(if $(REQUESTED),$(REQUESTED),$(TEST_TARGETS))
 
+OUT := out
+
 .PHONY: all rust test test-rust test-cronyx run clean
 
 all: rust
