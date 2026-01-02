@@ -1,11 +1,17 @@
 use crate::models::ast::ExpandedExpr;
 use crate::models::typed_ast::{TypedExpr, TypedExprKind};
 use crate::models::types::Type;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
-pub struct TypeError;
+pub enum TypeError {
+    Unsupported,
+    UnboundVar(String),
+}
 
-pub fn lower_to_typed_expr(expr: &ExpandedExpr) -> Result<TypedExpr, TypeError> {
+pub type TypeEnv = HashMap<String, Type>;
+
+pub fn lower_to_typed_expr(expr: &ExpandedExpr, env: &TypeEnv) -> Result<TypedExpr, TypeError> {
     match expr {
         ExpandedExpr::Int(i) => Ok(TypedExpr {
             ty: Type::Int,
@@ -19,6 +25,16 @@ pub fn lower_to_typed_expr(expr: &ExpandedExpr) -> Result<TypedExpr, TypeError> 
             ty: Type::String,
             kind: TypedExprKind::String(s.clone()),
         }),
-        _ => Err(TypeError),
+        ExpandedExpr::Variable(name) => {
+            let ty = env
+                .get(name)
+                .cloned()
+                .ok_or(TypeError::UnboundVar(name.clone()))?;
+            Ok(TypedExpr {
+                ty,
+                kind: TypedExprKind::Variable(name.clone()),
+            })
+        }
+        _ => Err(TypeError::Unsupported),
     }
 }
