@@ -1,9 +1,19 @@
 use crate::models::types::Type;
 
+pub trait ToType {
+    fn to_type(&self) -> Type;
+}
+
 #[derive(Debug, Clone)]
 pub struct TypedExpr {
     pub ty: Type,
     pub kind: TypedExprKind,
+}
+
+impl ToType for TypedExpr {
+    fn to_type(&self) -> Type {
+        return self.ty.clone();
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -31,4 +41,52 @@ pub enum TypedExprKind {
         callee: String,
         args: Vec<TypedExpr>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct TypedStmt {
+    pub ty: Type,
+    pub kind: TypedStmtKind,
+}
+
+impl ToType for TypedStmt {
+    fn to_type(&self) -> Type {
+        return self.ty.clone();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum TypedStmtKind {
+    ExprStmt(Box<TypedExpr>),
+
+    Assignment {
+        name: String,
+        expr: Box<TypedExpr>,
+    },
+
+    Print(Box<TypedStmt>),
+
+    If {
+        cond: Box<TypedExpr>,
+        body: Box<TypedStmt>,
+        else_branch: Option<Box<TypedStmt>>,
+    },
+
+    ForEach {
+        var: String,
+        iterable: Box<TypedExpr>,
+        body: Box<TypedStmt>,
+    },
+
+    Block(Vec<TypedStmt>),
+
+    FnDecl {
+        name: String,
+        params: Vec<String>,
+        body: Box<TypedStmt>,
+    },
+
+    Return(Option<Box<TypedExpr>>),
+
+    Gen(Vec<TypedStmt>),
 }

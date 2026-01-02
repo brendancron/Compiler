@@ -1,5 +1,5 @@
-use crate::models::ast::ExpandedExpr;
-use crate::models::typed_ast::{TypedExpr, TypedExprKind};
+use crate::models::ast::{ExpandedExpr, ExpandedStmt};
+use crate::models::typed_ast::{ToType, TypedExpr, TypedExprKind, TypedStmt, TypedStmtKind};
 use crate::models::types::Type;
 use std::collections::HashMap;
 
@@ -11,7 +11,7 @@ pub enum TypeError {
 
 pub type TypeEnv = HashMap<String, Type>;
 
-pub fn lower_to_typed_expr(expr: &ExpandedExpr, env: &TypeEnv) -> Result<TypedExpr, TypeError> {
+pub fn infer_expr(expr: &ExpandedExpr, env: &TypeEnv) -> Result<TypedExpr, TypeError> {
     match expr {
         ExpandedExpr::Int(i) => Ok(TypedExpr {
             ty: Type::Int,
@@ -37,4 +37,27 @@ pub fn lower_to_typed_expr(expr: &ExpandedExpr, env: &TypeEnv) -> Result<TypedEx
         }
         _ => Err(TypeError::Unsupported),
     }
+}
+
+pub fn infer_stmt(stmt: ExpandedStmt, env: &TypeEnv) -> Result<TypedStmt, TypeError> {
+    match stmt {
+        ExpandedStmt::Assignment { name, expr } => type_check_assignment(env, &name, &expr),
+        _ => Err(TypeError::Unsupported),
+    }
+}
+
+fn type_check_assignment(
+    env: &TypeEnv,
+    name: &String,
+    expr: &ExpandedExpr,
+) -> Result<TypedStmt, TypeError> {
+    let typed_expr = infer_expr(expr, env)?;
+    let ty = typed_expr.to_type();
+    let scheme = generalize(&typed_expr.ty, env);
+    env.insert(name.clone(), scheme);
+    let kind = TypedStmtKind::Assignment {
+        name: name.clone(),
+        expr: Box::new(typed_expr),
+    };
+    Ok(TypedStmt { ty, kind })
 }

@@ -1,4 +1,4 @@
-use rust_comp::components::type_checker::lower_to_typed_expr;
+use rust_comp::components::type_checker::infer_expr;
 use rust_comp::models::ast::ExpandedExpr;
 use rust_comp::models::types::Type;
 use std::collections::HashMap;
@@ -16,7 +16,7 @@ mod type_check_tests {
         ];
 
         for (expr, expected_ty) in cases {
-            let typed = lower_to_typed_expr(&expr, &HashMap::new()).unwrap();
+            let typed = infer_expr(&expr, &HashMap::new()).unwrap();
             assert_eq!(typed.ty, expected_ty);
         }
     }
@@ -27,12 +27,23 @@ mod type_check_tests {
             Box::new(ExpandedExpr::Int(1)),
             Box::new(ExpandedExpr::Int(2)),
         );
-        assert!(lower_to_typed_expr(&expr, &HashMap::new()).is_err());
+        assert!(infer_expr(&expr, &HashMap::new()).is_err());
     }
 
     #[test]
     fn variable_expr_errors() {
-        let expr = ExpandedExpr::Variable(String::from("x"));
-        assert!(lower_to_typed_expr(&expr, &HashMap::new()).is_err());
+        let expr = ExpandedExpr::Variable("x".to_string());
+        assert!(infer_expr(&expr, &HashMap::new()).is_err());
+    }
+
+    #[test]
+    fn variable_expr_ok() {
+        let mut env = HashMap::new();
+        env.insert("x".to_string(), Type::Int);
+
+        let expr = ExpandedExpr::Variable("x".to_string());
+        let typed = infer_expr(&expr, &env).unwrap();
+
+        assert_eq!(typed.ty, Type::Int);
     }
 }
