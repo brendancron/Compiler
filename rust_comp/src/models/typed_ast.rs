@@ -1,3 +1,5 @@
+use crate::models::types::Type;
+
 #[derive(Debug, Clone)]
 pub struct TypedExpr {
     pub ty: Type,

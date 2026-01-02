@@ -6,6 +6,7 @@ pub mod components {
     pub mod parser;
     pub mod pipeline;
     pub mod substitution;
+    pub mod type_checker;
 }
 
 pub mod models {
@@ -14,6 +15,7 @@ pub mod models {
     pub mod environment;
     pub mod result;
     pub mod token;
+    pub mod typed_ast;
     pub mod types;
     pub mod value;
 }
