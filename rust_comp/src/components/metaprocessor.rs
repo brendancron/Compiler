@@ -1,7 +1,8 @@
 use crate::components::interpreter;
-use crate::models::ast::{BlueprintExpr, BlueprintStmt, ExpandedExpr, ExpandedStmt};
 use crate::models::decl_registry::{DeclRegistryRef, StructDef};
 use crate::models::environment::EnvRef;
+use crate::models::semantics::blueprint_ast::{BlueprintExpr, BlueprintStmt};
+use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use crate::models::value::{Function, Value};
 use std::io::Write;
 use std::rc::Rc;

@@ -1,5 +1,5 @@
-use crate::models::ast::{ExpandedExpr, ExpandedStmt};
 use crate::models::environment::EnvRef;
+use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use crate::models::value::Value;
 
 fn subst_str(name: &str, env: &EnvRef) -> String {

@@ -10,21 +10,26 @@ pub mod components {
 }
 
 pub mod models {
-    pub mod ast;
+    pub mod semantics {
+        pub mod blueprint_ast;
+        pub mod expanded_ast;
+        pub mod typed_ast;
+    }
     pub mod decl_registry;
     pub mod environment;
     pub mod result;
     pub mod token;
-    pub mod typed_ast;
+    pub mod type_env;
     pub mod types;
     pub mod value;
 }
 
 use components::pipeline::{Pipeline, PipelineBuilder};
 use components::{formatter, interpreter, lexer, metaprocessor, parser};
-use models::ast::{BlueprintStmt, ExpandedStmt};
 use models::decl_registry::{DeclRegistry, DeclRegistryRef};
 use models::environment::Env;
+use models::semantics::blueprint_ast::BlueprintStmt;
+use models::semantics::expanded_ast::ExpandedStmt;
 use models::token::Token;
 use std::fs::{self, File};
 use std::io::Write;

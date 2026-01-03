@@ -1,4 +1,6 @@
-use crate::models::ast::{BlueprintExpr, BlueprintFuncType, BlueprintStmt, TypeExpr};
+use crate::models::semantics::blueprint_ast::{
+    BlueprintExpr, BlueprintFuncType, BlueprintStmt, TypeExpr,
+};
 use crate::models::token::{Token, TokenType};
 
 fn peek(tokens: &[Token], pos: usize) -> Option<TokenType> {

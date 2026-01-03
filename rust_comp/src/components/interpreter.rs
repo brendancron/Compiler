@@ -1,9 +1,9 @@
 use crate::components::metaprocessor::MetaContext;
 use crate::components::substitution::subst_stmts;
-use crate::models::ast::{ExpandedExpr, ExpandedStmt};
 use crate::models::decl_registry::DeclRegistryRef;
 use crate::models::environment::{Env, EnvRef};
 use crate::models::result::ExecResult;
+use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use crate::models::value::{Function, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;

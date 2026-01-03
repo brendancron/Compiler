@@ -44,19 +44,7 @@ pub enum TypedExprKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct TypedStmt {
-    pub ty: Type,
-    pub kind: TypedStmtKind,
-}
-
-impl ToType for TypedStmt {
-    fn to_type(&self) -> Type {
-        return self.ty.clone();
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum TypedStmtKind {
+pub enum TypedStmt {
     ExprStmt(Box<TypedExpr>),
 
     Assignment {
