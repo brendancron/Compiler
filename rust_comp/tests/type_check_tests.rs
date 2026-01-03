@@ -1,4 +1,4 @@
-use rust_comp::components::type_checker::{infer_expr, infer_stmt, type_check_expr};
+use rust_comp::components::type_checker::{infer_expr, infer_stmt, type_check_expr, TypeCheckCtx};
 use rust_comp::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use rust_comp::models::type_env::TypeEnv;
 use rust_comp::models::types::{PrimitiveType, Type};
@@ -52,7 +52,7 @@ mod type_check_tests {
             expr: Box::new(ExpandedExpr::Int(3)),
         };
 
-        infer_stmt(&stmt, &mut env).unwrap();
+        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
         assert_eq!(env.get_type("x"), Some(Type::Primitive(PrimitiveType::Int)));
     }
 
@@ -65,7 +65,7 @@ mod type_check_tests {
             expr: Box::new(ExpandedExpr::Int(1)),
         }]);
 
-        infer_stmt(&block, &mut env).unwrap();
+        infer_stmt(&block, &mut env, &mut TypeCheckCtx::new()).unwrap();
 
         assert!(env.get_type("x").is_none());
     }
@@ -125,7 +125,7 @@ mod type_check_tests {
             else_branch: None,
         };
 
-        assert!(infer_stmt(&stmt, &mut env).is_err());
+        assert!(infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).is_err());
     }
 
     #[test]
@@ -138,7 +138,7 @@ mod type_check_tests {
             else_branch: None,
         };
 
-        infer_stmt(&stmt, &mut env).unwrap();
+        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
     }
 
     #[test]
@@ -159,7 +159,7 @@ mod type_check_tests {
             ]))),
         };
 
-        infer_stmt(&stmt, &mut env).unwrap();
+        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
 
         assert!(env.get_type("x").is_none());
         assert!(env.get_type("y").is_none());
@@ -175,6 +175,97 @@ mod type_check_tests {
             else_branch: None,
         };
 
-        infer_stmt(&stmt, &mut env).unwrap();
+        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
+    }
+
+    #[test]
+    fn fn_decl_zero_param_binds_empty_to_unit() {
+        let mut env = TypeEnv::new();
+
+        let stmt = ExpandedStmt::FnDecl {
+            name: "foo".into(),
+            params: vec![],
+            body: Box::new(ExpandedStmt::Block(vec![])),
+        };
+
+        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
+
+        assert_eq!(
+            env.get_type("foo"),
+            Some(Type::Func {
+                params: vec![],
+                ret: Box::new(Type::Primitive(PrimitiveType::Unit)),
+            })
+        );
+    }
+
+    #[test]
+    fn fn_decl_zero_param_binds_empty_to_int() {
+        let mut env = TypeEnv::new();
+
+        let stmt = ExpandedStmt::FnDecl {
+            name: "foo".into(),
+            params: vec![],
+            body: Box::new(ExpandedStmt::Block(vec![ExpandedStmt::Return(Some(
+                Box::new(ExpandedExpr::Int(3)),
+            ))])),
+        };
+
+        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
+
+        assert_eq!(
+            env.get_type("foo"),
+            Some(Type::Func {
+                params: vec![],
+                ret: Box::new(Type::Primitive(PrimitiveType::Int)),
+            })
+        );
+    }
+
+    #[test]
+    fn return_in_if_branches_match() {
+        let mut env = TypeEnv::new();
+
+        let stmt = ExpandedStmt::FnDecl {
+            name: "foo".into(),
+            params: vec![],
+            body: Box::new(ExpandedStmt::If {
+                cond: Box::new(ExpandedExpr::Bool(true)),
+                body: Box::new(ExpandedStmt::Return(Some(Box::new(ExpandedExpr::Int(1))))),
+                else_branch: Some(Box::new(ExpandedStmt::Return(Some(Box::new(
+                    ExpandedExpr::Int(2),
+                ))))),
+            }),
+        };
+
+        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
+
+        assert_eq!(
+            env.get_type("foo"),
+            Some(Type::Func {
+                params: vec![],
+                ret: Box::new(Type::Primitive(PrimitiveType::Int)),
+            })
+        );
+    }
+
+    #[test]
+    fn return_in_if_branches_mismatch_errors() {
+        let mut env = TypeEnv::new();
+
+        let stmt = ExpandedStmt::FnDecl {
+            name: "foo".into(),
+            params: vec![],
+            body: Box::new(ExpandedStmt::If {
+                cond: Box::new(ExpandedExpr::Bool(true)),
+                body: Box::new(ExpandedStmt::Return(Some(Box::new(ExpandedExpr::Int(1))))),
+                else_branch: Some(Box::new(ExpandedStmt::Return(Some(Box::new(
+                    ExpandedExpr::Bool(true),
+                ))))),
+            }),
+        };
+
+        let result = infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new());
+        assert!(result.is_err());
     }
 }

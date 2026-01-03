@@ -5,3 +5,4 @@
 * Traits
 * Defer
 * Pattern Matching
+* Refactor everything to more appropriate names
