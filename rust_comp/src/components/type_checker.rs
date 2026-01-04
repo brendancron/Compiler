@@ -3,6 +3,7 @@ use crate::models::semantics::typed_ast::{ToType, TypedExpr, TypedExprKind, Type
 use crate::models::types::type_env::TypeEnv;
 use crate::models::types::type_error::TypeError;
 use crate::models::types::type_subst::{unify, ApplySubst, TypeSubst};
+use crate::models::types::type_utils::generalize;
 use crate::models::types::types::*;
 
 pub struct TypeCheckCtx {
@@ -127,7 +128,9 @@ pub fn infer_stmt(
     match stmt {
         ExpandedStmt::Assignment { name, expr } => {
             let typed_expr = infer_expr(expr, env, subst)?;
-            env.bind_mono(name, typed_expr.ty.clone());
+            let ty = typed_expr.ty.apply(subst);
+            let scheme = generalize(env, ty);
+            env.bind(name, scheme);
             let typed_assign = TypedStmt::Assignment {
                 name: name.clone(),
                 expr: Box::new(typed_expr),
@@ -172,9 +175,10 @@ pub fn infer_stmt(
                 ret: Box::new(ret_tv.clone()),
             };
 
+            env.push_scope();
+
             env.bind_mono(name, fn_type.clone());
 
-            env.push_scope();
             for (param, ty) in params.iter().zip(param_types.iter()) {
                 env.bind_mono(param, ty.clone());
             }
@@ -197,7 +201,8 @@ pub fn infer_stmt(
             env.pop_scope();
 
             let final_fn_type = fn_type.apply(subst);
-            env.bind_mono(name, final_fn_type);
+            let scheme = generalize(env, final_fn_type);
+            env.bind(name, scheme);
 
             Ok(TypedStmt::FnDecl {
                 name: name.clone(),

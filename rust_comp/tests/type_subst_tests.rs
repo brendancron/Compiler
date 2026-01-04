@@ -1,5 +1,5 @@
 use rust_comp::models::types::type_subst::{unify, ApplySubst, TypeSubst};
-use rust_comp::models::types::types::{bool_type, int_type, string_type, unit_type, Type, TypeVar};
+use rust_comp::models::types::types::*;
 
 #[cfg(test)]
 mod type_subst_tests {

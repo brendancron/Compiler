@@ -1,5 +1,4 @@
 use rust_comp::models::types::type_env::*;
-use rust_comp::models::types::type_subst::{unify, ApplySubst, TypeSubst};
 use rust_comp::models::types::type_utils::*;
 use rust_comp::models::types::types::*;
 
