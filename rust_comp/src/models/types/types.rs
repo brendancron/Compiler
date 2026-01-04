@@ -17,3 +17,15 @@ pub enum PrimitiveType {
     String,
     Bool,
 }
+
+pub fn bool_type() -> Type {
+    Type::Primitive(PrimitiveType::Bool)
+}
+
+pub fn int_type() -> Type {
+    Type::Primitive(PrimitiveType::Int)
+}
+
+pub fn string_type() -> Type {
+    Type::Primitive(PrimitiveType::String)
+}

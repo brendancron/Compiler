@@ -5,7 +5,8 @@ use rust_comp::components::type_checker::{
 };
 use rust_comp::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use rust_comp::models::types::type_env::TypeEnv;
-use rust_comp::models::types::types::{PrimitiveType, Type};
+use rust_comp::models::types::type_subst::{unify, ApplySubst, TypeSubst};
+use rust_comp::models::types::types::{PrimitiveType, Type, TypeVar};
 use std::io;
 
 #[cfg(test)]
@@ -56,7 +57,7 @@ mod type_check_tests {
         env.bind("x", Type::Primitive(PrimitiveType::Int));
 
         let expr = ExpandedExpr::Variable("x".to_string());
-        let typed = infer_expr(&expr, &mut env).unwrap();
+        let typed = infer_expr(&expr, &mut env, &mut TypeSubst::new()).unwrap();
 
         assert_eq!(typed.ty, Type::Primitive(PrimitiveType::Int));
     }
@@ -69,7 +70,13 @@ mod type_check_tests {
             expr: Box::new(ExpandedExpr::Int(3)),
         };
 
-        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
+        infer_stmt(
+            &stmt,
+            &mut env,
+            &mut TypeSubst::new(),
+            &mut TypeCheckCtx::new(),
+        )
+        .unwrap();
         assert_eq!(env.get_type("x"), Some(Type::Primitive(PrimitiveType::Int)));
     }
 
@@ -82,7 +89,13 @@ mod type_check_tests {
             expr: Box::new(ExpandedExpr::Int(1)),
         }]);
 
-        infer_stmt(&block, &mut env, &mut TypeCheckCtx::new()).unwrap();
+        infer_stmt(
+            &block,
+            &mut env,
+            &mut TypeSubst::new(),
+            &mut TypeCheckCtx::new(),
+        )
+        .unwrap();
 
         assert!(env.get_type("x").is_none());
     }
@@ -112,8 +125,13 @@ mod type_check_tests {
 
         let expr = ExpandedExpr::Variable("x".into());
 
-        let typed =
-            type_check_expr(&expr, &mut env, &Type::Primitive(PrimitiveType::Bool)).unwrap();
+        let typed = type_check_expr(
+            &expr,
+            &mut env,
+            &mut TypeSubst::new(),
+            &Type::Primitive(PrimitiveType::Bool),
+        )
+        .unwrap();
 
         assert_eq!(typed.ty, Type::Primitive(PrimitiveType::Bool));
     }
@@ -125,7 +143,12 @@ mod type_check_tests {
 
         let expr = ExpandedExpr::Variable("x".into());
 
-        let result = type_check_expr(&expr, &mut env, &Type::Primitive(PrimitiveType::Bool));
+        let result = type_check_expr(
+            &expr,
+            &mut env,
+            &mut TypeSubst::new(),
+            &Type::Primitive(PrimitiveType::Bool),
+        );
 
         assert!(result.is_err());
     }
@@ -140,7 +163,13 @@ mod type_check_tests {
             else_branch: None,
         };
 
-        assert!(infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).is_err());
+        assert!(infer_stmt(
+            &stmt,
+            &mut env,
+            &mut TypeSubst::new(),
+            &mut TypeCheckCtx::new()
+        )
+        .is_err());
     }
 
     #[test]
@@ -153,7 +182,13 @@ mod type_check_tests {
             else_branch: None,
         };
 
-        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
+        infer_stmt(
+            &stmt,
+            &mut env,
+            &mut TypeSubst::new(),
+            &mut TypeCheckCtx::new(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -174,7 +209,13 @@ mod type_check_tests {
             ]))),
         };
 
-        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
+        infer_stmt(
+            &stmt,
+            &mut env,
+            &mut TypeSubst::new(),
+            &mut TypeCheckCtx::new(),
+        )
+        .unwrap();
 
         assert!(env.get_type("x").is_none());
         assert!(env.get_type("y").is_none());
@@ -190,7 +231,13 @@ mod type_check_tests {
             else_branch: None,
         };
 
-        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
+        infer_stmt(
+            &stmt,
+            &mut env,
+            &mut TypeSubst::new(),
+            &mut TypeCheckCtx::new(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -203,7 +250,13 @@ mod type_check_tests {
             body: Box::new(ExpandedStmt::Block(vec![])),
         };
 
-        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
+        infer_stmt(
+            &stmt,
+            &mut env,
+            &mut TypeSubst::new(),
+            &mut TypeCheckCtx::new(),
+        )
+        .unwrap();
 
         assert_eq!(
             env.get_type("foo"),
@@ -226,7 +279,13 @@ mod type_check_tests {
             ))])),
         };
 
-        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
+        infer_stmt(
+            &stmt,
+            &mut env,
+            &mut TypeSubst::new(),
+            &mut TypeCheckCtx::new(),
+        )
+        .unwrap();
 
         assert_eq!(
             env.get_type("foo"),
@@ -252,7 +311,13 @@ mod type_check_tests {
         let stmt = exec_parse_pipeline(source)[0].clone();
 
         let mut env = TypeEnv::new();
-        infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
+        infer_stmt(
+            &stmt,
+            &mut env,
+            &mut TypeSubst::new(),
+            &mut TypeCheckCtx::new(),
+        )
+        .unwrap();
 
         assert_eq!(
             env.get_type("foo"),
@@ -279,5 +344,110 @@ mod type_check_tests {
 
         let result = infer_stmt_top(&stmt);
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod type_subst_tests {
+    use super::*;
+
+    fn tv(n: usize) -> Type {
+        Type::Var(TypeVar { id: n })
+    }
+
+    fn int() -> Type {
+        Type::Primitive(PrimitiveType::Int)
+    }
+
+    fn bool_() -> Type {
+        Type::Primitive(PrimitiveType::Bool)
+    }
+
+    #[test]
+    fn apply_substitution_simple() {
+        let mut subst = TypeSubst::new();
+        subst.map.insert(TypeVar { id: 0 }, int());
+
+        let t = tv(0);
+        assert_eq!(t.apply(&subst), int());
+    }
+
+    #[test]
+    fn apply_substitution_recursive_func() {
+        let mut subst = TypeSubst::new();
+        subst.map.insert(TypeVar { id: 0 }, int());
+
+        let t = Type::Func {
+            params: vec![tv(0)],
+            ret: Box::new(tv(0)),
+        };
+
+        let applied = t.apply(&subst);
+
+        assert_eq!(
+            applied,
+            Type::Func {
+                params: vec![int()],
+                ret: Box::new(int()),
+            }
+        );
+    }
+
+    #[test]
+    fn unify_var_with_primitive() {
+        let mut subst = TypeSubst::new();
+
+        unify(&tv(0), &int(), &mut subst).unwrap();
+
+        assert_eq!(subst.map.get(&TypeVar { id: 0 }), Some(&int()));
+    }
+
+    #[test]
+    fn unify_same_primitive() {
+        let mut subst = TypeSubst::new();
+
+        unify(&int(), &int(), &mut subst).unwrap();
+        assert!(subst.map.is_empty());
+    }
+
+    #[test]
+    fn unify_function_types() {
+        let mut subst = TypeSubst::new();
+
+        let f1 = Type::Func {
+            params: vec![tv(0)],
+            ret: Box::new(tv(0)),
+        };
+
+        let f2 = Type::Func {
+            params: vec![int()],
+            ret: Box::new(int()),
+        };
+
+        unify(&f1, &f2, &mut subst).unwrap();
+
+        assert_eq!(subst.map.get(&TypeVar { id: 0 }), Some(&int()));
+    }
+
+    #[test]
+    fn unify_mismatch_errors() {
+        let mut subst = TypeSubst::new();
+
+        let err = unify(&int(), &bool_(), &mut subst);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn occurs_check_rejects_infinite_type() {
+        let mut subst = TypeSubst::new();
+
+        let t = tv(0);
+        let bad = Type::Func {
+            params: vec![tv(0)],
+            ret: Box::new(int()),
+        };
+
+        let err = unify(&t, &bad, &mut subst);
+        assert!(err.is_err());
     }
 }
