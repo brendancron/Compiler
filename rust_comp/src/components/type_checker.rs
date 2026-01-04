@@ -1,7 +1,7 @@
 use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use crate::models::semantics::typed_ast::{ToType, TypedExpr, TypedExprKind, TypedStmt};
-use crate::models::type_env::TypeEnv;
-use crate::models::types::{PrimitiveType, Type};
+use crate::models::types::type_env::TypeEnv;
+use crate::models::types::types::{PrimitiveType, Type};
 
 #[derive(Debug, Clone)]
 pub enum TypeError {
@@ -45,6 +45,10 @@ impl TypeCheckCtx {
     }
 }
 
+pub fn infer_expr_top(expr: &ExpandedExpr) -> Result<TypedExpr, TypeError> {
+    infer_expr(expr, &mut TypeEnv::new())
+}
+
 pub fn infer_expr(expr: &ExpandedExpr, env: &mut TypeEnv) -> Result<TypedExpr, TypeError> {
     match expr {
         ExpandedExpr::Int(i) => Ok(TypedExpr {
@@ -72,6 +76,10 @@ pub fn infer_expr(expr: &ExpandedExpr, env: &mut TypeEnv) -> Result<TypedExpr, T
     }
 }
 
+pub fn type_check_expr_top(expr: &ExpandedExpr, expected: &Type) -> Result<TypedExpr, TypeError> {
+    type_check_expr(expr, &mut TypeEnv::new(), expected)
+}
+
 pub fn type_check_expr(
     expr: &ExpandedExpr,
     env: &mut TypeEnv,
@@ -87,6 +95,10 @@ pub fn type_check_expr(
             found: inferred_type,
         })
     }
+}
+
+pub fn infer_stmt_top(stmt: &ExpandedStmt) -> Result<TypedStmt, TypeError> {
+    infer_stmt(stmt, &mut TypeEnv::new(), &mut TypeCheckCtx::new())
 }
 
 pub fn infer_stmt(

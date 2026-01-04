@@ -1,4 +1,4 @@
-use crate::models::types::{Type, TypeVar};
+use crate::models::types::types::{Type, TypeVar};
 use std::collections::HashMap;
 
 pub struct TypeEnv {

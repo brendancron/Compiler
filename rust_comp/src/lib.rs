@@ -19,8 +19,12 @@ pub mod models {
     pub mod environment;
     pub mod result;
     pub mod token;
-    pub mod type_env;
-    pub mod types;
+    pub mod types {
+        pub mod type_env;
+        pub mod type_error;
+        pub mod type_subst;
+        pub mod types;
+    }
     pub mod value;
 }
 

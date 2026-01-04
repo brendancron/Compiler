@@ -1,11 +1,28 @@
-use rust_comp::components::type_checker::{infer_expr, infer_stmt, type_check_expr, TypeCheckCtx};
+use rust_comp::components::pipeline::PipelineBuilder;
+use rust_comp::components::type_checker::{
+    infer_expr, infer_expr_top, infer_stmt, infer_stmt_top, type_check_expr, type_check_expr_top,
+    TypeCheckCtx,
+};
 use rust_comp::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
-use rust_comp::models::type_env::TypeEnv;
-use rust_comp::models::types::{PrimitiveType, Type};
+use rust_comp::models::types::type_env::TypeEnv;
+use rust_comp::models::types::types::{PrimitiveType, Type};
+use std::io;
 
 #[cfg(test)]
 mod type_check_tests {
     use super::*;
+
+    fn exec_parse_pipeline(source: &str) -> Vec<ExpandedStmt> {
+        let mut pipeline = PipelineBuilder::new()
+            .with_lexer()
+            .with_parser()
+            .with_metaprocessor(io::stdout())
+            .build();
+        let res = pipeline.run(source.to_string());
+        match res {
+            (stmts, _) => stmts,
+        }
+    }
 
     #[test]
     fn literals_are_typed_correctly() {
@@ -22,7 +39,7 @@ mod type_check_tests {
         ];
 
         for (expr, expected_ty) in cases {
-            let typed = infer_expr(&expr, &mut TypeEnv::new()).unwrap();
+            let typed = infer_expr_top(&expr).unwrap();
             assert_eq!(typed.ty, expected_ty);
         }
     }
@@ -30,7 +47,7 @@ mod type_check_tests {
     #[test]
     fn variable_expr_errors() {
         let expr = ExpandedExpr::Variable("x".to_string());
-        assert!(infer_expr(&expr, &mut TypeEnv::new()).is_err());
+        assert!(infer_expr_top(&expr).is_err());
     }
 
     #[test]
@@ -72,20 +89,18 @@ mod type_check_tests {
 
     #[test]
     fn type_check_literal_ok() {
-        let mut env = TypeEnv::new();
         let expr = ExpandedExpr::Int(1);
 
-        let typed = type_check_expr(&expr, &mut env, &Type::Primitive(PrimitiveType::Int)).unwrap();
+        let typed = type_check_expr_top(&expr, &Type::Primitive(PrimitiveType::Int)).unwrap();
 
         assert_eq!(typed.ty, Type::Primitive(PrimitiveType::Int));
     }
 
     #[test]
     fn type_check_literal_mismatch_errors() {
-        let mut env = TypeEnv::new();
         let expr = ExpandedExpr::Int(1);
 
-        let result = type_check_expr(&expr, &mut env, &Type::Primitive(PrimitiveType::Bool));
+        let result = type_check_expr_top(&expr, &Type::Primitive(PrimitiveType::Bool));
 
         assert!(result.is_err());
     }
@@ -224,20 +239,19 @@ mod type_check_tests {
 
     #[test]
     fn return_in_if_branches_match() {
+        let source = "
+            fn foo() {
+                if (true) {
+                    return 1;
+                } else {
+                    return 5;
+                }
+            }
+        ";
+
+        let stmt = exec_parse_pipeline(source)[0].clone();
+
         let mut env = TypeEnv::new();
-
-        let stmt = ExpandedStmt::FnDecl {
-            name: "foo".into(),
-            params: vec![],
-            body: Box::new(ExpandedStmt::If {
-                cond: Box::new(ExpandedExpr::Bool(true)),
-                body: Box::new(ExpandedStmt::Return(Some(Box::new(ExpandedExpr::Int(1))))),
-                else_branch: Some(Box::new(ExpandedStmt::Return(Some(Box::new(
-                    ExpandedExpr::Int(2),
-                ))))),
-            }),
-        };
-
         infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new()).unwrap();
 
         assert_eq!(
@@ -251,21 +265,19 @@ mod type_check_tests {
 
     #[test]
     fn return_in_if_branches_mismatch_errors() {
-        let mut env = TypeEnv::new();
+        let source = "
+            fn foo() {
+                if (true) {
+                    return 1;
+                } else {
+                    return true;
+                }
+            }
+        ";
 
-        let stmt = ExpandedStmt::FnDecl {
-            name: "foo".into(),
-            params: vec![],
-            body: Box::new(ExpandedStmt::If {
-                cond: Box::new(ExpandedExpr::Bool(true)),
-                body: Box::new(ExpandedStmt::Return(Some(Box::new(ExpandedExpr::Int(1))))),
-                else_branch: Some(Box::new(ExpandedStmt::Return(Some(Box::new(
-                    ExpandedExpr::Bool(true),
-                ))))),
-            }),
-        };
+        let stmt = exec_parse_pipeline(source)[0].clone();
 
-        let result = infer_stmt(&stmt, &mut env, &mut TypeCheckCtx::new());
+        let result = infer_stmt_top(&stmt);
         assert!(result.is_err());
     }
 }
