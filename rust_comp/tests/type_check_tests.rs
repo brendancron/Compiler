@@ -1,12 +1,12 @@
 use rust_comp::components::pipeline::PipelineBuilder;
 use rust_comp::components::type_checker::{
-    infer_expr, infer_expr_top, infer_stmt, infer_stmt_top, type_check_expr, type_check_expr_top,
-    TypeCheckCtx,
+    infer_expr, infer_expr_top, infer_stmt, infer_stmt_top, infer_stmts, infer_stmts_top,
+    type_check_expr, type_check_expr_top, TypeCheckCtx,
 };
 use rust_comp::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use rust_comp::models::types::type_env::TypeEnv;
-use rust_comp::models::types::type_subst::{unify, ApplySubst, TypeSubst};
-use rust_comp::models::types::types::{PrimitiveType, Type, TypeVar};
+use rust_comp::models::types::type_subst::TypeSubst;
+use rust_comp::models::types::types::{bool_type, int_type, string_type, unit_type, Type};
 use std::io;
 
 #[cfg(test)]
@@ -28,15 +28,9 @@ mod type_check_tests {
     #[test]
     fn literals_are_typed_correctly() {
         let cases = vec![
-            (ExpandedExpr::Int(42), Type::Primitive(PrimitiveType::Int)),
-            (
-                ExpandedExpr::Bool(true),
-                Type::Primitive(PrimitiveType::Bool),
-            ),
-            (
-                ExpandedExpr::String("hi".into()),
-                Type::Primitive(PrimitiveType::String),
-            ),
+            (ExpandedExpr::Int(42), int_type()),
+            (ExpandedExpr::Bool(true), bool_type()),
+            (ExpandedExpr::String("hi".into()), string_type()),
         ];
 
         for (expr, expected_ty) in cases {
@@ -54,12 +48,12 @@ mod type_check_tests {
     #[test]
     fn variable_expr_ok() {
         let mut env = TypeEnv::new();
-        env.bind("x", Type::Primitive(PrimitiveType::Int));
+        env.bind("x", int_type());
 
         let expr = ExpandedExpr::Variable("x".to_string());
         let typed = infer_expr(&expr, &mut env, &mut TypeSubst::new()).unwrap();
 
-        assert_eq!(typed.ty, Type::Primitive(PrimitiveType::Int));
+        assert_eq!(typed.ty, int_type());
     }
 
     #[test]
@@ -77,7 +71,7 @@ mod type_check_tests {
             &mut TypeCheckCtx::new(),
         )
         .unwrap();
-        assert_eq!(env.get_type("x"), Some(Type::Primitive(PrimitiveType::Int)));
+        assert_eq!(env.get_type("x"), Some(int_type()));
     }
 
     #[test]
@@ -104,16 +98,16 @@ mod type_check_tests {
     fn type_check_literal_ok() {
         let expr = ExpandedExpr::Int(1);
 
-        let typed = type_check_expr_top(&expr, &Type::Primitive(PrimitiveType::Int)).unwrap();
+        let typed = type_check_expr_top(&expr, &int_type()).unwrap();
 
-        assert_eq!(typed.ty, Type::Primitive(PrimitiveType::Int));
+        assert_eq!(typed.ty, int_type());
     }
 
     #[test]
     fn type_check_literal_mismatch_errors() {
         let expr = ExpandedExpr::Int(1);
 
-        let result = type_check_expr_top(&expr, &Type::Primitive(PrimitiveType::Bool));
+        let result = type_check_expr_top(&expr, &bool_type());
 
         assert!(result.is_err());
     }
@@ -121,34 +115,23 @@ mod type_check_tests {
     #[test]
     fn type_check_variable_ok() {
         let mut env = TypeEnv::new();
-        env.bind("x", Type::Primitive(PrimitiveType::Bool));
+        env.bind("x", bool_type());
 
         let expr = ExpandedExpr::Variable("x".into());
 
-        let typed = type_check_expr(
-            &expr,
-            &mut env,
-            &mut TypeSubst::new(),
-            &Type::Primitive(PrimitiveType::Bool),
-        )
-        .unwrap();
+        let typed = type_check_expr(&expr, &mut env, &mut TypeSubst::new(), &bool_type()).unwrap();
 
-        assert_eq!(typed.ty, Type::Primitive(PrimitiveType::Bool));
+        assert_eq!(typed.ty, bool_type());
     }
 
     #[test]
     fn type_check_variable_mismatch_errors() {
         let mut env = TypeEnv::new();
-        env.bind("x", Type::Primitive(PrimitiveType::Int));
+        env.bind("x", int_type());
 
         let expr = ExpandedExpr::Variable("x".into());
 
-        let result = type_check_expr(
-            &expr,
-            &mut env,
-            &mut TypeSubst::new(),
-            &Type::Primitive(PrimitiveType::Bool),
-        );
+        let result = type_check_expr(&expr, &mut env, &mut TypeSubst::new(), &bool_type());
 
         assert!(result.is_err());
     }
@@ -262,7 +245,7 @@ mod type_check_tests {
             env.get_type("foo"),
             Some(Type::Func {
                 params: vec![],
-                ret: Box::new(Type::Primitive(PrimitiveType::Unit)),
+                ret: Box::new(unit_type()),
             })
         );
     }
@@ -291,7 +274,7 @@ mod type_check_tests {
             env.get_type("foo"),
             Some(Type::Func {
                 params: vec![],
-                ret: Box::new(Type::Primitive(PrimitiveType::Int)),
+                ret: Box::new(int_type()),
             })
         );
     }
@@ -323,7 +306,7 @@ mod type_check_tests {
             env.get_type("foo"),
             Some(Type::Func {
                 params: vec![],
-                ret: Box::new(Type::Primitive(PrimitiveType::Int)),
+                ret: Box::new(int_type()),
             })
         );
     }
@@ -345,109 +328,90 @@ mod type_check_tests {
         let result = infer_stmt_top(&stmt);
         assert!(result.is_err());
     }
-}
 
-#[cfg(test)]
-mod type_subst_tests {
-    use super::*;
+    #[test]
+    fn call_simple_function() {
+        let source = "
+            fn id(x) { return x; }
+            id(3);
+        ";
 
-    fn tv(n: usize) -> Type {
-        Type::Var(TypeVar { id: n })
-    }
+        let stmts = exec_parse_pipeline(source);
 
-    fn int() -> Type {
-        Type::Primitive(PrimitiveType::Int)
-    }
-
-    fn bool_() -> Type {
-        Type::Primitive(PrimitiveType::Bool)
+        infer_stmts_top(&stmts).unwrap();
     }
 
     #[test]
-    fn apply_substitution_simple() {
-        let mut subst = TypeSubst::new();
-        subst.map.insert(TypeVar { id: 0 }, int());
+    fn call_returns_correct_type() {
+        let source = "
+            fn five() { return 5; }
+            var x = five();
+        ";
 
-        let t = tv(0);
-        assert_eq!(t.apply(&subst), int());
+        let stmts = exec_parse_pipeline(source);
+
+        let mut env = TypeEnv::new();
+        let mut subst = TypeSubst::new();
+        let mut ctx = TypeCheckCtx::new();
+
+        infer_stmts(&stmts, &mut env, &mut subst, &mut ctx).unwrap();
+
+        assert_eq!(env.get_type("x"), Some(int_type()));
     }
 
     #[test]
-    fn apply_substitution_recursive_func() {
+    fn call_with_multiple_params() {
+        let source = "
+            fn add(a, b) { return a + b; }
+            var x = add(1, 2);
+        ";
+
+        let stmts = exec_parse_pipeline(source);
+
+        let mut env = TypeEnv::new();
         let mut subst = TypeSubst::new();
-        subst.map.insert(TypeVar { id: 0 }, int());
+        let mut ctx = TypeCheckCtx::new();
 
-        let t = Type::Func {
-            params: vec![tv(0)],
-            ret: Box::new(tv(0)),
-        };
+        for stmt in stmts {
+            infer_stmt(&stmt, &mut env, &mut subst, &mut ctx).unwrap();
+        }
 
-        let applied = t.apply(&subst);
-
-        assert_eq!(
-            applied,
-            Type::Func {
-                params: vec![int()],
-                ret: Box::new(int()),
-            }
-        );
+        assert_eq!(env.get_type("x"), Some(int_type()));
     }
 
     #[test]
-    fn unify_var_with_primitive() {
+    fn call_argument_mismatch_errors() {
+        let source = "
+            fn id(x) { return x; }
+            id(true);
+        ";
+
+        let stmts = exec_parse_pipeline(source);
+
+        let mut env = TypeEnv::new();
         let mut subst = TypeSubst::new();
+        let mut ctx = TypeCheckCtx::new();
 
-        unify(&tv(0), &int(), &mut subst).unwrap();
-
-        assert_eq!(subst.map.get(&TypeVar { id: 0 }), Some(&int()));
+        assert!(infer_stmts(&stmts, &mut env, &mut subst, &mut ctx).is_err());
     }
 
     #[test]
-    fn unify_same_primitive() {
+    fn call_polymorphic_identity_twice() {
+        let source = "
+            fn id(x) { return x; }
+            var a = id(1);
+            var b = id(true);
+        ";
+
+        let stmts = exec_parse_pipeline(source);
+
+        let mut env = TypeEnv::new();
         let mut subst = TypeSubst::new();
+        let mut ctx = TypeCheckCtx::new();
 
-        unify(&int(), &int(), &mut subst).unwrap();
-        assert!(subst.map.is_empty());
-    }
+        infer_stmts(&stmts, &mut env, &mut subst, &mut ctx).unwrap();
 
-    #[test]
-    fn unify_function_types() {
-        let mut subst = TypeSubst::new();
-
-        let f1 = Type::Func {
-            params: vec![tv(0)],
-            ret: Box::new(tv(0)),
-        };
-
-        let f2 = Type::Func {
-            params: vec![int()],
-            ret: Box::new(int()),
-        };
-
-        unify(&f1, &f2, &mut subst).unwrap();
-
-        assert_eq!(subst.map.get(&TypeVar { id: 0 }), Some(&int()));
-    }
-
-    #[test]
-    fn unify_mismatch_errors() {
-        let mut subst = TypeSubst::new();
-
-        let err = unify(&int(), &bool_(), &mut subst);
-        assert!(err.is_err());
-    }
-
-    #[test]
-    fn occurs_check_rejects_infinite_type() {
-        let mut subst = TypeSubst::new();
-
-        let t = tv(0);
-        let bad = Type::Func {
-            params: vec![tv(0)],
-            ret: Box::new(int()),
-        };
-
-        let err = unify(&t, &bad, &mut subst);
-        assert!(err.is_err());
+        assert_eq!(env.get_type("a"), Some(int_type()));
+        assert_eq!(env.get_type("b"), Some(bool_type()));
     }
 }

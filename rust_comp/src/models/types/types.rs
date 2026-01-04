@@ -18,6 +18,10 @@ pub enum PrimitiveType {
     Bool,
 }
 
+pub fn unit_type() -> Type {
+    Type::Primitive(PrimitiveType::Unit)
+}
+
 pub fn bool_type() -> Type {
     Type::Primitive(PrimitiveType::Bool)
 }

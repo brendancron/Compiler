@@ -207,3 +207,12 @@ pub fn infer_stmts(
     }
     Ok(stmt_vec)
 }
+
+pub fn infer_stmts_top(stmts: &Vec<ExpandedStmt>) -> Result<Vec<TypedStmt>, TypeError> {
+    infer_stmts(
+        stmts,
+        &mut TypeEnv::new(),
+        &mut TypeSubst::new(),
+        &mut TypeCheckCtx::new(),
+    )
+}
