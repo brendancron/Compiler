@@ -50,6 +50,38 @@ pub fn infer_expr(
                 kind: TypedExprKind::Variable(name.clone()),
             })
         }
+        ExpandedExpr::Call { callee, args } => {
+            let callee_ty = env
+                .get_type(callee)
+                .ok_or(TypeError::UnboundVar(callee.clone()))?;
+
+            let mut typed_args = Vec::new();
+            let mut arg_types = Vec::new();
+            for arg in args {
+                let ta = infer_expr(arg, env, subst)?;
+                arg_types.push(ta.ty.clone());
+                typed_args.push(ta);
+            }
+
+            let ret_tv = Type::Var(env.fresh());
+
+            let expected_fn = Type::Func {
+                params: arg_types,
+                ret: Box::new(ret_tv.clone()),
+            };
+
+            unify(&callee_ty, &expected_fn, subst)?;
+
+            let result_ty = ret_tv.apply(subst);
+
+            Ok(TypedExpr {
+                ty: result_ty,
+                kind: TypedExprKind::Call {
+                    callee: callee.clone(),
+                    args: typed_args,
+                },
+            })
+        }
         _ => Err(TypeError::Unsupported),
     }
 }
@@ -173,6 +205,12 @@ pub fn infer_stmt(
                 body: Box::new(typed_body),
             })
         }
+
+        ExpandedStmt::ExprStmt(expr) => {
+            let typed_expr = infer_expr(expr, env, subst)?;
+            Ok(TypedStmt::ExprStmt(Box::new(typed_expr)))
+        }
+
         ExpandedStmt::Return(op_expr) => {
             let expr_ty = match op_expr {
                 None => Type::Primitive(PrimitiveType::Unit),
