@@ -3,7 +3,7 @@ use crate::models::semantics::typed_ast::{ToType, TypedExpr, TypedExprKind, Type
 use crate::models::types::type_env::TypeEnv;
 use crate::models::types::type_error::TypeError;
 use crate::models::types::type_subst::{unify, ApplySubst, TypeSubst};
-use crate::models::types::types::{bool_type, PrimitiveType, Type};
+use crate::models::types::types::*;
 
 pub struct TypeCheckCtx {
     pub return_type: Option<Type>,
@@ -30,20 +30,20 @@ pub fn infer_expr(
 ) -> Result<TypedExpr, TypeError> {
     match expr {
         ExpandedExpr::Int(i) => Ok(TypedExpr {
-            ty: Type::Primitive(PrimitiveType::Int),
+            ty: int_type(),
             kind: TypedExprKind::Int(*i),
         }),
         ExpandedExpr::Bool(b) => Ok(TypedExpr {
-            ty: Type::Primitive(PrimitiveType::Bool),
+            ty: bool_type(),
             kind: TypedExprKind::Bool(*b),
         }),
         ExpandedExpr::String(s) => Ok(TypedExpr {
-            ty: Type::Primitive(PrimitiveType::String),
+            ty: string_type(),
             kind: TypedExprKind::String(s.clone()),
         }),
         ExpandedExpr::Variable(name) => {
             let ty = env
-                .get_type(name.as_str())
+                .lookup(name)
                 .ok_or(TypeError::UnboundVar(name.clone()))?;
             Ok(TypedExpr {
                 ty,
@@ -52,7 +52,7 @@ pub fn infer_expr(
         }
         ExpandedExpr::Call { callee, args } => {
             let callee_ty = env
-                .get_type(callee)
+                .lookup(callee)
                 .ok_or(TypeError::UnboundVar(callee.clone()))?;
 
             let mut typed_args = Vec::new();
@@ -127,7 +127,7 @@ pub fn infer_stmt(
     match stmt {
         ExpandedStmt::Assignment { name, expr } => {
             let typed_expr = infer_expr(expr, env, subst)?;
-            env.bind(name, typed_expr.ty.clone());
+            env.bind_mono(name, typed_expr.ty.clone());
             let typed_assign = TypedStmt::Assignment {
                 name: name.clone(),
                 expr: Box::new(typed_expr),
@@ -172,11 +172,11 @@ pub fn infer_stmt(
                 ret: Box::new(ret_tv.clone()),
             };
 
-            env.bind(name, fn_type.clone());
+            env.bind_mono(name, fn_type.clone());
 
             env.push_scope();
             for (param, ty) in params.iter().zip(param_types.iter()) {
-                env.bind(param, ty.clone());
+                env.bind_mono(param, ty.clone());
             }
 
             let saved_ret = ctx.return_type.take();
@@ -197,7 +197,7 @@ pub fn infer_stmt(
             env.pop_scope();
 
             let final_fn_type = fn_type.apply(subst);
-            env.bind(name, final_fn_type);
+            env.bind_mono(name, final_fn_type);
 
             Ok(TypedStmt::FnDecl {
                 name: name.clone(),

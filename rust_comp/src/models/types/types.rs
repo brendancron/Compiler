@@ -4,6 +4,12 @@ pub struct TypeVar {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TypeScheme {
+    MonoType(Type),
+    PolyType { vars: Vec<TypeVar>, ty: Type },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Primitive(PrimitiveType),
     Var(TypeVar),
@@ -16,6 +22,10 @@ pub enum PrimitiveType {
     Int,
     String,
     Bool,
+}
+
+pub fn type_var(n: usize) -> Type {
+    Type::Var(TypeVar { id: n })
 }
 
 pub fn unit_type() -> Type {

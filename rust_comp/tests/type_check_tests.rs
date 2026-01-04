@@ -48,7 +48,7 @@ mod type_check_tests {
     #[test]
     fn variable_expr_ok() {
         let mut env = TypeEnv::new();
-        env.bind("x", int_type());
+        env.bind_mono("x", int_type());
 
         let expr = ExpandedExpr::Variable("x".to_string());
         let typed = infer_expr(&expr, &mut env, &mut TypeSubst::new()).unwrap();
@@ -71,7 +71,7 @@ mod type_check_tests {
             &mut TypeCheckCtx::new(),
         )
         .unwrap();
-        assert_eq!(env.get_type("x"), Some(int_type()));
+        assert_eq!(env.lookup("x"), Some(int_type()));
     }
 
     #[test]
@@ -115,7 +115,7 @@ mod type_check_tests {
     #[test]
     fn type_check_variable_ok() {
         let mut env = TypeEnv::new();
-        env.bind("x", bool_type());
+        env.bind_mono("x", bool_type());
 
         let expr = ExpandedExpr::Variable("x".into());
 
@@ -127,7 +127,7 @@ mod type_check_tests {
     #[test]
     fn type_check_variable_mismatch_errors() {
         let mut env = TypeEnv::new();
-        env.bind("x", int_type());
+        env.bind_mono("x", int_type());
 
         let expr = ExpandedExpr::Variable("x".into());
 
@@ -242,7 +242,7 @@ mod type_check_tests {
         .unwrap();
 
         assert_eq!(
-            env.get_type("foo"),
+            env.lookup("foo"),
             Some(Type::Func {
                 params: vec![],
                 ret: Box::new(unit_type()),
@@ -271,7 +271,7 @@ mod type_check_tests {
         .unwrap();
 
         assert_eq!(
-            env.get_type("foo"),
+            env.lookup("foo"),
             Some(Type::Func {
                 params: vec![],
                 ret: Box::new(int_type()),
@@ -303,7 +303,7 @@ mod type_check_tests {
         .unwrap();
 
         assert_eq!(
-            env.get_type("foo"),
+            env.lookup("foo"),
             Some(Type::Func {
                 params: vec![],
                 ret: Box::new(int_type()),
@@ -356,14 +356,14 @@ mod type_check_tests {
 
         infer_stmts(&stmts, &mut env, &mut subst, &mut ctx).unwrap();
 
-        assert_eq!(env.get_type("x"), Some(int_type()));
+        assert_eq!(env.lookup("x"), Some(int_type()));
     }
 
     #[test]
     fn call_with_multiple_params() {
         let source = "
-            fn add(a, b) { return a + b; }
-            var x = add(1, 2);
+            fn ret_first(a, b) { return a; }
+            var x = ret_first(1, \"hi\");
         ";
 
         let stmts = exec_parse_pipeline(source);
@@ -376,14 +376,20 @@ mod type_check_tests {
             infer_stmt(&stmt, &mut env, &mut subst, &mut ctx).unwrap();
         }
 
-        assert_eq!(env.get_type("x"), Some(int_type()));
+        assert_eq!(env.lookup("x"), Some(int_type()));
     }
 
     #[test]
     fn call_argument_mismatch_errors() {
         let source = "
-            fn id(x) { return x; }
-            id(true);
+            fn cond(x) {
+                if(x) {
+                    return 3;
+                } else {
+                    return 7;
+                }
+            }
+            cond(3);
         ";
 
         let stmts = exec_parse_pipeline(source);
@@ -411,7 +417,7 @@ mod type_check_tests {
 
         infer_stmts(&stmts, &mut env, &mut subst, &mut ctx).unwrap();
 
-        assert_eq!(env.get_type("a"), Some(int_type()));
-        assert_eq!(env.get_type("b"), Some(bool_type()));
+        assert_eq!(env.lookup("a"), Some(int_type()));
+        assert_eq!(env.lookup("b"), Some(bool_type()));
     }
 }
