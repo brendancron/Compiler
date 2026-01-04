@@ -1,7 +1,6 @@
 use crate::models::environment::EnvRef;
 use crate::models::semantics::expanded_ast::ExpandedStmt;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -13,7 +12,7 @@ pub enum Value {
 
     Struct {
         type_name: String,
-        fields: Rc<RefCell<HashMap<String, Value>>>,
+        fields: Rc<RefCell<Vec<(String, Value)>>>,
     },
 
     List(Rc<RefCell<Vec<Value>>>),

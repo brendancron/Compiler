@@ -28,16 +28,16 @@ pub fn eval_expr<W: Write>(
                 .get_struct(type_name)
                 .unwrap_or_else(|| panic!("unknown struct type {}", type_name));
 
-            let mut map = HashMap::new();
+            let mut fs = vec![];
 
             for (field_name, expr) in fields {
                 let value = eval_expr(expr, env.clone(), decls.clone(), ctx, out);
-                map.insert(field_name.clone(), value);
+                fs.push((field_name.clone(), value));
             }
 
             Value::Struct {
                 type_name: type_name.clone(),
-                fields: Rc::new(RefCell::new(map)),
+                fields: Rc::new(RefCell::new(fs)),
             }
         }
 
