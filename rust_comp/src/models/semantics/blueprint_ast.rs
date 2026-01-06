@@ -27,6 +27,7 @@ pub enum BlueprintExpr {
     },
 
     Typeof(String),
+    Embed(String),
 }
 
 #[derive(Debug, Clone)]

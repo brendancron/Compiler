@@ -1,3 +1,4 @@
+use rust_comp::components::embed_resolver::DefaultResolver;
 use std::cell::RefCell;
 use std::fs;
 use std::io::{self, Write};
@@ -64,7 +65,13 @@ fn run_language_tests() {
         let eval_buf = SharedBuf::new();
         let eval_handle = eval_buf.clone();
 
-        let mut pipeline = rust_comp::default_pipeline(meta_out, eval_handle);
+        let mut pipeline = rust_comp::default_pipeline(
+            meta_out,
+            eval_handle,
+            DefaultResolver {
+                base_dir: PathBuf::from("."),
+            },
+        );
         pipeline.run(source);
 
         let actual = String::from_utf8(eval_buf.into_inner().borrow().clone()).unwrap();

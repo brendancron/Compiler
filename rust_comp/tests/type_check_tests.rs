@@ -1,3 +1,4 @@
+use rust_comp::components::embed_resolver::DefaultResolver;
 use rust_comp::components::pipeline::PipelineBuilder;
 use rust_comp::components::type_checker::{
     infer_expr, infer_expr_top, infer_stmt, infer_stmt_top, infer_stmts, infer_stmts_top,
@@ -8,6 +9,7 @@ use rust_comp::models::types::type_env::TypeEnv;
 use rust_comp::models::types::type_subst::TypeSubst;
 use rust_comp::models::types::types::{bool_type, int_type, string_type, unit_type, Type};
 use std::io;
+use std::path::PathBuf;
 
 #[cfg(test)]
 mod type_check_tests {
@@ -17,7 +19,12 @@ mod type_check_tests {
         let mut pipeline = PipelineBuilder::new()
             .with_lexer()
             .with_parser()
-            .with_metaprocessor(io::stdout())
+            .with_metaprocessor(
+                io::stdout(),
+                DefaultResolver {
+                    base_dir: PathBuf::from("."),
+                },
+            )
             .build();
         let res = pipeline.run(source.to_string());
         match res {
@@ -419,5 +426,30 @@ mod type_check_tests {
 
         assert_eq!(env.lookup("a"), Some(int_type()));
         assert_eq!(env.lookup("b"), Some(bool_type()));
+    }
+
+    #[test]
+    fn struct_type_check() {
+        let source = "
+            struct Person {
+                name: string;
+                age: int
+            }
+
+            var p = Person {
+                name: \"Alice\",
+                age: 30
+            };
+
+            print(p);
+        ";
+
+        let stmts = exec_parse_pipeline(source);
+
+        let mut env = TypeEnv::new();
+        let mut subst = TypeSubst::new();
+        let mut ctx = TypeCheckCtx::new();
+
+        infer_stmts(&stmts, &mut env, &mut subst, &mut ctx).unwrap();
     }
 }

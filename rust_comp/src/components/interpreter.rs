@@ -6,7 +6,6 @@ use crate::models::result::ExecResult;
 use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use crate::models::value::{Function, Value};
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::io::Write;
 use std::rc::Rc;
 

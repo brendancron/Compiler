@@ -1,4 +1,5 @@
 pub mod components {
+    pub mod embed_resolver;
     pub mod formatter;
     pub mod interpreter;
     pub mod lexer;
@@ -29,8 +30,10 @@ pub mod models {
     pub mod value;
 }
 
+use components::embed_resolver::EmbedResolver;
+use components::metaprocessor::{self, MetaProcessContext};
 use components::pipeline::{Pipeline, PipelineBuilder};
-use components::{formatter, interpreter, lexer, metaprocessor, parser};
+use components::{formatter, interpreter, lexer, parser};
 use models::decl_registry::{DeclRegistry, DeclRegistryRef};
 use models::environment::Env;
 use models::semantics::blueprint_ast::BlueprintStmt;
@@ -59,16 +62,24 @@ impl PipelineBuilder<String, Vec<Token>> {
 }
 
 impl PipelineBuilder<String, Vec<BlueprintStmt>> {
-    pub fn with_metaprocessor<W: Write + 'static>(
+    pub fn with_metaprocessor<W: Write + 'static, E: EmbedResolver + 'static>(
         self,
         mut out: W,
+        mut embed_resolver: E,
     ) -> PipelineBuilder<String, (Vec<ExpandedStmt>, DeclRegistryRef)> {
         PipelineBuilder {
-            pipeline: self.pipeline.then(move |parsed: Vec<BlueprintStmt>| {
+            pipeline: self.pipeline.then(move |parsed| {
                 let meta_env = Env::new();
                 let decl_reg = DeclRegistry::new();
-                let processed =
-                    metaprocessor::process(&parsed, meta_env, decl_reg.clone(), &mut out);
+
+                let mut ctx = MetaProcessContext {
+                    env: meta_env,
+                    decls: decl_reg.clone(),
+                    embed_resolver: &mut embed_resolver,
+                    out: &mut out,
+                };
+
+                let processed = metaprocessor::process(&parsed, &mut ctx);
                 (processed, decl_reg)
             }),
         }
@@ -105,8 +116,10 @@ impl PipelineBuilder<String, Vec<Token>> {
         fs::create_dir_all(out_dir).unwrap();
         let mut f = File::create(out_dir.join("tokens.txt")).unwrap();
 
-        self.with_tap(move |t: &Vec<Token>| {
-            writeln!(f, "{t:?}").unwrap();
+        self.with_tap(move |tokens: &Vec<Token>| {
+            for t in tokens {
+                writeln!(f, "{t:?}").unwrap();
+            }
         })
     }
 }
@@ -143,23 +156,30 @@ impl PipelineBuilder<String, (Vec<ExpandedStmt>, DeclRegistryRef)> {
     }
 }
 
-pub fn default_pipeline<M, E>(meta_out: M, eval_out: E) -> Pipeline<String, ()>
+pub fn default_pipeline<M, E, R>(meta_out: M, eval_out: E, resolver: R) -> Pipeline<String, ()>
 where
     M: Write + 'static,
     E: Write + 'static,
+    R: EmbedResolver + 'static,
 {
     PipelineBuilder::new()
         .with_lexer()
         .with_parser()
-        .with_metaprocessor(meta_out)
+        .with_metaprocessor(meta_out, resolver)
         .with_interpreter(eval_out)
         .build()
 }
 
-pub fn debug_pipeline<M, E>(meta_out: M, eval_out: E, out_dir: PathBuf) -> Pipeline<String, ()>
+pub fn debug_pipeline<M, E, R>(
+    meta_out: M,
+    eval_out: E,
+    resolver: R,
+    out_dir: PathBuf,
+) -> Pipeline<String, ()>
 where
     M: Write + 'static,
     E: Write + 'static,
+    R: EmbedResolver + 'static,
 {
     PipelineBuilder::new()
         .dump_source(&out_dir)
@@ -167,7 +187,7 @@ where
         .dump_tokens(&out_dir)
         .with_parser()
         .dump_blueprint_ast(&out_dir)
-        .with_metaprocessor(meta_out)
+        .with_metaprocessor(meta_out, resolver)
         .dump_expanded_ast(&out_dir)
         .dump_expanded_code(&out_dir)
         .with_interpreter(eval_out)

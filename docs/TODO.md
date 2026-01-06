@@ -1,8 +1,11 @@
-* Type System
-* Type Inference
+* Type System for structs
+* Optional explicit typing
 * Interpreter -> Compiler
 * DU
 * Traits
 * Defer
 * Pattern Matching
-* Refactor everything to more appropriate names
+* Embedding Files
+* Allowing/Disallowing Syscalls
+* Better Error Messages
+* Test Source of Truth Config Files

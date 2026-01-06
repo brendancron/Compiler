@@ -120,6 +120,14 @@ pub fn parse(tokens: &[Token]) -> Vec<BlueprintStmt> {
                     BlueprintExpr::Typeof(id)
                 }
 
+                TokenType::Embed => {
+                    consume(tokens, pos, TokenType::Embed);
+                    consume(tokens, pos, TokenType::LeftParen);
+                    let file_path = consume(tokens, pos, TokenType::String).expect_str();
+                    consume(tokens, pos, TokenType::RightParen);
+                    BlueprintExpr::Embed(file_path)
+                }
+
                 TokenType::Identifier => {
                     let name = consume_next(tokens, pos).expect_str();
 

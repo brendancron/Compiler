@@ -3,6 +3,8 @@ The main purpose of Cronyx is to provide a simple but powerful language. It shou
 
 Metaprocessing is a core feature in Cronyx. It allows for higher order code to be written allowing for many modern language features such as reflection while keeping runtimes fast.
 
+It doesn't need to be blazingly fast like C or Rust but it at least needs to be competitive with other languages in its memory model (whatever that ends up being).
+
 ## Architecture
 See [[Phase Architecture]]
 

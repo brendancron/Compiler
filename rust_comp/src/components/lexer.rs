@@ -267,6 +267,7 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 let tok_type = match name.as_str() {
                     "and" => TokenType::And,
                     "else" => TokenType::Else,
+                    "embed" => TokenType::Embed,
                     "false" => TokenType::False,
                     "fn" => TokenType::Func,
                     "for" => TokenType::For,

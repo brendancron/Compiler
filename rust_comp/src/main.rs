@@ -1,3 +1,4 @@
+use rust_comp::components::embed_resolver::DefaultResolver;
 use rust_comp::components::pipeline::PipelineBuilder;
 use std::env;
 use std::io::{self, Read};
@@ -16,7 +17,12 @@ fn main() {
         .dump_tokens(&out_dir)
         .with_parser()
         .dump_blueprint_ast(&out_dir)
-        .with_metaprocessor(io::stdout())
+        .with_metaprocessor(
+            io::stdout(),
+            DefaultResolver {
+                base_dir: PathBuf::from("."),
+            },
+        )
         .dump_expanded_ast(&out_dir)
         .dump_expanded_code(&out_dir)
         .with_interpreter(io::stdout())
