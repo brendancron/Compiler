@@ -1,85 +1,80 @@
-pub trait Stage<I, O>: 'static {
-    fn run(&mut self, input: I) -> O;
+use std::marker::PhantomData;
+use std::sync::Arc;
+
+/// A pipeline step that transforms Input into Output.
+/// It wraps a function: Fn(Input) -> Result<Output, Error>
+pub struct Pipeline<Input, Output, Error> {
+    func: Arc<dyn Fn(Input) -> Result<Output, Error> + Send + Sync>,
 }
 
-impl<I, O, F> Stage<I, O> for F
+impl<Input, Output, Error> Pipeline<Input, Output, Error>
 where
-    F: FnMut(I) -> O + 'static,
+    Input: 'static,
+    Output: 'static,
+    Error: 'static,
 {
-    fn run(&mut self, input: I) -> O {
-        self(input)
-    }
-}
-
-pub struct Pipeline<I, O> {
-    stage: Box<dyn Stage<I, O>>,
-}
-
-impl<I> Pipeline<I, I> {
-    pub fn new() -> Self {
-        Self {
-            stage: Box::new(|x| x),
+    /// Create a new pipeline step from a function.
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(Input) -> Result<Output, Error> + Send + Sync + 'static,
+    {
+        Pipeline {
+            func: Arc::new(f),
         }
     }
-}
 
-impl<I: 'static, O: 'static> Pipeline<I, O> {
-    pub fn run(&mut self, input: I) -> O {
-        self.stage.run(input)
+    /// Execute the pipeline with the given input.
+    pub fn execute(&self, input: Input) -> Result<Output, Error> {
+        (self.func)(input)
     }
-}
 
-impl<I: 'static, O: 'static> Pipeline<I, O> {
-    pub fn then<N: 'static>(self, mut next: impl Stage<O, N> + 'static) -> Pipeline<I, N> {
-        let mut prev = self.stage;
-
+    /// Chain another step after this one.
+    pub fn then<NextOutput, F>(self, next: F) -> Pipeline<Input, NextOutput, Error>
+    where
+        NextOutput: 'static,
+        F: Fn(Output) -> Result<NextOutput, Error> + Send + Sync + 'static,
+    {
+        let current = self.func;
+        let next = Arc::new(next);
         Pipeline {
-            stage: Box::new(move |input: I| {
-                let mid = prev.run(input);
-                next.run(mid)
+            func: Arc::new(move |input| {
+                let intermediate = current(input)?;
+                next(intermediate)
             }),
         }
     }
 
-    pub fn tap(self, mut f: impl FnMut(&O) + 'static) -> Self {
-        let mut prev = self.stage;
-
+    pub fn tap<F>(self, f: F) -> Self
+    where
+        F: Fn(&Output) -> Result<(), Error> + Send + Sync + 'static,
+    {
+        let current = self.func;
+        let tap_func = Arc::new(f);
         Pipeline {
-            stage: Box::new(move |input: I| {
-                let out = prev.run(input);
-                f(&out);
-                out
+            func: Arc::new(move |input| {
+                let result = current(input)?;
+                tap_func(&result)?;
+                Ok(result)
             }),
         }
     }
-}
 
-pub struct PipelineBuilder<I, O> {
-    pub pipeline: Pipeline<I, O>,
-}
+    /// Alias for execute, for compatibility.
+    pub fn run(&self, input: Input) -> Result<Output, Error> {
+        self.execute(input)
+    }
 
-impl PipelineBuilder<String, String> {
-    pub fn new() -> Self {
-        Self {
-            pipeline: Pipeline::new(),
-        }
+    /// Finishes the build phase. For this Pipeline implementation, it is an identity.
+    pub fn build(self) -> Self {
+        self
     }
 }
 
-impl<I: 'static, O: 'static> PipelineBuilder<I, O> {
-    pub fn with_tap(self, f: impl FnMut(&O) + 'static) -> Self {
-        Self {
-            pipeline: self.pipeline.tap(f),
-        }
-    }
+pub struct PipelineBuilder;
 
-    pub fn then<N: 'static>(self, stage: impl Stage<O, N> + 'static) -> PipelineBuilder<I, N> {
-        PipelineBuilder {
-            pipeline: self.pipeline.then(stage),
-        }
-    }
-
-    pub fn build(self) -> Pipeline<I, O> {
-        self.pipeline
+impl PipelineBuilder {
+    pub fn new() -> Pipeline<String, String, String> {
+        // The initial pipeline just passes the input string through.
+        Pipeline::new(|s| Ok(s))
     }
 }

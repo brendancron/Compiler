@@ -9,23 +9,31 @@ use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
 
+pub enum EvalError {
+    UnknownStructType,
+}
+
+pub struct EvalCtx<W> {
+    pub out: W,
+}
+
 pub fn eval_expr<W: Write>(
     expr: &ExpandedExpr,
     env: EnvRef,
     decls: DeclRegistryRef,
     ctx: &mut Option<&mut MetaContext>,
     out: &mut W,
-) -> Value {
+) -> Result<Value, EvalError> {
     match expr {
-        ExpandedExpr::Int(n) => Value::Int(*n),
-        ExpandedExpr::String(s) => Value::String(s.clone()),
-        ExpandedExpr::Bool(b) => Value::Bool(*b),
+        ExpandedExpr::Int(n) => Ok(Value::Int(*n)),
+        ExpandedExpr::String(s) => Ok(Value::String(s.clone())),
+        ExpandedExpr::Bool(b) => Ok(Value::Bool(*b)),
 
         ExpandedExpr::StructLiteral { type_name, fields } => {
             let _struct_def = decls
                 .borrow()
                 .get_struct(type_name)
-                .unwrap_or_else(|| panic!("unknown struct type {}", type_name));
+                .unwrap_or_else(|| return Err(EvalError::UnknownStructType(type_name)));
 
             let mut fs = vec![];
 

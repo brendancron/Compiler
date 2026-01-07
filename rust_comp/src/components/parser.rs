@@ -3,6 +3,12 @@ use crate::models::semantics::blueprint_ast::{
 };
 use crate::models::token::{Token, TokenType};
 
+pub enum ParseError {
+    UnterminatedString,
+    UnexpectedToken{found: TokenType, expected: TokenType, pos: usize},
+    UnexpectedEOF{expected: TokenType, pos: usize},
+}
+
 fn peek(tokens: &[Token], pos: usize) -> Option<TokenType> {
     match tokens.get(pos) {
         None => None,
@@ -17,14 +23,15 @@ fn check(tokens: &[Token], pos: usize, expected: TokenType) -> bool {
     }
 }
 
-fn consume<'a>(tokens: &'a [Token], pos: &mut usize, expected: TokenType) -> &'a Token {
+fn consume<'a>(tokens: &'a [Token], pos: &mut usize, expected: TokenType) -> Result<&'a Token, ParseError> {
     match tokens.get(*pos) {
-        Some(t) if t.token_type == expected => consume_next(tokens, pos),
-        Some(t) => panic!(
-            "expected {:?}, found {:?} on line {} at position {}",
-            expected, t.token_type, t.line_number, pos
-        ),
-        None => panic!("expected {:?}, found EOF at position {}", expected, pos),
+        Some(t) if t.token_type == expected => Ok(consume_next(tokens, pos)),
+        Some(t) => Err(ParseError::UnexpectedToken{
+            found: t.token_type,
+            expected,
+            pos: *pos
+        }),
+        None => Err(ParseError::UnexpectedEOF{expected, pos: *pos})
     }
 }
 
@@ -33,7 +40,6 @@ fn consume_next<'a>(tokens: &'a [Token], pos: &mut usize) -> &'a Token {
         .get(*pos)
         .expect("internal error: consume_next out of bounds");
     *pos += 1;
-    //println!("Consumed: {:?}", tok);
     tok
 }
 
