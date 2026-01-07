@@ -1,5 +1,10 @@
 use crate::models::token::{Token, TokenMetadata, TokenType};
 
+pub enum ScanError {
+    UnterminatedString,
+    UnexpectedCharacter(char),
+}
+
 fn is_digit(c: char) -> bool {
     c >= '0' && c <= '9'
 }
@@ -34,7 +39,7 @@ fn lex_identifier(chars: &[char], mut i: usize) -> (String, usize) {
     (acc, i)
 }
 
-pub fn tokenize(s: &str) -> Vec<Token> {
+pub fn tokenize(s: &str) -> Result<Vec<Token>, ScanError> {
     let chars: Vec<char> = s.chars().collect();
     let len = chars.len();
     let mut tokens = Vec::new();
@@ -326,11 +331,11 @@ pub fn tokenize(s: &str) -> Vec<Token> {
                 }
 
                 if j >= len {
-                    panic!("unterminated string");
+                    return Err(ScanError::UnterminatedString)
                 }
             }
 
-            _ => panic!("unexpected character: {}", c),
+            _ => return Err(ScanError::UnexpectedCharacter(c))
         }
     }
 
@@ -339,5 +344,5 @@ pub fn tokenize(s: &str) -> Vec<Token> {
         line_number: line_number,
         metadata: None,
     });
-    tokens
+    Ok(tokens)
 }

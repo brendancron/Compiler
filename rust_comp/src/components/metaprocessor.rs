@@ -4,20 +4,30 @@ use crate::models::semantics::blueprint_ast::{BlueprintExpr, BlueprintStmt};
 use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use crate::models::value::{Function, Value};
 use crate::{
-    components::interpreter,
+    components::interpreter::{self, EvalError},
     models::decl_registry::{DeclRegistryRef, StructDef},
 };
 use std::io::Write;
 use std::rc::Rc;
 
+#[derive(Debug)]
 pub enum MetaProcessError {
     EmbedFailed { path: String, error: String },
+    UnknownType(String),
+    Unimplemented(String),
+    Eval(EvalError),
 }
 
-pub struct MetaProcessContext<'a, W: Write> {
+impl From<EvalError> for MetaProcessError {
+    fn from(e: EvalError) -> Self {
+        MetaProcessError::Eval(e)
+    }
+}
+
+pub struct MetaProcessContext<'a, E: EmbedResolver, W: Write> {
     pub env: EnvRef,
     pub decls: DeclRegistryRef,
-    pub embed_resolver: &'a mut dyn EmbedResolver,
+    pub embed_resolver: &'a mut E,
     pub out: &'a mut W,
 }
 
@@ -25,69 +35,83 @@ pub struct MetaContext {
     pub emitted: Vec<ExpandedStmt>,
 }
 
-pub fn value_to_literal(val: Value) -> ExpandedExpr {
+pub fn value_to_literal(val: Value) -> Result<ExpandedExpr, MetaProcessError> {
     match val {
-        Value::Int(n) => ExpandedExpr::Int(n),
-        Value::String(s) => ExpandedExpr::String(s),
-        Value::Bool(b) => ExpandedExpr::Bool(b),
-        Value::Unit => panic!("Unit has no literal representation"),
-        _ => panic!("non-primitive value not supported yet"),
+        Value::Int(n) => Ok(ExpandedExpr::Int(n)),
+        Value::String(s) => Ok(ExpandedExpr::String(s)),
+        Value::Bool(b) => Ok(ExpandedExpr::Bool(b)),
+        Value::Unit => Err(MetaProcessError::Unimplemented(
+            "Unit has no literal representation".to_string(),
+        )),
+        _ => Err(MetaProcessError::Unimplemented(
+            "non-primitive value not supported yet".to_string(),
+        )),
     }
 }
 
-pub fn process_expr<W: Write>(
+pub fn process_expr<E: EmbedResolver, W: Write>(
     expr: &BlueprintExpr,
-    ctx: &mut MetaProcessContext<W>,
-) -> ExpandedExpr {
+    ctx: &mut MetaProcessContext<E, W>,
+) -> Result<ExpandedExpr, MetaProcessError> {
     match expr {
-        BlueprintExpr::Int(i) => ExpandedExpr::Int(*i),
-        BlueprintExpr::String(s) => ExpandedExpr::String(s.clone()),
-        BlueprintExpr::Bool(b) => ExpandedExpr::Bool(*b),
+        BlueprintExpr::Int(i) => Ok(ExpandedExpr::Int(*i)),
+        BlueprintExpr::String(s) => Ok(ExpandedExpr::String(s.clone())),
+        BlueprintExpr::Bool(b) => Ok(ExpandedExpr::Bool(*b)),
 
-        BlueprintExpr::StructLiteral { type_name, fields } => ExpandedExpr::StructLiteral {
-            type_name: type_name.clone(),
-            fields: fields
-                .iter()
-                .map(|(name, expr)| (name.clone(), Box::new(process_expr(expr, ctx))))
-                .collect(),
-        },
+        BlueprintExpr::StructLiteral { type_name, fields } => {
+            let mut out_fields = Vec::new();
+            for (name, expr) in fields {
+                let expanded = process_expr(expr, ctx)?;
+                out_fields.push((name.clone(), Box::new(expanded)));
+            }
+
+            Ok(ExpandedExpr::StructLiteral {
+                type_name: type_name.clone(),
+                fields: out_fields,
+            })
+        }
 
         BlueprintExpr::Variable(name) => match ctx.env.borrow().get(name) {
             Some(x) => value_to_literal(x),
-            None => ExpandedExpr::Variable(name.clone()),
+            None => Ok(ExpandedExpr::Variable(name.clone())),
         },
 
-        BlueprintExpr::List(exprs) => ExpandedExpr::List(process_exprs(exprs, ctx)),
+        BlueprintExpr::List(exprs) => Ok(ExpandedExpr::List(process_exprs(exprs, ctx)?)),
 
-        BlueprintExpr::Add(a, b) => ExpandedExpr::Add(
-            Box::new(process_expr(a, ctx)),
-            Box::new(process_expr(b, ctx)),
-        ),
+        BlueprintExpr::Add(a, b) => Ok(ExpandedExpr::Add(
+            Box::new(process_expr(a, ctx)?),
+            Box::new(process_expr(b, ctx)?),
+        )),
 
-        BlueprintExpr::Sub(a, b) => ExpandedExpr::Sub(
-            Box::new(process_expr(a, ctx)),
-            Box::new(process_expr(b, ctx)),
-        ),
+        BlueprintExpr::Sub(a, b) => Ok(ExpandedExpr::Sub(
+            Box::new(process_expr(a, ctx)?),
+            Box::new(process_expr(b, ctx)?),
+        )),
 
-        BlueprintExpr::Mult(a, b) => ExpandedExpr::Mult(
-            Box::new(process_expr(a, ctx)),
-            Box::new(process_expr(b, ctx)),
-        ),
+        BlueprintExpr::Mult(a, b) => Ok(ExpandedExpr::Mult(
+            Box::new(process_expr(a, ctx)?),
+            Box::new(process_expr(b, ctx)?),
+        )),
 
-        BlueprintExpr::Div(a, b) => ExpandedExpr::Div(
-            Box::new(process_expr(a, ctx)),
-            Box::new(process_expr(b, ctx)),
-        ),
+        BlueprintExpr::Div(a, b) => Ok(ExpandedExpr::Div(
+            Box::new(process_expr(a, ctx)?),
+            Box::new(process_expr(b, ctx)?),
+        )),
 
-        BlueprintExpr::Equals(a, b) => ExpandedExpr::Equals(
-            Box::new(process_expr(a, ctx)),
-            Box::new(process_expr(b, ctx)),
-        ),
+        BlueprintExpr::Equals(a, b) => Ok(ExpandedExpr::Equals(
+            Box::new(process_expr(a, ctx)?),
+            Box::new(process_expr(b, ctx)?),
+        )),
 
         BlueprintExpr::Call { callee, args } => {
+            let mut out_args = Vec::new();
+            for e in args {
+                out_args.push(process_expr(e, ctx)?);
+            }
+
             let call_expr = ExpandedExpr::Call {
                 callee: callee.clone(),
-                args: args.iter().map(|e| process_expr(e, ctx)).collect(),
+                args: out_args,
             };
 
             match ctx.env.borrow().get(&callee) {
@@ -98,10 +122,10 @@ pub fn process_expr<W: Write>(
                         ctx.decls.clone(),
                         &mut None,
                         ctx.out,
-                    );
+                    )?;
                     value_to_literal(val)
                 }
-                None => call_expr,
+                None => Ok(call_expr),
             }
         }
 
@@ -110,76 +134,81 @@ pub fn process_expr<W: Write>(
                 .decls
                 .borrow()
                 .get_struct(id)
-                .unwrap_or_else(|| panic!("unknown type {}", id));
-            ExpandedExpr::String(def.to_string())
+                .ok_or_else(|| MetaProcessError::UnknownType(id.clone()))?;
+
+            Ok(ExpandedExpr::String(def.to_string()))
         }
 
         BlueprintExpr::Embed(file_path) => {
             let contents = std::fs::read_to_string(&file_path).unwrap();
-            ExpandedExpr::String(contents)
+            Ok(ExpandedExpr::String(contents))
         }
     }
 }
 
-pub fn process_exprs<W: Write>(
+pub fn process_exprs<E: EmbedResolver, W: Write>(
     exprs: &Vec<BlueprintExpr>,
-    ctx: &mut MetaProcessContext<W>,
-) -> Vec<ExpandedExpr> {
+    ctx: &mut MetaProcessContext<E, W>,
+) -> Result<Vec<ExpandedExpr>, MetaProcessError> {
     let mut output = Vec::new();
 
     for expr in exprs {
-        output.push(process_expr(expr, ctx));
+        output.push(process_expr(expr, ctx)?);
     }
 
-    output
+    Ok(output)
 }
 
-pub fn process_stmt<W: Write>(
+pub fn process_stmt<E: EmbedResolver, W: Write>(
     stmt: &BlueprintStmt,
-    ctx: &mut MetaProcessContext<W>,
-) -> Vec<ExpandedStmt> {
+    ctx: &mut MetaProcessContext<E, W>,
+) -> Result<Vec<ExpandedStmt>, MetaProcessError> {
     match stmt {
-        BlueprintStmt::ExprStmt(expr) => {
-            vec![ExpandedStmt::ExprStmt(Box::new(process_expr(expr, ctx)))]
-        }
+        BlueprintStmt::ExprStmt(expr) => Ok(vec![ExpandedStmt::ExprStmt(Box::new(process_expr(
+            expr, ctx,
+        )?))]),
 
-        BlueprintStmt::Assignment { name, expr } => vec![ExpandedStmt::Assignment {
+        BlueprintStmt::Assignment { name, expr } => Ok(vec![ExpandedStmt::Assignment {
             name: name.clone(),
-            expr: Box::new(process_expr(expr, ctx)),
-        }],
+            expr: Box::new(process_expr(expr, ctx)?),
+        }]),
 
-        BlueprintStmt::Print(expr) => {
-            vec![ExpandedStmt::Print(Box::new(process_expr(expr, ctx)))]
-        }
+        BlueprintStmt::Print(expr) => Ok(vec![ExpandedStmt::Print(Box::new(process_expr(
+            expr, ctx,
+        )?))]),
 
         BlueprintStmt::If {
             cond,
             body,
             else_branch,
-        } => vec![ExpandedStmt::If {
-            cond: Box::new(process_expr(cond, ctx)),
-            body: Box::new(process_to_block(body, ctx)),
-            else_branch: else_branch
-                .as_ref()
-                .map(|stmt| Box::new(ExpandedStmt::Block(process_stmt(stmt, ctx)))),
-        }],
+        } => {
+            let else_branch = match else_branch {
+                Some(stmt) => Some(Box::new(ExpandedStmt::Block(process_stmt(stmt, ctx)?))),
+                None => None,
+            };
+            Ok(vec![ExpandedStmt::If {
+                cond: Box::new(process_expr(cond, ctx)?),
+                body: Box::new(process_to_block(body, ctx)?),
+                else_branch,
+            }])
+        }
 
         BlueprintStmt::ForEach {
             var,
             iterable,
             body,
-        } => vec![ExpandedStmt::ForEach {
+        } => Ok(vec![ExpandedStmt::ForEach {
             var: var.clone(),
-            iterable: Box::new(process_expr(iterable, ctx)),
-            body: Box::new(process_to_block(body, ctx)),
-        }],
+            iterable: Box::new(process_expr(iterable, ctx)?),
+            body: Box::new(process_to_block(body, ctx)?),
+        }]),
 
         BlueprintStmt::Block(stmts) => {
             let mut processed = Vec::new();
             for stmt in stmts {
-                processed.extend(process_stmt(stmt, ctx));
+                processed.extend(process_stmt(stmt, ctx)?);
             }
-            vec![ExpandedStmt::Block(processed)]
+            Ok(vec![ExpandedStmt::Block(processed)])
         }
 
         BlueprintStmt::FnDecl {
@@ -188,7 +217,7 @@ pub fn process_stmt<W: Write>(
             params,
             body,
         } => {
-            let processed_body = process_to_block(body.as_ref(), ctx);
+            let processed_body = process_to_block(body.as_ref(), ctx)?;
             if func_type.can_execute_at_meta() {
                 let func = Rc::new(Function {
                     params: params.clone(),
@@ -206,9 +235,9 @@ pub fn process_stmt<W: Write>(
                     params: params.clone(),
                     body: Box::new(processed_body.clone()),
                 };
-                return vec![func_decl];
+                return Ok(vec![func_decl]);
             }
-            vec![]
+            Ok(vec![])
         }
 
         BlueprintStmt::StructDecl { name, fields } => {
@@ -218,21 +247,21 @@ pub fn process_stmt<W: Write>(
                     fields: fields.clone(),
                 },
             );
-            vec![]
+            Ok(vec![])
         }
 
         BlueprintStmt::Return(expr) => {
-            vec![ExpandedStmt::Return(
-                expr.as_ref().map(|e| Box::new(process_expr(e, ctx))),
-            )]
+            let expr = match expr {
+                Some(e) => Some(Box::new(process_expr(e, ctx)?)),
+                None => None,
+            };
+            Ok(vec![ExpandedStmt::Return(expr)])
         }
 
-        BlueprintStmt::Gen(stmts) => {
-            vec![ExpandedStmt::Gen(process(stmts, ctx))]
-        }
+        BlueprintStmt::Gen(stmts) => Ok(vec![ExpandedStmt::Gen(process(stmts, ctx)?)]),
 
         BlueprintStmt::MetaStmt(parsed_stmt) => {
-            let processed_code = process_stmt(parsed_stmt, ctx);
+            let processed_code = process_stmt(parsed_stmt, ctx)?;
             let mut meta_ctx = MetaContext {
                 emitted: Vec::new(),
             };
@@ -245,38 +274,38 @@ pub fn process_stmt<W: Write>(
                 ctx.out,
             );
 
-            meta_ctx.emitted
+            Ok(meta_ctx.emitted)
         }
     }
 }
 
-fn process_to_block<W: Write>(
+fn process_to_block<E: EmbedResolver, W: Write>(
     stmt: &BlueprintStmt,
-    ctx: &mut MetaProcessContext<W>,
-) -> ExpandedStmt {
+    ctx: &mut MetaProcessContext<E, W>,
+) -> Result<ExpandedStmt, MetaProcessError> {
     match stmt {
         BlueprintStmt::Block(_) => {
-            let processed = process_stmt(stmt, ctx);
+            let processed = process_stmt(stmt, ctx)?;
             debug_assert!(
                 processed.len() == 1,
                 "block processing must produce exactly one statement"
             );
-            processed.into_iter().next().unwrap()
+            Ok(processed.into_iter().next().unwrap())
         }
 
-        _ => ExpandedStmt::Block(process_stmt(stmt, ctx)),
+        _ => Ok(ExpandedStmt::Block(process_stmt(stmt, ctx)?)),
     }
 }
 
-pub fn process<W: Write>(
+pub fn process<E: EmbedResolver, W: Write>(
     stmts: &Vec<BlueprintStmt>,
-    ctx: &mut MetaProcessContext<W>,
-) -> Vec<ExpandedStmt> {
+    ctx: &mut MetaProcessContext<E, W>,
+) -> Result<Vec<ExpandedStmt>, MetaProcessError> {
     let mut output = Vec::new();
 
     for stmt in stmts {
-        output.extend(process_stmt(stmt, ctx));
+        output.extend(process_stmt(stmt, ctx)?);
     }
 
-    output
+    Ok(output)
 }

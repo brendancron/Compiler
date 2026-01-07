@@ -4,10 +4,24 @@ use crate::models::decl_registry::DeclRegistryRef;
 use crate::models::environment::{Env, EnvRef};
 use crate::models::result::ExecResult;
 use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
+use crate::models::types::types::{self, Type};
 use crate::models::value::{Function, Value};
 use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
+
+#[derive(Debug)]
+pub enum EvalError {
+    UnknownStructType(String),
+    UndefinedVariable(String),
+    TypeError(Type),
+    NonFunctionCall,
+    ArgumentMismatch,
+}
+
+pub struct EvalCtx<W> {
+    pub out: W,
+}
 
 pub fn eval_expr<W: Write>(
     expr: &ExpandedExpr,
@@ -15,102 +29,105 @@ pub fn eval_expr<W: Write>(
     decls: DeclRegistryRef,
     ctx: &mut Option<&mut MetaContext>,
     out: &mut W,
-) -> Value {
+) -> Result<Value, EvalError> {
     match expr {
-        ExpandedExpr::Int(n) => Value::Int(*n),
-        ExpandedExpr::String(s) => Value::String(s.clone()),
-        ExpandedExpr::Bool(b) => Value::Bool(*b),
+        ExpandedExpr::Int(n) => Ok(Value::Int(*n)),
+        ExpandedExpr::String(s) => Ok(Value::String(s.clone())),
+        ExpandedExpr::Bool(b) => Ok(Value::Bool(*b)),
 
         ExpandedExpr::StructLiteral { type_name, fields } => {
             let _struct_def = decls
                 .borrow()
                 .get_struct(type_name)
-                .unwrap_or_else(|| panic!("unknown struct type {}", type_name));
+                .ok_or_else(|| EvalError::UnknownStructType(type_name.clone()))?;
 
             let mut fs = vec![];
 
             for (field_name, expr) in fields {
-                let value = eval_expr(expr, env.clone(), decls.clone(), ctx, out);
+                let value = eval_expr(expr, env.clone(), decls.clone(), ctx, out)?;
                 fs.push((field_name.clone(), value));
             }
 
-            Value::Struct {
+            Ok(Value::Struct {
                 type_name: type_name.clone(),
                 fields: Rc::new(RefCell::new(fs)),
-            }
+            })
         }
 
-        ExpandedExpr::Variable(name) => env
-            .borrow()
-            .get(name)
-            .unwrap_or_else(|| panic!("undefined variable: {}", name)),
+        ExpandedExpr::Variable(name) => {
+            let var = env
+                .borrow()
+                .get(name)
+                .ok_or_else(|| EvalError::UndefinedVariable(name.clone()))?;
+            Ok(var)
+        }
 
         ExpandedExpr::List(exprs) => {
-            let values = exprs
-                .iter()
-                .map(|e| eval_expr(e, env.clone(), decls.clone(), ctx, out))
-                .collect();
+            let mut values = Vec::new();
+            for e in exprs {
+                values.push(eval_expr(e, env.clone(), decls.clone(), ctx, out)?);
+            }
 
-            Value::List(Rc::new(RefCell::new(values)))
+            Ok(Value::List(Rc::new(RefCell::new(values))))
         }
 
         ExpandedExpr::Add(a, b) => match (
-            eval_expr(a, env.clone(), decls.clone(), ctx, out),
-            eval_expr(b, env.clone(), decls, ctx, out),
+            eval_expr(a, env.clone(), decls.clone(), ctx, out)?,
+            eval_expr(b, env.clone(), decls, ctx, out)?,
         ) {
-            (Value::Int(x), Value::Int(y)) => Value::Int(x + y),
-            (Value::String(x), Value::String(y)) => Value::String(x + &y),
-            _ => panic!("type error: + expects ints"),
+            (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x + y)),
+            (Value::String(x), Value::String(y)) => Ok(Value::String(x + &y)),
+            _ => Err(EvalError::TypeError(types::int_type())),
         },
 
         ExpandedExpr::Sub(a, b) => match (
-            eval_expr(a, env.clone(), decls.clone(), ctx, out),
-            eval_expr(b, env.clone(), decls, ctx, out),
+            eval_expr(a, env.clone(), decls.clone(), ctx, out)?,
+            eval_expr(b, env.clone(), decls, ctx, out)?,
         ) {
-            (Value::Int(x), Value::Int(y)) => Value::Int(x - y),
-            _ => panic!("type error: - expects ints"),
+            (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x - y)),
+            _ => Err(EvalError::TypeError(types::int_type())),
         },
 
         ExpandedExpr::Mult(a, b) => match (
-            eval_expr(a, env.clone(), decls.clone(), ctx, out),
-            eval_expr(b, env.clone(), decls, ctx, out),
+            eval_expr(a, env.clone(), decls.clone(), ctx, out)?,
+            eval_expr(b, env.clone(), decls, ctx, out)?,
         ) {
-            (Value::Int(x), Value::Int(y)) => Value::Int(x * y),
-            _ => panic!("type error: * expects ints"),
+            (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x * y)),
+            _ => Err(EvalError::TypeError(types::int_type())),
         },
 
         ExpandedExpr::Div(a, b) => match (
-            eval_expr(a, env.clone(), decls.clone(), ctx, out),
-            eval_expr(b, env.clone(), decls, ctx, out),
+            eval_expr(a, env.clone(), decls.clone(), ctx, out)?,
+            eval_expr(b, env.clone(), decls, ctx, out)?,
         ) {
-            (Value::Int(x), Value::Int(y)) => Value::Int(x / y),
-            _ => panic!("type error: / expects ints"),
+            (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x / y)),
+            _ => Err(EvalError::TypeError(types::int_type())),
         },
 
         ExpandedExpr::Equals(a, b) => match (
-            eval_expr(a, env.clone(), decls.clone(), ctx, out),
-            eval_expr(b, env.clone(), decls, ctx, out),
+            eval_expr(a, env.clone(), decls.clone(), ctx, out)?,
+            eval_expr(b, env.clone(), decls, ctx, out)?,
         ) {
-            (Value::Int(x), Value::Int(y)) => Value::Bool(x == y),
-            (Value::String(x), Value::String(y)) => Value::Bool(x == y),
-            (Value::Bool(x), Value::Bool(y)) => Value::Bool(x == y),
-            _ => panic!("type error: == mismatched types"),
+            (Value::Int(x), Value::Int(y)) => Ok(Value::Bool(x == y)),
+            (Value::String(x), Value::String(y)) => Ok(Value::Bool(x == y)),
+            (Value::Bool(x), Value::Bool(y)) => Ok(Value::Bool(x == y)),
+            _ => Err(EvalError::TypeError(types::unit_type())),
         },
 
         ExpandedExpr::Call { callee, args } => {
             let func = match env.borrow().get(callee) {
                 Some(Value::Function(f)) => f,
-                _ => panic!("attempted to call a non-function"),
+                _ => return Err(EvalError::NonFunctionCall),
             };
 
             if func.params.len() != args.len() {
-                panic!("wrong number of arguments");
+                return Err(EvalError::ArgumentMismatch);
             }
 
-            let arg_vals: Vec<Value> = args
-                .iter()
-                .map(|a| eval_expr(a, env.clone(), decls.clone(), ctx, out))
-                .collect();
+            let arg_vals = args.iter().try_fold(Vec::new(), |mut v, a| {
+                v.push(eval_expr(a, env.clone(), decls.clone(), ctx, out)?);
+                Ok(v)
+            })?;
 
             let callee_env = Env::new_child(Rc::clone(&func.env));
 
@@ -121,12 +138,12 @@ pub fn eval_expr<W: Write>(
                 }
             }
 
-            let result = match eval_stmt(&func.body, callee_env, decls, ctx, out) {
+            let result = match eval_stmt(&func.body, callee_env, decls, ctx, out)? {
                 ExecResult::Return(v) => v,
                 ExecResult::Continue => Value::Unit,
             };
 
-            result
+            Ok(result)
         }
     }
 }
@@ -137,25 +154,25 @@ pub fn eval_stmt<W: Write>(
     decls: DeclRegistryRef,
     ctx: &mut Option<&mut MetaContext>,
     out: &mut W,
-) -> ExecResult {
+) -> Result<ExecResult, EvalError> {
     match stmt {
         ExpandedStmt::Print(expr) => {
-            let value = eval_expr(expr, env.clone(), decls, ctx, out);
+            let value = eval_expr(expr, env.clone(), decls, ctx, out)?;
             writeln!(out, "{}", value).unwrap();
-            ExecResult::Continue
+            Ok(ExecResult::Continue)
         }
 
         ExpandedStmt::If {
             cond,
             body,
             else_branch,
-        } => match eval_expr(cond, env.clone(), decls.clone(), ctx, out) {
+        } => match eval_expr(cond, env.clone(), decls.clone(), ctx, out)? {
             Value::Bool(true) => eval_stmt(body, env.clone(), decls, ctx, out),
             Value::Bool(false) => match else_branch {
                 Some(else_stmt) => eval_stmt(else_stmt, env.clone(), decls, ctx, out),
-                None => ExecResult::Continue,
+                None => Ok(ExecResult::Continue),
             },
-            _ => panic!("type error: expected bool expr"),
+            _ => Err(EvalError::TypeError(types::bool_type())),
         },
 
         ExpandedStmt::ForEach {
@@ -165,14 +182,14 @@ pub fn eval_stmt<W: Write>(
         } => {
             let value = eval_expr(iterable, env.clone(), decls.clone(), ctx, out);
 
-            for elem in value.enumerate().iter() {
+            for elem in value?.enumerate().iter() {
                 env.borrow_mut().push_scope();
                 env.borrow_mut().define(var.clone(), elem.clone());
 
-                match eval_stmt(body, env.clone(), decls.clone(), ctx, out) {
+                match eval_stmt(body, env.clone(), decls.clone(), ctx, out)? {
                     ExecResult::Return(v) => {
                         env.borrow_mut().pop_scope();
-                        return ExecResult::Return(v);
+                        return Ok(ExecResult::Return(v));
                     }
                     ExecResult::Continue => {}
                 }
@@ -180,18 +197,18 @@ pub fn eval_stmt<W: Write>(
                 env.borrow_mut().pop_scope();
             }
 
-            ExecResult::Continue
+            Ok(ExecResult::Continue)
         }
 
         ExpandedStmt::ExprStmt(expr) => {
             eval_expr(expr, env.clone(), decls, ctx, out);
-            ExecResult::Continue
+            Ok(ExecResult::Continue)
         }
 
         ExpandedStmt::Assignment { name, expr } => {
-            let value = eval_expr(expr, env.clone(), decls, ctx, out);
+            let value = eval_expr(expr, env.clone(), decls, ctx, out)?;
             env.borrow_mut().define(name.clone(), value);
-            ExecResult::Continue
+            Ok(ExecResult::Continue)
         }
 
         ExpandedStmt::Block(stmts) => {
@@ -210,15 +227,15 @@ pub fn eval_stmt<W: Write>(
 
             env.borrow_mut().define(name.clone(), Value::Function(func));
 
-            ExecResult::Continue
+            Ok(ExecResult::Continue)
         }
 
         ExpandedStmt::Return(opt_expr) => {
             let val = match opt_expr {
                 None => Value::Unit,
-                Some(expr) => eval_expr(expr, env, decls, ctx, out),
+                Some(expr) => eval_expr(expr, env, decls, ctx, out)?,
             };
-            ExecResult::Return(val)
+            Ok(ExecResult::Return(val))
         }
 
         ExpandedStmt::Gen(stmts) => {
@@ -227,7 +244,7 @@ pub fn eval_stmt<W: Write>(
             for stmt in substituted {
                 meta.emitted.push(stmt.clone());
             }
-            ExecResult::Continue
+            Ok(ExecResult::Continue)
         }
     }
 }
@@ -238,14 +255,14 @@ pub fn eval<W: Write>(
     decls: DeclRegistryRef,
     ctx: &mut Option<&mut MetaContext>,
     out: &mut W,
-) -> ExecResult {
+) -> Result<ExecResult, EvalError> {
     for stmt in stmts {
-        match eval_stmt(stmt, env.clone(), decls.clone(), ctx, out) {
+        match eval_stmt(stmt, env.clone(), decls.clone(), ctx, out)? {
             ExecResult::Continue => {}
             ExecResult::Return(v) => {
-                return ExecResult::Return(v);
+                return Ok(ExecResult::Return(v));
             }
         }
     }
-    ExecResult::Continue
+    Ok(ExecResult::Continue)
 }
