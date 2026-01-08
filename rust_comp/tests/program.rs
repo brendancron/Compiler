@@ -1,4 +1,6 @@
 use rust_comp::components::embed_resolver::DefaultResolver;
+use rust_comp::components::pipeline::*;
+use rust_comp::models::decl_registry::DeclRegistry;
 use std::cell::RefCell;
 use std::fs;
 use std::io::{self, Write};
@@ -65,14 +67,21 @@ fn run_language_tests() {
         let eval_buf = SharedBuf::new();
         let eval_handle = eval_buf.clone();
 
-        let mut pipeline = rust_comp::default_pipeline(
-            meta_out,
-            eval_handle,
-            DefaultResolver {
-                base_dir: PathBuf::from("."),
-            },
-        );
-        pipeline.run(source);
+        let resolver = DefaultResolver {
+            base_dir: PathBuf::from("."),
+        };
+
+        let pipeline = lexer_pipeline()
+            .then(parser_pipeline())
+            .then(metaprocessor_pipeline(meta_out, resolver))
+            .then(interpreter_pipeline(eval_handle));
+
+        let mut pipeline_ctx = PipelineCtx {
+            out_dir: PathBuf::from("../out"),
+            decl_reg: DeclRegistry::new(),
+        };
+
+        pipeline.run(source, &mut pipeline_ctx);
 
         let actual = String::from_utf8(eval_buf.into_inner().borrow().clone()).unwrap();
 

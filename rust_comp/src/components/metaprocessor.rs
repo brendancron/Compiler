@@ -5,7 +5,7 @@ use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use crate::models::value::{Function, Value};
 use crate::{
     components::interpreter::{self, EvalError},
-    models::decl_registry::{DeclRegistryRef, StructDef},
+    models::decl_registry::{DeclRegistry, StructDef},
 };
 use std::io::Write;
 use std::rc::Rc;
@@ -26,7 +26,7 @@ impl From<EvalError> for MetaProcessError {
 
 pub struct MetaProcessContext<'a, E: EmbedResolver, W: Write> {
     pub env: EnvRef,
-    pub decls: DeclRegistryRef,
+    pub decls: &'a mut DeclRegistry,
     pub embed_resolver: &'a mut E,
     pub out: &'a mut W,
 }
@@ -119,7 +119,7 @@ pub fn process_expr<E: EmbedResolver, W: Write>(
                     let val = interpreter::eval_expr(
                         &call_expr,
                         ctx.env.clone(),
-                        ctx.decls.clone(),
+                        ctx.decls,
                         &mut None,
                         ctx.out,
                     )?;
@@ -132,7 +132,6 @@ pub fn process_expr<E: EmbedResolver, W: Write>(
         BlueprintExpr::Typeof(id) => {
             let def = ctx
                 .decls
-                .borrow()
                 .get_struct(id)
                 .ok_or_else(|| MetaProcessError::UnknownType(id.clone()))?;
 
@@ -241,7 +240,7 @@ pub fn process_stmt<E: EmbedResolver, W: Write>(
         }
 
         BlueprintStmt::StructDecl { name, fields } => {
-            ctx.decls.borrow_mut().define_struct(
+            ctx.decls.define_struct(
                 name.clone(),
                 StructDef {
                     fields: fields.clone(),
@@ -269,10 +268,10 @@ pub fn process_stmt<E: EmbedResolver, W: Write>(
             interpreter::eval(
                 &processed_code,
                 ctx.env.clone(),
-                ctx.decls.clone(),
+                ctx.decls,
                 &mut Some(&mut meta_ctx),
                 ctx.out,
-            );
+            )?;
 
             Ok(meta_ctx.emitted)
         }

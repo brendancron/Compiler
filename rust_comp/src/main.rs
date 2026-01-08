@@ -1,34 +1,30 @@
-use rust_comp::components::embed_resolver::DefaultResolver;
-use rust_comp::components::pipeline::PipelineBuilder;
-use std::env;
+use rust_comp::components::embed_resolver::*;
+use rust_comp::components::pipeline::*;
+use rust_comp::models::decl_registry::DeclRegistry;
 use std::io::{self, Read};
 use std::path::PathBuf;
 
 fn main() {
-    let out_dir = env::args()
-        .skip_while(|a| a != "--out")
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("out"));
+    let resolver = DefaultResolver {
+        base_dir: PathBuf::from("."),
+    };
 
-    let mut pipeline = PipelineBuilder::new()
-        .dump_source(&out_dir)
-        .with_lexer()
-        .dump_tokens(&out_dir)
-        .with_parser()
-        .dump_blueprint_ast(&out_dir)
-        .with_metaprocessor(
-            io::stdout(),
-            DefaultResolver {
-                base_dir: PathBuf::from("."),
-            },
-        )
-        .dump_expanded_ast(&out_dir)
-        .dump_expanded_code(&out_dir)
-        .with_interpreter(io::stdout())
-        .build();
+    let pipeline = dump_source()
+        .then(lexer_pipeline())
+        .then(dump_tokens())
+        .then(parser_pipeline())
+        .then(dump_blueprint_ast())
+        .then(metaprocessor_pipeline(io::stdout(), resolver))
+        .then(dump_expanded_ast())
+        .then(dump_expanded_code())
+        .then(interpreter_pipeline(io::stdout()));
+
+    let mut pipeline_ctx = PipelineCtx {
+        out_dir: PathBuf::from("../out"),
+        decl_reg: DeclRegistry::new(),
+    };
 
     let mut buf = String::new();
     io::stdin().read_to_string(&mut buf).unwrap();
-    pipeline.run(buf)
+    pipeline.run(buf, &mut pipeline_ctx);
 }

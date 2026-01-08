@@ -28,18 +28,18 @@ pub struct DeclRegistry {
 }
 
 impl DeclRegistry {
-    pub fn new() -> DeclRegistryRef {
-        Rc::new(RefCell::new(DeclRegistry {
+    pub fn new() -> DeclRegistry {
+        DeclRegistry {
             structs: HashMap::new(),
             parent: None,
-        }))
+        }
     }
 
-    pub fn child(parent: DeclRegistryRef) -> DeclRegistryRef {
-        Rc::new(RefCell::new(DeclRegistry {
+    pub fn child(parent: DeclRegistryRef) -> DeclRegistry {
+        DeclRegistry {
             structs: HashMap::new(),
             parent: Some(parent),
-        }))
+        }
     }
 
     pub fn define_struct(&mut self, name: String, def: StructDef) {

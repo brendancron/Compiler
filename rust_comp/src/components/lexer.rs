@@ -1,5 +1,6 @@
 use crate::models::token::{Token, TokenMetadata, TokenType};
 
+#[derive(Debug)]
 pub enum ScanError {
     UnterminatedString,
     UnexpectedCharacter(char),
@@ -331,11 +332,11 @@ pub fn tokenize(s: &str) -> Result<Vec<Token>, ScanError> {
                 }
 
                 if j >= len {
-                    return Err(ScanError::UnterminatedString)
+                    return Err(ScanError::UnterminatedString);
                 }
             }
 
-            _ => return Err(ScanError::UnexpectedCharacter(c))
+            _ => return Err(ScanError::UnexpectedCharacter(c)),
         }
     }
 

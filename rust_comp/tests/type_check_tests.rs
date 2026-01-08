@@ -1,13 +1,11 @@
 use rust_comp::components::embed_resolver::DefaultResolver;
-use rust_comp::components::pipeline::PipelineBuilder;
-use rust_comp::components::type_checker::{
-    infer_expr, infer_expr_top, infer_stmt, infer_stmt_top, infer_stmts, infer_stmts_top,
-    type_check_expr, type_check_expr_top, TypeCheckCtx,
-};
+use rust_comp::components::pipeline::*;
+use rust_comp::components::type_checker::*;
+use rust_comp::models::decl_registry::DeclRegistry;
 use rust_comp::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use rust_comp::models::types::type_env::TypeEnv;
 use rust_comp::models::types::type_subst::TypeSubst;
-use rust_comp::models::types::types::{bool_type, int_type, string_type, unit_type, Type};
+use rust_comp::models::types::types::*;
 use std::io;
 use std::path::PathBuf;
 
@@ -16,20 +14,21 @@ mod type_check_tests {
     use super::*;
 
     fn exec_parse_pipeline(source: &str) -> Vec<ExpandedStmt> {
-        let mut pipeline = PipelineBuilder::new()
-            .with_lexer()
-            .with_parser()
-            .with_metaprocessor(
+        let pipeline = lexer_pipeline()
+            .then(parser_pipeline())
+            .then(metaprocessor_pipeline(
                 io::stdout(),
                 DefaultResolver {
                     base_dir: PathBuf::from("."),
                 },
-            )
-            .build();
-        let res = pipeline.run(source.to_string());
-        match res {
-            (stmts, _) => stmts,
-        }
+            ));
+
+        let mut pipeline_ctx = PipelineCtx {
+            out_dir: PathBuf::from("../out"),
+            decl_reg: DeclRegistry::new(),
+        };
+
+        pipeline.run(source.to_string(), &mut pipeline_ctx)
     }
 
     #[test]

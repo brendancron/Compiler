@@ -1,6 +1,6 @@
 use crate::components::metaprocessor::MetaContext;
 use crate::components::substitution::subst_stmts;
-use crate::models::decl_registry::DeclRegistryRef;
+use crate::models::decl_registry::DeclRegistry;
 use crate::models::environment::{Env, EnvRef};
 use crate::models::result::ExecResult;
 use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
@@ -26,7 +26,7 @@ pub struct EvalCtx<W> {
 pub fn eval_expr<W: Write>(
     expr: &ExpandedExpr,
     env: EnvRef,
-    decls: DeclRegistryRef,
+    decls: &mut DeclRegistry,
     ctx: &mut Option<&mut MetaContext>,
     out: &mut W,
 ) -> Result<Value, EvalError> {
@@ -37,14 +37,13 @@ pub fn eval_expr<W: Write>(
 
         ExpandedExpr::StructLiteral { type_name, fields } => {
             let _struct_def = decls
-                .borrow()
                 .get_struct(type_name)
                 .ok_or_else(|| EvalError::UnknownStructType(type_name.clone()))?;
 
             let mut fs = vec![];
 
             for (field_name, expr) in fields {
-                let value = eval_expr(expr, env.clone(), decls.clone(), ctx, out)?;
+                let value = eval_expr(expr, env.clone(), decls, ctx, out)?;
                 fs.push((field_name.clone(), value));
             }
 
@@ -65,14 +64,14 @@ pub fn eval_expr<W: Write>(
         ExpandedExpr::List(exprs) => {
             let mut values = Vec::new();
             for e in exprs {
-                values.push(eval_expr(e, env.clone(), decls.clone(), ctx, out)?);
+                values.push(eval_expr(e, env.clone(), decls, ctx, out)?);
             }
 
             Ok(Value::List(Rc::new(RefCell::new(values))))
         }
 
         ExpandedExpr::Add(a, b) => match (
-            eval_expr(a, env.clone(), decls.clone(), ctx, out)?,
+            eval_expr(a, env.clone(), decls, ctx, out)?,
             eval_expr(b, env.clone(), decls, ctx, out)?,
         ) {
             (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x + y)),
@@ -81,7 +80,7 @@ pub fn eval_expr<W: Write>(
         },
 
         ExpandedExpr::Sub(a, b) => match (
-            eval_expr(a, env.clone(), decls.clone(), ctx, out)?,
+            eval_expr(a, env.clone(), decls, ctx, out)?,
             eval_expr(b, env.clone(), decls, ctx, out)?,
         ) {
             (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x - y)),
@@ -89,7 +88,7 @@ pub fn eval_expr<W: Write>(
         },
 
         ExpandedExpr::Mult(a, b) => match (
-            eval_expr(a, env.clone(), decls.clone(), ctx, out)?,
+            eval_expr(a, env.clone(), decls, ctx, out)?,
             eval_expr(b, env.clone(), decls, ctx, out)?,
         ) {
             (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x * y)),
@@ -97,7 +96,7 @@ pub fn eval_expr<W: Write>(
         },
 
         ExpandedExpr::Div(a, b) => match (
-            eval_expr(a, env.clone(), decls.clone(), ctx, out)?,
+            eval_expr(a, env.clone(), decls, ctx, out)?,
             eval_expr(b, env.clone(), decls, ctx, out)?,
         ) {
             (Value::Int(x), Value::Int(y)) => Ok(Value::Int(x / y)),
@@ -105,7 +104,7 @@ pub fn eval_expr<W: Write>(
         },
 
         ExpandedExpr::Equals(a, b) => match (
-            eval_expr(a, env.clone(), decls.clone(), ctx, out)?,
+            eval_expr(a, env.clone(), decls, ctx, out)?,
             eval_expr(b, env.clone(), decls, ctx, out)?,
         ) {
             (Value::Int(x), Value::Int(y)) => Ok(Value::Bool(x == y)),
@@ -125,7 +124,7 @@ pub fn eval_expr<W: Write>(
             }
 
             let arg_vals = args.iter().try_fold(Vec::new(), |mut v, a| {
-                v.push(eval_expr(a, env.clone(), decls.clone(), ctx, out)?);
+                v.push(eval_expr(a, env.clone(), decls, ctx, out)?);
                 Ok(v)
             })?;
 
@@ -151,7 +150,7 @@ pub fn eval_expr<W: Write>(
 pub fn eval_stmt<W: Write>(
     stmt: &ExpandedStmt,
     env: EnvRef,
-    decls: DeclRegistryRef,
+    decls: &mut DeclRegistry,
     ctx: &mut Option<&mut MetaContext>,
     out: &mut W,
 ) -> Result<ExecResult, EvalError> {
@@ -166,7 +165,7 @@ pub fn eval_stmt<W: Write>(
             cond,
             body,
             else_branch,
-        } => match eval_expr(cond, env.clone(), decls.clone(), ctx, out)? {
+        } => match eval_expr(cond, env.clone(), decls, ctx, out)? {
             Value::Bool(true) => eval_stmt(body, env.clone(), decls, ctx, out),
             Value::Bool(false) => match else_branch {
                 Some(else_stmt) => eval_stmt(else_stmt, env.clone(), decls, ctx, out),
@@ -180,13 +179,13 @@ pub fn eval_stmt<W: Write>(
             iterable,
             body,
         } => {
-            let value = eval_expr(iterable, env.clone(), decls.clone(), ctx, out);
+            let value = eval_expr(iterable, env.clone(), decls, ctx, out);
 
             for elem in value?.enumerate().iter() {
                 env.borrow_mut().push_scope();
                 env.borrow_mut().define(var.clone(), elem.clone());
 
-                match eval_stmt(body, env.clone(), decls.clone(), ctx, out)? {
+                match eval_stmt(body, env.clone(), decls, ctx, out)? {
                     ExecResult::Return(v) => {
                         env.borrow_mut().pop_scope();
                         return Ok(ExecResult::Return(v));
@@ -201,7 +200,7 @@ pub fn eval_stmt<W: Write>(
         }
 
         ExpandedStmt::ExprStmt(expr) => {
-            eval_expr(expr, env.clone(), decls, ctx, out);
+            eval_expr(expr, env.clone(), decls, ctx, out)?;
             Ok(ExecResult::Continue)
         }
 
@@ -252,12 +251,12 @@ pub fn eval_stmt<W: Write>(
 pub fn eval<W: Write>(
     stmts: &Vec<ExpandedStmt>,
     env: EnvRef,
-    decls: DeclRegistryRef,
+    decls: &mut DeclRegistry,
     ctx: &mut Option<&mut MetaContext>,
     out: &mut W,
 ) -> Result<ExecResult, EvalError> {
     for stmt in stmts {
-        match eval_stmt(stmt, env.clone(), decls.clone(), ctx, out)? {
+        match eval_stmt(stmt, env.clone(), decls, ctx, out)? {
             ExecResult::Continue => {}
             ExecResult::Return(v) => {
                 return Ok(ExecResult::Return(v));
