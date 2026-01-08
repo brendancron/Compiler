@@ -25,32 +25,24 @@
             "id": "39ca65ae2952a527",
             "type": "leaf",
             "state": {
-              "type": "excalidraw",
+              "type": "kanban",
               "state": {
-                "file": "Phase Architecture.md"
+                "file": "TODO Kanban.md",
+                "kanbanViewState": {
+                  "kanban-plugin": "board",
+                  "list-collapse": [
+                    false,
+                    false,
+                    false
+                  ]
+                }
               },
-              "icon": "excalidraw-icon",
-              "title": "Phase Architecture"
+              "icon": "lucide-trello",
+              "title": "TODO Kanban"
             }
           }
         ],
         "currentTab": 1
-      },
-      {
-        "id": "8e43458c3edc31d8",
-        "type": "tabs",
-        "children": [
-          {
-            "id": "39ba4a2fca9f8858",
-            "type": "leaf",
-            "state": {
-              "type": "graph",
-              "state": {},
-              "icon": "lucide-git-fork",
-              "title": "Graph view"
-            }
-          }
-        ]
       }
     ],
     "direction": "vertical"
@@ -207,15 +199,19 @@
       "templates:Insert template": false,
       "command-palette:Open command palette": false,
       "bases:Create new base": false,
-      "obsidian-excalidraw-plugin:New drawing": false
+      "obsidian-excalidraw-plugin:New drawing": false,
+      "obsidian-kanban:Create new board": false
     }
   },
-  "active": "39ca65ae2952a527",
+  "active": "a6c029583903630a",
   "lastOpenFiles": [
-    "TODO.md",
-    "Cronyx.md",
     "Phase Architecture.md",
     "Type Checking.md",
+    "TODO Kanban.md",
+    "TODO.md",
+    "Useful Commands.md",
+    "Tasks",
+    "Cronyx.md",
     "Hindley-Milner/HM Algorithm W.md",
     "Hindley-Milner/Type Order in HM.md",
     "Hindley-Milner/HM Type System.md",
@@ -229,8 +225,6 @@
     "Hindley-Milner/HM Assignments & Expressions.md",
     "Hindley-Milner/Free and Bound Type Variables.md",
     "Hindley-Milner",
-    "Key Takeaways.md",
-    "Useful Commands.md",
-    "Untitled"
+    "Key Takeaways.md"
   ]
 }
