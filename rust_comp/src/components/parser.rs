@@ -149,6 +149,15 @@ pub fn parse(tokens: &[Token]) -> Result<Vec<BlueprintStmt>, ParseError> {
                     Ok(BlueprintExpr::Embed(file_path))
                 }
 
+                TokenType::Mod => {
+                    consume(tokens, pos, TokenType::Mod)?;
+                    consume(tokens, pos, TokenType::LeftParen)?;
+                    let mod_name = consume(tokens, pos, TokenType::String)?.expect_str();
+                    consume(tokens, pos, TokenType::RightParen)?;
+                    Ok(BlueprintExpr::Embed(mod_name))
+                }
+
+
                 TokenType::Identifier => {
                     let name = consume_next(tokens, pos).expect_str();
 

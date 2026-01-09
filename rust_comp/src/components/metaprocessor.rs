@@ -142,6 +142,10 @@ pub fn process_expr<E: EmbedResolver, W: Write>(
             let contents = std::fs::read_to_string(&file_path).unwrap();
             Ok(ExpandedExpr::String(contents))
         }
+        
+        BlueprintExpr::Mod(mod_name) => {
+            Ok(ExpandedExpr::String(mod_name.clone()))
+        }
     }
 }
 

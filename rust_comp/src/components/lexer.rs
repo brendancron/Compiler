@@ -281,6 +281,7 @@ pub fn tokenize(s: &str) -> Result<Vec<Token>, ScanError> {
                     "if" => TokenType::If,
                     "in" => TokenType::In,
                     "meta" => TokenType::Meta,
+                    "mod" => TokenType::Mod,
                     "or" => TokenType::Or,
                     "print" => TokenType::Print,
                     "return" => TokenType::Return,

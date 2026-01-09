@@ -42,6 +42,7 @@ pub enum TokenType {
     If,
     In,
     Meta,
+    Mod,
     Or,
     Print,
     Return,

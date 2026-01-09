@@ -27,6 +27,8 @@ pub enum BlueprintExpr {
     },
 
     Typeof(String),
+    
+    Mod(String),
     Embed(String),
 }
 
