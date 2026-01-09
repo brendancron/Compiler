@@ -1,4 +1,4 @@
-use crate::components::embed_resolver::EmbedResolver;
+use crate::components::external_resolver::ExternalResolver;
 use crate::components::formatter::{self};
 use crate::components::interpreter::{self, EvalError};
 use crate::components::lexer::{self, ScanError};
@@ -123,7 +123,7 @@ pub fn metaprocessor_pipeline<E, W>(
     mut resolver: E,
 ) -> Pipeline<Vec<BlueprintStmt>, Vec<ExpandedStmt>>
 where
-    E: EmbedResolver + 'static,
+    E: ExternalResolver + 'static,
     W: Write + 'static,
 {
     Pipeline::new(move |blueprint, ctx| {

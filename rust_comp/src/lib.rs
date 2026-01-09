@@ -1,5 +1,5 @@
 pub mod components {
-    pub mod embed_resolver;
+    pub mod external_resolver;
     pub mod formatter;
     pub mod interpreter;
     pub mod lexer;
@@ -29,3 +29,5 @@ pub mod models {
     }
     pub mod value;
 }
+
+pub mod config;

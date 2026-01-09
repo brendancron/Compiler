@@ -1,4 +1,4 @@
-use rust_comp::components::embed_resolver::*;
+use rust_comp::components::external_resolver::*;
 use rust_comp::components::pipeline::*;
 use rust_comp::models::decl_registry::DeclRegistry;
 use std::io::{self, Read};

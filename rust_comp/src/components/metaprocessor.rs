@@ -1,4 +1,4 @@
-use crate::components::embed_resolver::EmbedResolver;
+use crate::components::external_resolver::ExternalResolver;
 use crate::models::environment::EnvRef;
 use crate::models::semantics::blueprint_ast::{BlueprintExpr, BlueprintStmt};
 use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
@@ -24,7 +24,7 @@ impl From<EvalError> for MetaProcessError {
     }
 }
 
-pub struct MetaProcessContext<'a, E: EmbedResolver, W: Write> {
+pub struct MetaProcessContext<'a, E: ExternalResolver, W: Write> {
     pub env: EnvRef,
     pub decls: &'a mut DeclRegistry,
     pub embed_resolver: &'a mut E,
@@ -49,7 +49,7 @@ pub fn value_to_literal(val: Value) -> Result<ExpandedExpr, MetaProcessError> {
     }
 }
 
-pub fn process_expr<E: EmbedResolver, W: Write>(
+pub fn process_expr<E: ExternalResolver, W: Write>(
     expr: &BlueprintExpr,
     ctx: &mut MetaProcessContext<E, W>,
 ) -> Result<ExpandedExpr, MetaProcessError> {
@@ -149,7 +149,7 @@ pub fn process_expr<E: EmbedResolver, W: Write>(
     }
 }
 
-pub fn process_exprs<E: EmbedResolver, W: Write>(
+pub fn process_exprs<E: ExternalResolver, W: Write>(
     exprs: &Vec<BlueprintExpr>,
     ctx: &mut MetaProcessContext<E, W>,
 ) -> Result<Vec<ExpandedExpr>, MetaProcessError> {
@@ -162,7 +162,7 @@ pub fn process_exprs<E: EmbedResolver, W: Write>(
     Ok(output)
 }
 
-pub fn process_stmt<E: EmbedResolver, W: Write>(
+pub fn process_stmt<E: ExternalResolver, W: Write>(
     stmt: &BlueprintStmt,
     ctx: &mut MetaProcessContext<E, W>,
 ) -> Result<Vec<ExpandedStmt>, MetaProcessError> {
@@ -282,7 +282,7 @@ pub fn process_stmt<E: EmbedResolver, W: Write>(
     }
 }
 
-fn process_to_block<E: EmbedResolver, W: Write>(
+fn process_to_block<E: ExternalResolver, W: Write>(
     stmt: &BlueprintStmt,
     ctx: &mut MetaProcessContext<E, W>,
 ) -> Result<ExpandedStmt, MetaProcessError> {
@@ -300,7 +300,7 @@ fn process_to_block<E: EmbedResolver, W: Write>(
     }
 }
 
-pub fn process<E: EmbedResolver, W: Write>(
+pub fn process<E: ExternalResolver, W: Write>(
     stmts: &Vec<BlueprintStmt>,
     ctx: &mut MetaProcessContext<E, W>,
 ) -> Result<Vec<ExpandedStmt>, MetaProcessError> {
