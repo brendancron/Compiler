@@ -9,6 +9,7 @@ use crate::{
 };
 use std::io::Write;
 use std::rc::Rc;
+use std::path::Path;
 
 #[derive(Debug)]
 pub enum MetaProcessError {
@@ -27,8 +28,9 @@ impl From<EvalError> for MetaProcessError {
 pub struct MetaProcessContext<'a, E: ExternalResolver, W: Write> {
     pub env: EnvRef,
     pub decls: &'a mut DeclRegistry,
-    pub embed_resolver: &'a mut E,
+    pub resolver: &'a mut E,
     pub out: &'a mut W,
+    pub curr_dir: &'a Path,
 }
 
 pub struct MetaContext {
@@ -128,7 +130,7 @@ pub fn process_expr<E: ExternalResolver, W: Write>(
                 None => Ok(call_expr),
             }
         }
-
+        
         BlueprintExpr::Typeof(id) => {
             let def = ctx
                 .decls
@@ -139,10 +141,15 @@ pub fn process_expr<E: ExternalResolver, W: Write>(
         }
 
         BlueprintExpr::Embed(file_path) => {
-            let contents = std::fs::read_to_string(&file_path).unwrap();
+            let contents = ctx.resolver
+                .read_file(ctx.curr_dir, file_path)
+                .ok_or_else(|| MetaProcessError::EmbedFailed {
+                    path: file_path.clone(),
+                    error: "file not found".to_string(),
+                })?;
             Ok(ExpandedExpr::String(contents))
         }
-        
+
         BlueprintExpr::Mod(mod_name) => {
             Ok(ExpandedExpr::String(mod_name.clone()))
         }

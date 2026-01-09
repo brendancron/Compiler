@@ -107,6 +107,7 @@ impl<I: 'static> Pipeline<I, I> {
 #[derive(Clone)]
 pub struct PipelineCtx {
     pub out_dir: PathBuf,
+    pub root_dir: PathBuf,
     pub decl_reg: DeclRegistry,
 }
 
@@ -132,8 +133,9 @@ where
         let mut meta_process_ctx = MetaProcessContext {
             env: meta_env,
             decls: &mut ctx.decl_reg,
-            embed_resolver: &mut resolver,
+            resolver: &mut resolver,
             out: &mut out,
+            curr_dir: &ctx.root_dir,
         };
 
         let processed = metaprocessor::process(&blueprint, &mut meta_process_ctx)
