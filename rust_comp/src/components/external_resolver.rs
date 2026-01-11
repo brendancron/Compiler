@@ -11,7 +11,6 @@ pub struct DefaultResolver {}
 
 impl ExternalResolver for DefaultResolver {
     fn read_file(&self, curr_dir: &Path, relative_path: &str) -> Option<String> {
-        println!("{}", relative_path);
         let path = curr_dir.join(relative_path);
         std::fs::read_to_string(&path).ok()
     }

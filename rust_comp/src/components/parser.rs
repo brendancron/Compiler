@@ -1,5 +1,5 @@
 use crate::models::semantics::blueprint_ast::{
-    BlueprintExpr, BlueprintFuncType, BlueprintStmt, TypeExpr,
+    BlueprintExpr, BlueprintFuncType, BlueprintStmt, TypeExpr, BlueprintAst,
 };
 use crate::models::token::{Token, TokenType};
 
@@ -100,380 +100,379 @@ fn parse_type(tokens: &[Token], pos: &mut usize) -> Result<TypeExpr, ParseError>
     }
 }
 
-pub fn parse(tokens: &[Token]) -> Result<Vec<BlueprintStmt>, ParseError> {
-    let mut pos = 0;
 
-    fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize) -> Result<BlueprintExpr, ParseError> {
-        match tokens.get(*pos) {
-            Some(tok) => match tok.token_type {
-                TokenType::Number => {
-                    consume_next(tokens, pos);
-                    Ok(BlueprintExpr::Int(tok.expect_int()))
-                }
+fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize) -> Result<BlueprintExpr, ParseError> {
+    match tokens.get(*pos) {
+        Some(tok) => match tok.token_type {
+            TokenType::Number => {
+                consume_next(tokens, pos);
+                Ok(BlueprintExpr::Int(tok.expect_int()))
+            }
 
-                TokenType::String => {
-                    consume_next(tokens, pos);
-                    Ok(BlueprintExpr::String(tok.expect_str()))
-                }
+            TokenType::String => {
+                consume_next(tokens, pos);
+                Ok(BlueprintExpr::String(tok.expect_str()))
+            }
 
-                TokenType::True => {
-                    consume_next(tokens, pos);
-                    Ok(BlueprintExpr::Bool(true))
-                }
+            TokenType::True => {
+                consume_next(tokens, pos);
+                Ok(BlueprintExpr::Bool(true))
+            }
 
-                TokenType::False => {
-                    consume_next(tokens, pos);
-                    Ok(BlueprintExpr::Bool(false))
-                }
+            TokenType::False => {
+                consume_next(tokens, pos);
+                Ok(BlueprintExpr::Bool(false))
+            }
 
-                TokenType::LeftParen => {
+            TokenType::LeftParen => {
+                consume(tokens, pos, TokenType::LeftParen)?;
+                let expr = parse_expr(tokens, pos)?;
+                consume(tokens, pos, TokenType::RightParen)?;
+                Ok(expr)
+            }
+
+            TokenType::Typeof => {
+                consume(tokens, pos, TokenType::Typeof)?;
+                consume(tokens, pos, TokenType::LeftParen)?;
+                let id = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+                consume(tokens, pos, TokenType::RightParen)?;
+                Ok(BlueprintExpr::Typeof(id))
+            }
+
+            TokenType::Embed => {
+                consume(tokens, pos, TokenType::Embed)?;
+                consume(tokens, pos, TokenType::LeftParen)?;
+                let file_path = consume(tokens, pos, TokenType::String)?.expect_str();
+                consume(tokens, pos, TokenType::RightParen)?;
+                Ok(BlueprintExpr::Embed(file_path))
+            }
+
+            TokenType::Import => {
+                consume(tokens, pos, TokenType::Import)?;
+                consume(tokens, pos, TokenType::LeftParen)?;
+                let mod_name = consume(tokens, pos, TokenType::String)?.expect_str();
+                consume(tokens, pos, TokenType::RightParen)?;
+                Ok(BlueprintExpr::Import(mod_name))
+            }
+
+
+            TokenType::Identifier => {
+                let name = consume_next(tokens, pos).expect_str();
+
+                if check(tokens, *pos, TokenType::LeftParen) {
                     consume(tokens, pos, TokenType::LeftParen)?;
-                    let expr = parse_expr(tokens, pos)?;
-                    consume(tokens, pos, TokenType::RightParen)?;
-                    Ok(expr)
-                }
-
-                TokenType::Typeof => {
-                    consume(tokens, pos, TokenType::Typeof)?;
-                    consume(tokens, pos, TokenType::LeftParen)?;
-                    let id = consume(tokens, pos, TokenType::Identifier)?.expect_str();
-                    consume(tokens, pos, TokenType::RightParen)?;
-                    Ok(BlueprintExpr::Typeof(id))
-                }
-
-                TokenType::Embed => {
-                    consume(tokens, pos, TokenType::Embed)?;
-                    consume(tokens, pos, TokenType::LeftParen)?;
-                    let file_path = consume(tokens, pos, TokenType::String)?.expect_str();
-                    consume(tokens, pos, TokenType::RightParen)?;
-                    Ok(BlueprintExpr::Embed(file_path))
-                }
-
-                TokenType::Mod => {
-                    consume(tokens, pos, TokenType::Mod)?;
-                    consume(tokens, pos, TokenType::LeftParen)?;
-                    let mod_name = consume(tokens, pos, TokenType::String)?.expect_str();
-                    consume(tokens, pos, TokenType::RightParen)?;
-                    Ok(BlueprintExpr::Embed(mod_name))
-                }
-
-
-                TokenType::Identifier => {
-                    let name = consume_next(tokens, pos).expect_str();
-
-                    if check(tokens, *pos, TokenType::LeftParen) {
-                        consume(tokens, pos, TokenType::LeftParen)?;
-                        let args = parse_separated(
-                            tokens,
-                            pos,
-                            TokenType::Comma,
-                            TokenType::RightParen,
-                            parse_expr,
-                        )?;
-                        consume(tokens, pos, TokenType::RightParen)?;
-
-                        Ok(BlueprintExpr::Call { callee: name, args })
-                    } else if check(tokens, *pos, TokenType::LeftBrace) {
-                        consume(tokens, pos, TokenType::LeftBrace)?;
-
-                        let fields = parse_separated(
-                            tokens,
-                            pos,
-                            TokenType::Comma,
-                            TokenType::RightBrace,
-                            |tokens, pos| {
-                                let field_name =
-                                    consume(tokens, pos, TokenType::Identifier)?.expect_str();
-                                consume(tokens, pos, TokenType::Colon)?;
-                                let expr = parse_expr(tokens, pos)?;
-                                Ok((field_name, Box::new(expr)))
-                            },
-                        )?;
-
-                        consume(tokens, pos, TokenType::RightBrace)?;
-
-                        Ok(BlueprintExpr::StructLiteral {
-                            type_name: name,
-                            fields,
-                        })
-                    } else {
-                        Ok(BlueprintExpr::Variable(name))
-                    }
-                }
-
-                TokenType::LeftBracket => {
-                    consume(tokens, pos, TokenType::LeftBracket)?;
-
-                    let elems = parse_separated(
+                    let args = parse_separated(
                         tokens,
                         pos,
                         TokenType::Comma,
-                        TokenType::RightBracket,
+                        TokenType::RightParen,
                         parse_expr,
                     )?;
-
-                    consume(tokens, pos, TokenType::RightBracket)?;
-
-                    Ok(BlueprintExpr::List(elems))
-                }
-
-                _ => panic!("expected literal or '('"),
-            },
-            None => panic!("Unexpected EOF"),
-        }
-    }
-
-    fn parse_term<'a>(tokens: &'a [Token], pos: &mut usize) -> Result<BlueprintExpr, ParseError> {
-        let mut left = parse_factor(tokens, pos)?;
-
-        loop {
-            match tokens.get(*pos) {
-                Some(tok) => match tok.token_type {
-                    TokenType::Star => {
-                        *pos += 1;
-                        let right = parse_factor(tokens, pos)?;
-                        left = BlueprintExpr::Mult(Box::new(left), Box::new(right));
-                    }
-                    TokenType::Slash => {
-                        *pos += 1;
-                        let right = parse_factor(tokens, pos)?;
-                        left = BlueprintExpr::Div(Box::new(left), Box::new(right));
-                    }
-                    _ => return Ok(left),
-                },
-                _ => return Ok(left),
-            }
-        }
-    }
-
-    fn parse_expr<'a>(tokens: &'a [Token], pos: &mut usize) -> Result<BlueprintExpr, ParseError> {
-        let mut left = parse_term(tokens, pos)?;
-
-        loop {
-            match tokens.get(*pos) {
-                Some(tok) => match tok.token_type {
-                    TokenType::Plus => {
-                        *pos += 1;
-                        let right = parse_term(tokens, pos)?;
-                        left = BlueprintExpr::Add(Box::new(left), Box::new(right));
-                    }
-
-                    TokenType::Minus => {
-                        *pos += 1;
-                        let right = parse_term(tokens, pos)?;
-                        left = BlueprintExpr::Sub(Box::new(left), Box::new(right));
-                    }
-
-                    TokenType::EqualEqual => {
-                        *pos += 1;
-                        let right = parse_term(tokens, pos)?;
-                        left = BlueprintExpr::Equals(Box::new(left), Box::new(right));
-                    }
-
-                    _ => return Ok(left),
-                },
-                _ => return Ok(left),
-            }
-        }
-    }
-
-    fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize) -> Result<BlueprintStmt, ParseError> {
-        fn parse_expr_stmt<'a>(
-            tokens: &'a [Token],
-            pos: &mut usize,
-        ) -> Result<BlueprintStmt, ParseError> {
-            let expr = parse_expr(tokens, pos)?;
-            consume(tokens, pos, TokenType::Semicolon)?;
-            Ok(BlueprintStmt::ExprStmt(Box::new(expr)))
-        }
-
-        match tokens.get(*pos) {
-            Some(tok) => match tok.token_type {
-                TokenType::Print => {
-                    consume(tokens, pos, TokenType::Print)?;
-                    consume(tokens, pos, TokenType::LeftParen)?;
-                    let expr = parse_expr(tokens, pos)?;
                     consume(tokens, pos, TokenType::RightParen)?;
-                    consume(tokens, pos, TokenType::Semicolon)?;
-                    Ok(BlueprintStmt::Print(Box::new(expr)))
-                }
 
-                TokenType::If => {
-                    consume(tokens, pos, TokenType::If)?;
-                    consume(tokens, pos, TokenType::LeftParen)?;
-                    let conditional = parse_expr(tokens, pos)?;
-                    consume(tokens, pos, TokenType::RightParen)?;
+                    Ok(BlueprintExpr::Call { callee: name, args })
+                } else if check(tokens, *pos, TokenType::LeftBrace) {
                     consume(tokens, pos, TokenType::LeftBrace)?;
-                    let inner = parse_block(tokens, pos)?;
-                    consume(tokens, pos, TokenType::RightBrace)?;
-                    let else_branch = if check(tokens, *pos, TokenType::Else) {
-                        consume(tokens, pos, TokenType::Else)?;
-                        if check(tokens, *pos, TokenType::If) {
-                            Some(Box::new(parse_stmt(tokens, pos)?))
-                        } else {
-                            consume(tokens, pos, TokenType::LeftBrace)?;
-                            let stmt = parse_stmt(tokens, pos)?;
-                            consume(tokens, pos, TokenType::RightBrace)?;
-                            Some(Box::new(stmt))
-                        }
-                    } else {
-                        None
-                    };
 
-                    Ok(BlueprintStmt::If {
-                        cond: Box::new(conditional),
-                        body: Box::new(inner),
-                        else_branch: else_branch,
-                    })
-                }
-
-                TokenType::For => {
-                    consume(tokens, pos, TokenType::For)?;
-                    consume(tokens, pos, TokenType::LeftParen)?;
-                    let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
-                    consume(tokens, pos, TokenType::In)?;
-                    let iter = Box::new(parse_expr(tokens, pos)?);
-                    consume(tokens, pos, TokenType::RightParen)?;
-                    consume(tokens, pos, TokenType::LeftBrace)?;
-                    let inner = Box::new(parse_block(tokens, pos)?);
-                    consume(tokens, pos, TokenType::RightBrace)?;
-                    Ok(BlueprintStmt::ForEach {
-                        var: name,
-                        iterable: iter,
-                        body: inner,
-                    })
-                }
-
-                TokenType::Var => {
-                    consume(tokens, pos, TokenType::Var)?;
-                    let id = consume(tokens, pos, TokenType::Identifier)?;
-                    consume(tokens, pos, TokenType::Equal)?;
-                    let expr = parse_expr(tokens, pos)?;
-                    consume(tokens, pos, TokenType::Semicolon)?;
-                    Ok(BlueprintStmt::Assignment {
-                        name: id.expect_str(),
-                        expr: Box::new(expr),
-                    })
-                }
-
-                TokenType::Func => parse_fn_decl(tokens, pos, BlueprintFuncType::Normal),
-
-                TokenType::Struct => {
-                    consume(tokens, pos, TokenType::Struct)?;
-                    let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
-                    consume(tokens, pos, TokenType::LeftBrace)?;
                     let fields = parse_separated(
                         tokens,
                         pos,
-                        TokenType::Semicolon,
+                        TokenType::Comma,
                         TokenType::RightBrace,
                         |tokens, pos| {
                             let field_name =
                                 consume(tokens, pos, TokenType::Identifier)?.expect_str();
                             consume(tokens, pos, TokenType::Colon)?;
-                            let ty = parse_type(tokens, pos)?;
-                            Ok((field_name, ty))
+                            let expr = parse_expr(tokens, pos)?;
+                            Ok((field_name, Box::new(expr)))
                         },
                     )?;
 
                     consume(tokens, pos, TokenType::RightBrace)?;
 
-                    Ok(BlueprintStmt::StructDecl { name, fields })
+                    Ok(BlueprintExpr::StructLiteral {
+                        type_name: name,
+                        fields,
+                    })
+                } else {
+                    Ok(BlueprintExpr::Variable(name))
                 }
-
-                TokenType::Return => {
-                    consume(tokens, pos, TokenType::Return)?;
-                    let opt_expr = if check(tokens, *pos, TokenType::Semicolon) {
-                        None
-                    } else {
-                        Some(Box::new(parse_expr(tokens, pos)?))
-                    };
-                    consume(tokens, pos, TokenType::Semicolon)?;
-                    Ok(BlueprintStmt::Return(opt_expr))
-                }
-
-                TokenType::Gen => {
-                    consume(tokens, pos, TokenType::Gen)?;
-                    let stmt = parse_stmt(tokens, pos)?;
-                    Ok(BlueprintStmt::Gen(vec![stmt]))
-                }
-
-                TokenType::LeftBrace => {
-                    consume(tokens, pos, TokenType::LeftBrace)?;
-                    let body = parse_block(tokens, pos)?;
-                    consume(tokens, pos, TokenType::RightBrace)?;
-                    Ok(body)
-                }
-
-                TokenType::Meta => parse_meta_stmt(tokens, pos),
-
-                _ => parse_expr_stmt(tokens, pos),
-            },
-            _ => parse_expr_stmt(tokens, pos),
-        }
-    }
-
-    fn parse_meta_stmt(tokens: &[Token], pos: &mut usize) -> Result<BlueprintStmt, ParseError> {
-        consume(tokens, pos, TokenType::Meta)?;
-
-        match peek(tokens, *pos) {
-            Some(TokenType::Func) => parse_fn_decl(tokens, pos, BlueprintFuncType::Meta),
-            _ => {
-                let stmt = parse_stmt(tokens, pos)?;
-                Ok(BlueprintStmt::MetaStmt(Box::new(stmt)))
             }
+
+            TokenType::LeftBracket => {
+                consume(tokens, pos, TokenType::LeftBracket)?;
+
+                let elems = parse_separated(
+                    tokens,
+                    pos,
+                    TokenType::Comma,
+                    TokenType::RightBracket,
+                    parse_expr,
+                )?;
+
+                consume(tokens, pos, TokenType::RightBracket)?;
+
+                Ok(BlueprintExpr::List(elems))
+            }
+
+            _ => panic!("expected literal or '('"),
+        },
+        None => panic!("Unexpected EOF"),
+    }
+}
+
+fn parse_term<'a>(tokens: &'a [Token], pos: &mut usize) -> Result<BlueprintExpr, ParseError> {
+    let mut left = parse_factor(tokens, pos)?;
+
+    loop {
+        match tokens.get(*pos) {
+            Some(tok) => match tok.token_type {
+                TokenType::Star => {
+                    *pos += 1;
+                    let right = parse_factor(tokens, pos)?;
+                    left = BlueprintExpr::Mult(Box::new(left), Box::new(right));
+                }
+                TokenType::Slash => {
+                    *pos += 1;
+                    let right = parse_factor(tokens, pos)?;
+                    left = BlueprintExpr::Div(Box::new(left), Box::new(right));
+                }
+                _ => return Ok(left),
+            },
+            _ => return Ok(left),
         }
     }
+}
 
-    fn parse_fn_decl(
-        tokens: &[Token],
+
+fn parse_expr<'a>(tokens: &'a [Token], pos: &mut usize) -> Result<BlueprintExpr, ParseError> {
+    let mut left = parse_term(tokens, pos)?;
+
+    loop {
+        match tokens.get(*pos) {
+            Some(tok) => match tok.token_type {
+                TokenType::Plus => {
+                    *pos += 1;
+                    let right = parse_term(tokens, pos)?;
+                    left = BlueprintExpr::Add(Box::new(left), Box::new(right));
+                }
+
+                TokenType::Minus => {
+                    *pos += 1;
+                    let right = parse_term(tokens, pos)?;
+                    left = BlueprintExpr::Sub(Box::new(left), Box::new(right));
+                }
+
+                TokenType::EqualEqual => {
+                    *pos += 1;
+                    let right = parse_term(tokens, pos)?;
+                    left = BlueprintExpr::Equals(Box::new(left), Box::new(right));
+                }
+
+                _ => return Ok(left),
+            },
+            _ => return Ok(left),
+        }
+    }
+}
+
+
+fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize) -> Result<BlueprintStmt, ParseError> {
+    fn parse_expr_stmt<'a>(
+        tokens: &'a [Token],
         pos: &mut usize,
-        func_type: BlueprintFuncType,
     ) -> Result<BlueprintStmt, ParseError> {
-        consume(tokens, pos, TokenType::Func)?;
-        let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
-
-        consume(tokens, pos, TokenType::LeftParen)?;
-        let params = parse_separated(
-            tokens,
-            pos,
-            TokenType::Comma,
-            TokenType::RightParen,
-            |tokens, pos| Ok(consume(tokens, pos, TokenType::Identifier)?.expect_str()),
-        )?;
-        consume(tokens, pos, TokenType::RightParen)?;
-
-        consume(tokens, pos, TokenType::LeftBrace)?;
-        let body = parse_block(tokens, pos)?;
-        consume(tokens, pos, TokenType::RightBrace)?;
-
-        Ok(BlueprintStmt::FnDecl {
-            name,
-            func_type,
-            params,
-            body: Box::new(body),
-        })
+        let expr = parse_expr(tokens, pos)?;
+        consume(tokens, pos, TokenType::Semicolon)?;
+        Ok(BlueprintStmt::ExprStmt(Box::new(expr)))
     }
 
-    fn parse_block(tokens: &[Token], pos: &mut usize) -> Result<BlueprintStmt, ParseError> {
-        let mut stmts = Vec::new();
+    match tokens.get(*pos) {
+        Some(tok) => match tok.token_type {
+            TokenType::Print => {
+                consume(tokens, pos, TokenType::Print)?;
+                consume(tokens, pos, TokenType::LeftParen)?;
+                let expr = parse_expr(tokens, pos)?;
+                consume(tokens, pos, TokenType::RightParen)?;
+                consume(tokens, pos, TokenType::Semicolon)?;
+                Ok(BlueprintStmt::Print(Box::new(expr)))
+            }
 
-        while *pos < tokens.len() && tokens[*pos].token_type != TokenType::RightBrace {
-            stmts.push(parse_stmt(tokens, pos)?);
+            TokenType::If => {
+                consume(tokens, pos, TokenType::If)?;
+                consume(tokens, pos, TokenType::LeftParen)?;
+                let conditional = parse_expr(tokens, pos)?;
+                consume(tokens, pos, TokenType::RightParen)?;
+                consume(tokens, pos, TokenType::LeftBrace)?;
+                let inner = parse_block(tokens, pos)?;
+                consume(tokens, pos, TokenType::RightBrace)?;
+                let else_branch = if check(tokens, *pos, TokenType::Else) {
+                    consume(tokens, pos, TokenType::Else)?;
+                    if check(tokens, *pos, TokenType::If) {
+                        Some(Box::new(parse_stmt(tokens, pos)?))
+                    } else {
+                        consume(tokens, pos, TokenType::LeftBrace)?;
+                        let stmt = parse_stmt(tokens, pos)?;
+                        consume(tokens, pos, TokenType::RightBrace)?;
+                        Some(Box::new(stmt))
+                    }
+                } else {
+                    None
+                };
+
+                Ok(BlueprintStmt::If {
+                    cond: Box::new(conditional),
+                    body: Box::new(inner),
+                    else_branch: else_branch,
+                })
+            }
+
+            TokenType::For => {
+                consume(tokens, pos, TokenType::For)?;
+                consume(tokens, pos, TokenType::LeftParen)?;
+                let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+                consume(tokens, pos, TokenType::In)?;
+                let iter = Box::new(parse_expr(tokens, pos)?);
+                consume(tokens, pos, TokenType::RightParen)?;
+                consume(tokens, pos, TokenType::LeftBrace)?;
+                let inner = Box::new(parse_block(tokens, pos)?);
+                consume(tokens, pos, TokenType::RightBrace)?;
+                Ok(BlueprintStmt::ForEach {
+                    var: name,
+                    iterable: iter,
+                    body: inner,
+                })
+            }
+
+            TokenType::Var => {
+                consume(tokens, pos, TokenType::Var)?;
+                let id = consume(tokens, pos, TokenType::Identifier)?;
+                consume(tokens, pos, TokenType::Equal)?;
+                let expr = parse_expr(tokens, pos)?;
+                consume(tokens, pos, TokenType::Semicolon)?;
+                Ok(BlueprintStmt::Assignment {
+                    name: id.expect_str(),
+                    expr: Box::new(expr),
+                })
+            }
+
+            TokenType::Func => parse_fn_decl(tokens, pos, BlueprintFuncType::Normal),
+
+            TokenType::Struct => {
+                consume(tokens, pos, TokenType::Struct)?;
+                let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+                consume(tokens, pos, TokenType::LeftBrace)?;
+                let fields = parse_separated(
+                    tokens,
+                    pos,
+                    TokenType::Semicolon,
+                    TokenType::RightBrace,
+                    |tokens, pos| {
+                        let field_name =
+                            consume(tokens, pos, TokenType::Identifier)?.expect_str();
+                        consume(tokens, pos, TokenType::Colon)?;
+                        let ty = parse_type(tokens, pos)?;
+                        Ok((field_name, ty))
+                    },
+                )?;
+
+                consume(tokens, pos, TokenType::RightBrace)?;
+
+                Ok(BlueprintStmt::StructDecl { name, fields })
+            }
+
+            TokenType::Return => {
+                consume(tokens, pos, TokenType::Return)?;
+                let opt_expr = if check(tokens, *pos, TokenType::Semicolon) {
+                    None
+                } else {
+                    Some(Box::new(parse_expr(tokens, pos)?))
+                };
+                consume(tokens, pos, TokenType::Semicolon)?;
+                Ok(BlueprintStmt::Return(opt_expr))
+            }
+
+            TokenType::Gen => {
+                consume(tokens, pos, TokenType::Gen)?;
+                let stmt = parse_stmt(tokens, pos)?;
+                Ok(BlueprintStmt::Gen(vec![stmt]))
+            }
+
+            TokenType::LeftBrace => {
+                consume(tokens, pos, TokenType::LeftBrace)?;
+                let body = parse_block(tokens, pos)?;
+                consume(tokens, pos, TokenType::RightBrace)?;
+                Ok(body)
+            }
+
+            TokenType::Meta => parse_meta_stmt(tokens, pos),
+
+            _ => parse_expr_stmt(tokens, pos),
+        },
+        _ => parse_expr_stmt(tokens, pos),
+    }
+}
+
+fn parse_meta_stmt(tokens: &[Token], pos: &mut usize) -> Result<BlueprintStmt, ParseError> {
+    consume(tokens, pos, TokenType::Meta)?;
+
+    match peek(tokens, *pos) {
+        Some(TokenType::Func) => parse_fn_decl(tokens, pos, BlueprintFuncType::Meta),
+        _ => {
+            let stmt = parse_stmt(tokens, pos)?;
+            Ok(BlueprintStmt::MetaStmt(Box::new(stmt)))
         }
+    }
+}
 
-        Ok(BlueprintStmt::Block(stmts))
+fn parse_fn_decl(
+    tokens: &[Token],
+    pos: &mut usize,
+    func_type: BlueprintFuncType,
+) -> Result<BlueprintStmt, ParseError> {
+    consume(tokens, pos, TokenType::Func)?;
+    let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+
+    consume(tokens, pos, TokenType::LeftParen)?;
+    let params = parse_separated(
+        tokens,
+        pos,
+        TokenType::Comma,
+        TokenType::RightParen,
+        |tokens, pos| Ok(consume(tokens, pos, TokenType::Identifier)?.expect_str()),
+    )?;
+    consume(tokens, pos, TokenType::RightParen)?;
+
+    consume(tokens, pos, TokenType::LeftBrace)?;
+    let body = parse_block(tokens, pos)?;
+    consume(tokens, pos, TokenType::RightBrace)?;
+
+    Ok(BlueprintStmt::FnDecl {
+        name,
+        func_type,
+        params,
+        body: Box::new(body),
+    })
+}
+
+fn parse_block(tokens: &[Token], pos: &mut usize) -> Result<BlueprintStmt, ParseError> {
+    let mut stmts = Vec::new();
+
+    while *pos < tokens.len() && tokens[*pos].token_type != TokenType::RightBrace {
+        stmts.push(parse_stmt(tokens, pos)?);
     }
 
-    fn parse_program(tokens: &[Token], pos: &mut usize) -> Result<Vec<BlueprintStmt>, ParseError> {
-        let mut stmts = Vec::new();
+    Ok(BlueprintStmt::Block(stmts))
+}
 
-        while *pos < tokens.len() && tokens[*pos].token_type != TokenType::EOF {
-            stmts.push(parse_stmt(tokens, pos)?);
-        }
+pub fn parse(tokens: &[Token]) -> Result<BlueprintAst, ParseError> {
+    let mut pos: usize = 0;
 
-        Ok(stmts)
+    let mut stmts = Vec::new();
+
+    while pos < tokens.len() && tokens[pos].token_type != TokenType::EOF {
+        stmts.push(parse_stmt(tokens, &mut pos)?);
     }
 
-    parse_program(tokens, &mut pos)
+    Ok(BlueprintAst{stmts})
 }

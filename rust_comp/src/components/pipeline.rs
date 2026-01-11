@@ -6,7 +6,7 @@ use crate::components::metaprocessor::{self, MetaProcessContext, MetaProcessErro
 use crate::components::parser::{self, ParseError};
 use crate::models::decl_registry::DeclRegistry;
 use crate::models::environment::Env;
-use crate::models::semantics::blueprint_ast::BlueprintStmt;
+use crate::models::semantics::blueprint_ast::BlueprintAst;
 use crate::models::semantics::expanded_ast::ExpandedStmt;
 use crate::models::token::Token;
 use std::fs::{self, File};
@@ -115,14 +115,14 @@ pub fn lexer_pipeline() -> Pipeline<String, Vec<Token>> {
     Pipeline::new(|s: String, _ctx| lexer::tokenize(&s))
 }
 
-pub fn parser_pipeline() -> Pipeline<Vec<Token>, Vec<BlueprintStmt>> {
+pub fn parser_pipeline() -> Pipeline<Vec<Token>, BlueprintAst> {
     Pipeline::new(|tokens: Vec<Token>, _ctx| parser::parse(&tokens))
 }
 
 pub fn metaprocessor_pipeline<E, W>(
     mut out: W,
     mut resolver: E,
-) -> Pipeline<Vec<BlueprintStmt>, Vec<ExpandedStmt>>
+) -> Pipeline<BlueprintAst, Vec<ExpandedStmt>>
 where
     E: ExternalResolver + 'static,
     W: Write + 'static,
@@ -179,7 +179,7 @@ pub fn dump_tokens() -> Pipeline<Vec<Token>, Vec<Token>> {
     })
 }
 
-pub fn dump_blueprint_ast() -> Pipeline<Vec<BlueprintStmt>, Vec<BlueprintStmt>> {
+pub fn dump_blueprint_ast() -> Pipeline<BlueprintAst, BlueprintAst> {
     Pipeline::tap(move |b, ctx| {
         let out_dir = ctx.out_dir.clone();
         fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;

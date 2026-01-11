@@ -1,6 +1,6 @@
 use crate::components::external_resolver::ExternalResolver;
 use crate::models::environment::EnvRef;
-use crate::models::semantics::blueprint_ast::{BlueprintExpr, BlueprintStmt};
+use crate::models::semantics::blueprint_ast::{BlueprintAst, BlueprintExpr, BlueprintStmt};
 use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
 use crate::models::value::{Function, Value};
 use crate::{
@@ -150,7 +150,7 @@ pub fn process_expr<E: ExternalResolver, W: Write>(
             Ok(ExpandedExpr::String(contents))
         }
 
-        BlueprintExpr::Mod(mod_name) => {
+        BlueprintExpr::Import(mod_name) => {
             Ok(ExpandedExpr::String(mod_name.clone()))
         }
     }
@@ -268,7 +268,7 @@ pub fn process_stmt<E: ExternalResolver, W: Write>(
             Ok(vec![ExpandedStmt::Return(expr)])
         }
 
-        BlueprintStmt::Gen(stmts) => Ok(vec![ExpandedStmt::Gen(process(stmts, ctx)?)]),
+        BlueprintStmt::Gen(stmts) => Ok(vec![ExpandedStmt::Gen(process_stmts(stmts, ctx)?)]),
 
         BlueprintStmt::MetaStmt(parsed_stmt) => {
             let processed_code = process_stmt(parsed_stmt, ctx)?;
@@ -307,7 +307,7 @@ fn process_to_block<E: ExternalResolver, W: Write>(
     }
 }
 
-pub fn process<E: ExternalResolver, W: Write>(
+pub fn process_stmts<E: ExternalResolver, W: Write>(
     stmts: &Vec<BlueprintStmt>,
     ctx: &mut MetaProcessContext<E, W>,
 ) -> Result<Vec<ExpandedStmt>, MetaProcessError> {
@@ -318,4 +318,11 @@ pub fn process<E: ExternalResolver, W: Write>(
     }
 
     Ok(output)
+}
+
+pub fn process<E: ExternalResolver, W: Write>(
+    ast: &BlueprintAst,
+    ctx: &mut MetaProcessContext<E, W>,
+) -> Result<Vec<ExpandedStmt>, MetaProcessError> {
+    process_stmts(&ast.stmts, ctx)
 }

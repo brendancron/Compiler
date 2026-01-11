@@ -1,6 +1,11 @@
 use std::fmt;
 
 #[derive(Debug, Clone)]
+pub struct BlueprintAst {
+    pub stmts: Vec<BlueprintStmt>,
+}
+
+#[derive(Debug, Clone)]
 pub enum BlueprintExpr {
     Int(i64),
     String(String),
@@ -28,8 +33,8 @@ pub enum BlueprintExpr {
 
     Typeof(String),
     
-    Mod(String),
     Embed(String),
+    Import(String),
 }
 
 #[derive(Debug, Clone)]
