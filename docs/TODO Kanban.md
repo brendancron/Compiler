@@ -16,6 +16,7 @@ kanban-plugin: board
 - [ ] Allowing/Disallowing Syscalls
 - [ ] Better Error Messages
 - [ ] Test Source of Truth Config Files
+- [ ] Pipeline Ctx Fields as Optionals
 
 
 ## Active

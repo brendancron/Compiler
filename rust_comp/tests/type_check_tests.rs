@@ -1,4 +1,4 @@
-use rust_comp::components::embed_resolver::DefaultResolver;
+use rust_comp::components::external_resolver::DummyResolver;
 use rust_comp::components::pipeline::*;
 use rust_comp::components::type_checker::*;
 use rust_comp::models::decl_registry::DeclRegistry;
@@ -18,14 +18,13 @@ mod type_check_tests {
             .then(parser_pipeline())
             .then(metaprocessor_pipeline(
                 io::stdout(),
-                DefaultResolver {
-                    base_dir: PathBuf::from("."),
-                },
+                DummyResolver{},
             ));
 
         let mut pipeline_ctx = PipelineCtx {
             out_dir: PathBuf::from("../out"),
             decl_reg: DeclRegistry::new(),
+            root_dir: PathBuf::from("."),
         };
 
         pipeline.run(source.to_string(), &mut pipeline_ctx)
