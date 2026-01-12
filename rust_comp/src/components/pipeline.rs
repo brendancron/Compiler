@@ -3,7 +3,7 @@ use crate::components::formatter::{self};
 use crate::components::interpreter::{self, EvalError};
 use crate::components::lexer::{self, ScanError};
 use crate::components::metaprocessor::{self, MetaProcessContext, MetaProcessError};
-use crate::components::parser::{self, ParseError};
+use crate::components::parser::{self, ParseError, ParseCtx};
 use crate::models::decl_registry::DeclRegistry;
 use crate::models::environment::Env;
 use crate::models::semantics::blueprint_ast::BlueprintAst;
@@ -116,7 +116,10 @@ pub fn lexer_pipeline() -> Pipeline<String, Vec<Token>> {
 }
 
 pub fn parser_pipeline() -> Pipeline<Vec<Token>, BlueprintAst> {
-    Pipeline::new(|tokens: Vec<Token>, _ctx| parser::parse(&tokens))
+    Pipeline::new(|tokens: Vec<Token>, _ctx| {
+        let mut parse_ctx = ParseCtx::new();
+        parser::parse(&tokens, &mut parse_ctx)
+    })
 }
 
 pub fn metaprocessor_pipeline<E, W>(

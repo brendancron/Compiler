@@ -11,6 +11,14 @@ use std::io::Write;
 use std::rc::Rc;
 use std::path::Path;
 
+pub struct MetaProcessContext<'a, E: ExternalResolver, W: Write> {
+    pub env: EnvRef,
+    pub decls: &'a mut DeclRegistry,
+    pub resolver: &'a mut E,
+    pub out: &'a mut W,
+    pub curr_dir: &'a Path,
+}
+
 #[derive(Debug)]
 pub enum MetaProcessError {
     EmbedFailed { path: String, error: String },
@@ -23,14 +31,6 @@ impl From<EvalError> for MetaProcessError {
     fn from(e: EvalError) -> Self {
         MetaProcessError::Eval(e)
     }
-}
-
-pub struct MetaProcessContext<'a, E: ExternalResolver, W: Write> {
-    pub env: EnvRef,
-    pub decls: &'a mut DeclRegistry,
-    pub resolver: &'a mut E,
-    pub out: &'a mut W,
-    pub curr_dir: &'a Path,
 }
 
 pub struct MetaContext {
