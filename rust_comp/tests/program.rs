@@ -1,6 +1,6 @@
-use rust_comp::components::external_resolver::DummyResolver;
-use rust_comp::components::pipeline::*;
-use rust_comp::models::decl_registry::DeclRegistry;
+use rust_comp::util::external_resolver::DummyResolver;
+use rust_comp::util::pipeline::*;
+use rust_comp::util::decl_registry::DeclRegistry;
 use std::cell::RefCell;
 use std::fs;
 use std::io::{self, Write};

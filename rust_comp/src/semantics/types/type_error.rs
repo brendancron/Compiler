@@ -1,4 +1,4 @@
-use crate::models::types::types::Type;
+use super::types::Type;
 
 #[derive(Debug, Clone)]
 pub enum TypeError {

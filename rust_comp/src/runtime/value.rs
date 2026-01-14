@@ -1,5 +1,5 @@
-use crate::models::environment::EnvRef;
-use crate::models::semantics::expanded_ast::ExpandedStmt;
+use crate::runtime::environment::EnvRef;
+use crate::semantics::meta::expanded_ast::ExpandedStmt;
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;

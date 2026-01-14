@@ -1,4 +1,4 @@
-use crate::models::semantics::blueprint_ast::TypeExpr;
+use crate::frontend::blueprint_ast::TypeExpr;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;

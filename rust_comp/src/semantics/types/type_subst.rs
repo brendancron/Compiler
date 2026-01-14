@@ -1,5 +1,5 @@
-use crate::models::types::type_error::TypeError;
-use crate::models::types::types::{Type, TypeVar};
+use super::type_error::TypeError;
+use super::types::{Type, TypeVar};
 use std::collections::HashMap;
 
 pub struct TypeSubst {

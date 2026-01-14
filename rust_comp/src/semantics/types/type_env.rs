@@ -1,5 +1,5 @@
-use crate::models::types::type_utils::instantiate;
-use crate::models::types::types::{Type, TypeScheme, TypeVar};
+use super::type_utils::instantiate;
+use super::types::{Type, TypeScheme, TypeVar};
 use std::collections::HashMap;
 
 pub struct TypeEnv {

@@ -1,10 +1,10 @@
-use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
-use crate::models::semantics::typed_ast::{ToType, TypedExpr, TypedExprKind, TypedStmt};
-use crate::models::types::type_env::TypeEnv;
-use crate::models::types::type_error::TypeError;
-use crate::models::types::type_subst::{unify, ApplySubst, TypeSubst};
-use crate::models::types::type_utils::generalize;
-use crate::models::types::types::*;
+use crate::semantics::meta::expanded_ast::{ExpandedExpr, ExpandedStmt};
+use super::typed_ast::{ToType, TypedExpr, TypedExprKind, TypedStmt};
+use super::type_env::TypeEnv;
+use super::type_error::TypeError;
+use super::type_subst::{unify, ApplySubst, TypeSubst};
+use super::type_utils::generalize;
+use super::types::*;
 
 pub struct TypeCheckCtx {
     pub return_type: Option<Type>,

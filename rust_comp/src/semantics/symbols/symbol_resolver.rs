@@ -1,5 +1,5 @@
-use crate::models::symbols::symbol::*;
-use crate::models::semantics::blueprint_ast::*;
+use super::symbol::*;
+use crate::frontend::blueprint_ast::*;
 
 pub fn declaration_pass(
     module_id: ModuleId,

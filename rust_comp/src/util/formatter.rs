@@ -1,4 +1,4 @@
-use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
+use crate::semantics::meta::expanded_ast::{ExpandedExpr, ExpandedStmt};
 
 #[derive(Debug, Clone)]
 pub struct FormatSettings {

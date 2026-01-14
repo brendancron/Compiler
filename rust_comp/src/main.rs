@@ -1,6 +1,6 @@
-use rust_comp::components::external_resolver::*;
-use rust_comp::components::pipeline::*;
-use rust_comp::models::decl_registry::DeclRegistry;
+use rust_comp::util::external_resolver::*;
+use rust_comp::util::pipeline::*;
+use rust_comp::util::decl_registry::DeclRegistry;
 use std::io::{self, Read};
 use std::path::PathBuf;
 

@@ -1,4 +1,4 @@
-use crate::models::token::{Token, TokenMetadata, TokenType};
+use super::token::*;
 
 #[derive(Debug)]
 pub enum ScanError {

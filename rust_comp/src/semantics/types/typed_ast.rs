@@ -1,4 +1,4 @@
-use crate::models::types::types::Type;
+use super::types::Type;
 
 pub trait ToType {
     fn to_type(&self) -> Type;

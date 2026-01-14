@@ -1,11 +1,11 @@
-use crate::components::external_resolver::ExternalResolver;
-use crate::models::environment::EnvRef;
-use crate::models::semantics::blueprint_ast::{BlueprintAst, BlueprintExpr, BlueprintStmt};
-use crate::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
-use crate::models::value::{Function, Value};
+use crate::util::external_resolver::ExternalResolver;
+use crate::runtime::environment::EnvRef;
+use crate::frontend::blueprint_ast::{BlueprintAst, BlueprintExpr, BlueprintStmt};
+use crate::semantics::meta::expanded_ast::{ExpandedExpr, ExpandedStmt};
+use crate::runtime::value::{Function, Value};
 use crate::{
-    components::interpreter::{self, EvalError},
-    models::decl_registry::{DeclRegistry, StructDef},
+    runtime::interpreter::{self, EvalError},
+    util::decl_registry::{DeclRegistry, StructDef},
 };
 use std::io::Write;
 use std::rc::Rc;

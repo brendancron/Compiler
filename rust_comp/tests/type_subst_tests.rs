@@ -1,5 +1,5 @@
-use rust_comp::models::types::type_subst::{unify, ApplySubst, TypeSubst};
-use rust_comp::models::types::types::*;
+use rust_comp::semantics::types::type_subst::{unify, ApplySubst, TypeSubst};
+use rust_comp::semantics::types::types::*;
 
 #[cfg(test)]
 mod type_subst_tests {

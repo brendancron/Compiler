@@ -1,11 +1,11 @@
-use rust_comp::components::external_resolver::DummyResolver;
-use rust_comp::components::pipeline::*;
-use rust_comp::components::type_checker::*;
-use rust_comp::models::decl_registry::DeclRegistry;
-use rust_comp::models::semantics::expanded_ast::{ExpandedExpr, ExpandedStmt};
-use rust_comp::models::types::type_env::TypeEnv;
-use rust_comp::models::types::type_subst::TypeSubst;
-use rust_comp::models::types::types::*;
+use rust_comp::util::external_resolver::DummyResolver;
+use rust_comp::util::pipeline::*;
+use rust_comp::semantics::types::type_checker::*;
+use rust_comp::util::decl_registry::DeclRegistry;
+use rust_comp::semantics::meta::expanded_ast::{ExpandedExpr, ExpandedStmt};
+use rust_comp::semantics::types::type_env::TypeEnv;
+use rust_comp::semantics::types::type_subst::TypeSubst;
+use rust_comp::semantics::types::types::*;
 use std::io;
 use std::path::PathBuf;
 

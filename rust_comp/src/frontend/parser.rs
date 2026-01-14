@@ -1,7 +1,5 @@
-use crate::models::semantics::blueprint_ast::{
-    BlueprintExpr, BlueprintFuncType, BlueprintStmt, TypeExpr, BlueprintAst,
-};
-use crate::models::token::{Token, TokenType};
+use super::blueprint_ast::*;
+use super::token::*;
 
 pub struct ParseCtx {
     pub imports: Vec<String>,

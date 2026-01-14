@@ -1,6 +1,6 @@
-use rust_comp::models::types::type_env::*;
-use rust_comp::models::types::type_utils::*;
-use rust_comp::models::types::types::*;
+use rust_comp::semantics::types::type_env::*;
+use rust_comp::semantics::types::type_utils::*;
+use rust_comp::semantics::types::types::*;
 
 #[cfg(test)]
 mod type_utils_tests {

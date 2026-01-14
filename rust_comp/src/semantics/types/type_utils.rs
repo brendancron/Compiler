@@ -1,6 +1,6 @@
-use crate::models::types::type_env::TypeEnv;
-use crate::models::types::type_subst::{ApplySubst, TypeSubst};
-use crate::models::types::types::{Type, TypeScheme, TypeVar};
+use super::type_env::TypeEnv;
+use super::type_subst::{ApplySubst, TypeSubst};
+use super::types::{Type, TypeScheme, TypeVar};
 use std::collections::HashSet;
 
 pub trait FreeTypeVars {
