@@ -34,7 +34,6 @@ pub enum BlueprintExpr {
     Typeof(String),
     
     Embed(String),
-    Import(String),
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +76,7 @@ pub enum BlueprintStmt {
     Gen(Vec<BlueprintStmt>),
 
     MetaStmt(Box<BlueprintStmt>),
+    Import(String),
 }
 
 #[derive(Debug, Clone)]

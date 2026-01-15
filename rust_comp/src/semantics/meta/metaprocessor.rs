@@ -150,9 +150,6 @@ pub fn process_expr<E: ExternalResolver, W: Write>(
             Ok(ExpandedExpr::String(contents))
         }
 
-        BlueprintExpr::Import(mod_name) => {
-            Ok(ExpandedExpr::String(mod_name.clone()))
-        }
     }
 }
 
@@ -285,6 +282,10 @@ pub fn process_stmt<E: ExternalResolver, W: Write>(
             )?;
 
             Ok(meta_ctx.emitted)
+        }
+
+        BlueprintStmt::Import(_mod_name) => {
+            Ok(vec![])
         }
     }
 }

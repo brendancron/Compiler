@@ -158,13 +158,6 @@ fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) ->
                 Ok(BlueprintExpr::Embed(file_path))
             }
 
-            TokenType::Import => {
-                consume(tokens, pos, TokenType::Import)?;
-                consume(tokens, pos, TokenType::LeftParen)?;
-                let mod_name = consume(tokens, pos, TokenType::String)?.expect_str();
-                consume(tokens, pos, TokenType::RightParen)?;
-                Ok(BlueprintExpr::Import(mod_name))
-            }
 
 
             TokenType::Identifier => {
@@ -383,7 +376,7 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                     ctx,
                     TokenType::Semicolon,
                     TokenType::RightBrace,
-                    |tokens, pos, ctx| {
+                    |tokens, pos, _ctx| {
                         let field_name =
                             consume(tokens, pos, TokenType::Identifier)?.expect_str();
                         consume(tokens, pos, TokenType::Colon)?;
@@ -423,6 +416,13 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
 
             TokenType::Meta => parse_meta_stmt(tokens, pos, ctx),
 
+            TokenType::Import => {
+                consume(tokens, pos, TokenType::Import)?;
+                let mod_name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+                consume(tokens, pos, TokenType::Semicolon)?;
+                Ok(BlueprintStmt::Import(mod_name))
+            }
+
             _ => parse_expr_stmt(tokens, pos, ctx),
         },
         _ => parse_expr_stmt(tokens, pos, ctx),
@@ -457,7 +457,7 @@ fn parse_fn_decl(
         ctx,
         TokenType::Comma,
         TokenType::RightParen,
-        |tokens, pos, ctx| Ok(consume(tokens, pos, TokenType::Identifier)?.expect_str()),
+        |tokens, pos, _ctx| Ok(consume(tokens, pos, TokenType::Identifier)?.expect_str()),
     )?;
     consume(tokens, pos, TokenType::RightParen)?;
 
