@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct MetaAst {
+    pub sem_root_stmts: Vec<MetaStmtId>,
     exprs: HashMap<MetaExprId, MetaExprNode>,
     stmts: HashMap<MetaStmtId, MetaStmtNode>,
     current_expr_id: usize,
@@ -15,6 +16,7 @@ impl MetaAst {
 
     pub fn new() -> Self {
         Self {
+            sem_root_stmts: vec![],
             exprs: HashMap::new(),
             stmts: HashMap::new(),
             current_expr_id: 0,
@@ -120,7 +122,7 @@ pub enum MetaStmtNode {
 
     Return(Option<MetaExprId>),
     
-    Block(Vec<MetaStmtNode>),
+    Block(Vec<MetaStmtId>),
 
     // UTIL
 

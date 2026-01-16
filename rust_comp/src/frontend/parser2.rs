@@ -111,7 +111,7 @@ fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) ->
 
             TokenType::String => {
                 consume_next(tokens, pos);
-                let id = ctx.ast.insert_expr(MetaExprNode::String(tok.expect_string()));
+                let id = ctx.ast.insert_expr(MetaExprNode::String(tok.expect_str()));
                 Ok(id)
             }
 
@@ -129,9 +129,9 @@ fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) ->
 
             TokenType::LeftParen => {
                 consume(tokens, pos, TokenType::LeftParen)?;
-                let expr = parse_expr(tokens, pos, ctx)?;
+                let expr_id = parse_expr(tokens, pos, ctx)?;
                 consume(tokens, pos, TokenType::RightParen)?;
-                Ok(expr)
+                Ok(expr_id)
             }
 
             TokenType::Typeof => {
@@ -297,7 +297,7 @@ fn parse_expr_stmt<'a>(
     Ok(id)
 }
 
-fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<BlueprintStmt, ParseError> {
+fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<MetaStmtId, ParseError> {
 
     match tokens.get(*pos) {
         Some(tok) => match tok.token_type {
@@ -312,6 +312,7 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
             }
 
             TokenType::If => {
+                // TODO parse if func for efficient recursion
                 consume(tokens, pos, TokenType::If)?;
                 consume(tokens, pos, TokenType::LeftParen)?;
                 let conditional = parse_expr(tokens, pos, ctx)?;
@@ -322,12 +323,12 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                 let else_branch = if check(tokens, *pos, TokenType::Else) {
                     consume(tokens, pos, TokenType::Else)?;
                     if check(tokens, *pos, TokenType::If) {
-                        Some(Box::new(parse_stmt(tokens, pos, ctx)?))
+                        Some(parse_stmt(tokens, pos, ctx)?)
                     } else {
                         consume(tokens, pos, TokenType::LeftBrace)?;
                         let stmt = parse_stmt(tokens, pos, ctx)?;
                         consume(tokens, pos, TokenType::RightBrace)?;
-                        Some(Box::new(stmt))
+                        Some(stmt)
                     }
                 } else {
                     None
@@ -378,7 +379,34 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                 Ok(id)
             }
 
-            TokenType::Func => parse_fn_decl(tokens, pos, ctx, BlueprintFuncType::Normal),
+            TokenType::Func => {
+                consume(tokens, pos, TokenType::Func)?;
+                let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+
+                consume(tokens, pos, TokenType::LeftParen)?;
+                let params = parse_separated(
+                    tokens,
+                    pos,
+                    ctx,
+                    TokenType::Comma,
+                    TokenType::RightParen,
+                    |tokens, pos, _ctx| Ok(consume(tokens, pos, TokenType::Identifier)?.expect_str()),
+                )?;
+                consume(tokens, pos, TokenType::RightParen)?;
+
+                consume(tokens, pos, TokenType::LeftBrace)?;
+                let body = parse_block(tokens, pos, ctx)?;
+                consume(tokens, pos, TokenType::RightBrace)?;
+
+                let fn_decl = MetaStmtNode::FnDecl {
+                    name,
+                    params,
+                    body,
+                };
+                let id = ctx.ast.insert_stmt(fn_decl);
+                Ok(id)
+            }
+            //parse_fn_decl(tokens, pos, ctx, BlueprintFuncType::Normal),
 
             TokenType::Struct => {
                 consume(tokens, pos, TokenType::Struct)?;
@@ -394,14 +422,15 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                         let field_name =
                             consume(tokens, pos, TokenType::Identifier)?.expect_str();
                         consume(tokens, pos, TokenType::Colon)?;
-                        let ty = parse_type(tokens, pos)?;
-                        Ok((field_name, ty))
+                        let type_name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+                        Ok(MetaFieldDecl{ field_name, type_name} )
                     },
                 )?;
 
                 consume(tokens, pos, TokenType::RightBrace)?;
-
-                Ok(BlueprintStmt::StructDecl { name, fields })
+                let struct_decl = MetaStmtNode::StructDecl {name, fields};
+                let id = ctx.ast.insert_stmt(struct_decl);
+                Ok(id)
             }
 
             TokenType::Return => {
@@ -409,16 +438,21 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                 let opt_expr = if check(tokens, *pos, TokenType::Semicolon) {
                     None
                 } else {
-                    Some(Box::new(parse_expr(tokens, pos, ctx)?))
+                    Some(parse_expr(tokens, pos, ctx)?)
                 };
                 consume(tokens, pos, TokenType::Semicolon)?;
-                Ok(BlueprintStmt::Return(opt_expr))
+                
+                let return_stmt = MetaStmtNode::Return(opt_expr);
+                let id = ctx.ast.insert_stmt(return_stmt);
+                Ok(id)
             }
 
             TokenType::Gen => {
                 consume(tokens, pos, TokenType::Gen)?;
                 let stmt = parse_stmt(tokens, pos, ctx)?;
-                Ok(BlueprintStmt::Gen(vec![stmt]))
+                let gen = MetaStmtNode::Gen(vec![stmt]);
+                let id = ctx.ast.insert_stmt(gen);
+                Ok(id)
             }
 
             TokenType::LeftBrace => {
@@ -434,7 +468,9 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                 consume(tokens, pos, TokenType::Import)?;
                 let mod_name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
                 consume(tokens, pos, TokenType::Semicolon)?;
-                Ok(BlueprintStmt::Import(mod_name))
+                let import = MetaStmtNode::Import(mod_name);
+                let id = ctx.ast.insert_stmt(import);
+                Ok(id)
             }
 
             _ => parse_expr_stmt(tokens, pos, ctx),
@@ -443,68 +479,33 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
     }
 }
 
-fn parse_meta_stmt(tokens: &[Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<BlueprintStmt, ParseError> {
+fn parse_meta_stmt(tokens: &[Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<MetaStmtId, ParseError> {
     consume(tokens, pos, TokenType::Meta)?;
-
-    match peek(tokens, *pos) {
-        Some(TokenType::Func) => parse_fn_decl(tokens, pos, ctx, BlueprintFuncType::Meta),
-        _ => {
-            let stmt = parse_stmt(tokens, pos, ctx)?;
-            Ok(BlueprintStmt::MetaStmt(Box::new(stmt)))
-        }
-    }
+    let stmt = parse_stmt(tokens, pos, ctx)?;
+    let meta_stmt = MetaStmtNode::MetaStmt(stmt);
+    let id = ctx.ast.insert_stmt(meta_stmt);
+    Ok(id)
 }
 
-fn parse_fn_decl(
-    tokens: &[Token],
-    pos: &mut usize,
-    ctx: &mut ParseCtx,
-    func_type: BlueprintFuncType,
-) -> Result<BlueprintStmt, ParseError> {
-    consume(tokens, pos, TokenType::Func)?;
-    let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
-
-    consume(tokens, pos, TokenType::LeftParen)?;
-    let params = parse_separated(
-        tokens,
-        pos,
-        ctx,
-        TokenType::Comma,
-        TokenType::RightParen,
-        |tokens, pos, _ctx| Ok(consume(tokens, pos, TokenType::Identifier)?.expect_str()),
-    )?;
-    consume(tokens, pos, TokenType::RightParen)?;
-
-    consume(tokens, pos, TokenType::LeftBrace)?;
-    let body = parse_block(tokens, pos, ctx)?;
-    consume(tokens, pos, TokenType::RightBrace)?;
-
-    Ok(BlueprintStmt::FnDecl {
-        name,
-        func_type,
-        params,
-        body: Box::new(body),
-    })
-}
-
-fn parse_block(tokens: &[Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<BlueprintStmt, ParseError> {
+fn parse_block(tokens: &[Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<MetaStmtId, ParseError> {
     let mut stmts = Vec::new();
 
     while *pos < tokens.len() && tokens[*pos].token_type != TokenType::RightBrace {
         stmts.push(parse_stmt(tokens, pos, ctx)?);
     }
-
-    Ok(BlueprintStmt::Block(stmts))
+    
+    let block_stmt = MetaStmtNode::Block(stmts);
+    let id = ctx.ast.insert_stmt(block_stmt);
+    Ok(id)
 }
 
-pub fn parse(tokens: &[Token], ctx: &mut ParseCtx) -> Result<BlueprintAst, ParseError> {
+pub fn parse(tokens: &[Token], ctx: &mut ParseCtx) -> Result<(), ParseError> {
     let mut pos: usize = 0;
 
-    let mut stmts = Vec::new();
-
     while pos < tokens.len() && tokens[pos].token_type != TokenType::EOF {
-        stmts.push(parse_stmt(tokens, &mut pos, ctx)?);
+        let id = parse_stmt(tokens, &mut pos, ctx)?;
+        ctx.ast.sem_root_stmts.push(id);
     }
 
-    Ok(BlueprintAst{stmts})
+    Ok(())
 }

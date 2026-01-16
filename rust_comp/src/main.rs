@@ -1,43 +1,31 @@
-use rust_comp::util::external_resolver::*;
-use rust_comp::util::pipeline::*;
-use rust_comp::util::decl_registry::DeclRegistry;
-use std::io::{self, Read};
 use std::path::PathBuf;
+use rust_comp::frontend::lexer::*;
+use std::fs::{ create_dir_all, read_to_string, File};
+use std::fmt::Debug;
+use std::io::Write;
 
 fn main() {
 
-    let pipeline = dump_source()
-        .then(lexer_pipeline())
-        .then(dump_tokens())
-        .then(parser_pipeline())
-        .then(dump_blueprint_ast())
-        .then(metaprocessor_pipeline(io::stdout(), DefaultResolver{}))
-        .then(dump_expanded_ast())
-        .then(dump_expanded_code())
-        .then(interpreter_pipeline(io::stdout()));
+    fn run_pipeline(root_path: &PathBuf, out_dir: &PathBuf) {
+        let buf = read_to_string(root_path).unwrap();
+        create_dir_all(&out_dir).unwrap();
 
+        let tokens = tokenize(&buf).unwrap();
+        let mut f = File::create(out_dir.join("tokens.txt")).unwrap();
+        dump(&tokens, &mut f);
+    }
 
     let input = std::env::args().nth(1);
-    let mut buf = String::new();
-    let root_dir = match input.as_deref() {
-        Some("-") | None => {
-            io::stdin().read_to_string(&mut buf).unwrap();
-            PathBuf::from(".")
-        }
-        Some(path) => {
-            buf = std::fs::read_to_string(path).unwrap();
-            PathBuf::from(path)
-                .parent()
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."))
-        }
-    };
+    let root_path = PathBuf::from(input.expect("source file path required"));
+    let out_path = PathBuf::from("../out");
+    run_pipeline(&root_path, &out_path);
+}
 
-    let mut pipeline_ctx = PipelineCtx {
-        out_dir: PathBuf::from("../out"),
-        root_dir,
-        decl_reg: DeclRegistry::new(),
-    };
-
-    pipeline.run(buf, &mut pipeline_ctx);
+pub fn dump<T: Debug, W: Write>(
+    items: &[T],
+    out: &mut W,
+) { 
+    for item in items {
+        writeln!(out, "{item:?}").map_err(|e| e.to_string()).unwrap();
+    }
 }
