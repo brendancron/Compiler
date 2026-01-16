@@ -1,23 +1,46 @@
-use std::fmt;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct MetaAst {
-    pub stmts: Vec<MetaStmtId>,
+    exprs: HashMap<MetaExprId, MetaExprNode>,
+    stmts: HashMap<MetaStmtId, MetaStmtNode>,
+    current_expr_id: usize,
+    current_stmt_id: usize,
 }
 
 pub type MetaExprId = usize;
 pub type MetaStmtId = usize;
 
-pub struct MetaExpr {
-    pub id: usize,
-    pub node: MetaExprNode,
-}
+impl MetaAst {
 
-pub struct MetaStmt {
-    pub id: usize,
-    pub node: MetaStmtNode,
-}
+    pub fn new() -> Self {
+        Self {
+            exprs: HashMap::new(),
+            stmts: HashMap::new(),
+            current_expr_id: 0,
+            current_stmt_id: 0,
+        }
+    }
 
+    pub fn insert_expr(&mut self, expr: MetaExprNode) -> usize {
+        let id = self.current_expr_id;
+        self.exprs.insert(id, expr);
+        self.current_expr_id += 1;
+        id
+    }
+
+    pub fn insert_stmt(&mut self, stmt: MetaStmtNode) -> usize {
+        let id = self.current_stmt_id;
+        self.stmts.insert(id, stmt);
+        self.current_stmt_id += 1;
+        id
+    }
+
+    pub fn get_expr(&self, id: MetaExprId) -> Option<&MetaExprNode> {
+        self.exprs.get(&id)
+    }
+
+}
 
 #[derive(Debug, Clone)]
 pub enum MetaExprNode {
@@ -113,6 +136,7 @@ pub enum MetaStmtNode {
     Print(MetaExprId),
 }
 
+#[derive(Debug, Clone)]
 pub struct MetaFieldDecl {
     pub field_name: String,
     pub type_name: String,
