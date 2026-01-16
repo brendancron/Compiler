@@ -17,13 +17,16 @@ kanban-plugin: board
 - [ ] Better Error Messages
 - [ ] Test Source of Truth Config Files
 - [ ] Pipeline Ctx Fields as Optionals
+- [ ] Symbol resolution algorithm
 
 
 ## Active
 
 - [ ] Struct Test Failing
 - [ ] Refactor PipelineCtx to streamline execution/mutation
+- [ ] Refactor AST System
 - [ ] Embedding Files
+- [ ] Update Parsing Errors
 
 
 ## Done
