@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 use rust_comp::frontend::lexer::*;
+use rust_comp::frontend::parser2::*;
+use rust_comp::util::formatters::tree_formatter::*;
 use std::fs::{ create_dir_all, read_to_string, File};
 use std::fmt::Debug;
 use std::io::Write;
@@ -10,15 +12,32 @@ fn main() {
         let buf = read_to_string(root_path).unwrap();
         create_dir_all(&out_dir).unwrap();
 
+        // TOKENIZE
+
         let tokens = tokenize(&buf).unwrap();
-        let mut f = File::create(out_dir.join("tokens.txt")).unwrap();
-        dump(&tokens, &mut f);
+        let mut tok_file = to_file(out_dir, "tokens.txt");
+        dump(&tokens, &mut tok_file);
+        
+        // PARSE
+        let mut parse_ctx = ParseCtx::new();
+        let _ = parse(&tokens, &mut parse_ctx).unwrap();
+        let meta_ast = &(parse_ctx.ast);
+        
+        let mut meta_ast_file = to_file(out_dir, "meta_ast.txt");
+        meta_ast.format_tree(&mut meta_ast_file);
     }
 
     let input = std::env::args().nth(1);
     let root_path = PathBuf::from(input.expect("source file path required"));
     let out_path = PathBuf::from("../out");
     run_pipeline(&root_path, &out_path);
+}
+
+pub fn to_file(
+    out_dir: &PathBuf, 
+    file_name: &str,
+) -> File {
+    File::create(out_dir.join(file_name)).unwrap()
 }
 
 pub fn dump<T: Debug, W: Write>(
