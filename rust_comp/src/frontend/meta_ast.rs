@@ -162,126 +162,179 @@ impl AsTree for MetaAst {
 impl MetaAst {
     fn convert_stmt(&self, id: MetaStmtId) -> TreeNode {
         let stmt = self.get_stmt(id).expect("invalid stmt id");
-        match stmt {
-            MetaStmt::ExprStmt(e) =>
-                TreeNode::node("ExprStmt", vec![self.convert_expr(*e)]),
 
-            MetaStmt::VarDecl { name, expr } =>
-                TreeNode::node("VarDecl", vec![
+        let (label, mut children): (String, Vec<TreeNode>) = match stmt {
+            MetaStmt::ExprStmt(e) => (
+                "ExprStmt".into(),
+                vec![self.convert_expr(*e)],
+            ),
+
+            MetaStmt::VarDecl { name, expr } => (
+                "VarDecl".into(),
+                vec![
                     TreeNode::leaf(format!("Name({name})")),
                     self.convert_expr(*expr),
-                ]),
+                ],
+            ),
 
-            MetaStmt::FnDecl { name, params, body } =>
-                TreeNode::node("FnDecl", vec![
+            MetaStmt::FnDecl { name, params, body } => (
+                "FnDecl".into(),
+                vec![
                     TreeNode::leaf(format!("Name({name})")),
-                    TreeNode::node("Params",
-                        params.iter()
-                            .map(|p| TreeNode::leaf(p.clone()))
-                            .collect()),
+                    TreeNode::node(
+                        "Params",
+                        params.iter().map(|p| TreeNode::leaf(p.clone())).collect(),
+                    ),
                     self.convert_stmt(*body),
-                ]),
+                ],
+            ),
 
-            MetaStmt::StructDecl { name, fields } =>
-                TreeNode::node("StructDecl", vec![
+            MetaStmt::StructDecl { name, fields } => (
+                "StructDecl".into(),
+                vec![
                     TreeNode::leaf(format!("Name({name})")),
-                    TreeNode::node("Fields",
-                        fields.iter().map(|f|
-                            TreeNode::leaf(format!("{}: {}", f.field_name, f.type_name))
-                        ).collect()),
-                ]),
+                    TreeNode::node(
+                        "Fields",
+                        fields.iter()
+                            .map(|f| TreeNode::leaf(format!("{}: {}", f.field_name, f.type_name)))
+                            .collect(),
+                    ),
+                ],
+            ),
 
-            MetaStmt::If { cond, body, else_branch } =>
-                TreeNode::node("IfStmt", {
-                    let mut v = vec![
-                        TreeNode::node("Cond", vec![self.convert_expr(*cond)]),
-                        TreeNode::node("Then", vec![self.convert_stmt(*body)]),
-                    ];
-                    if let Some(e) = else_branch {
-                        v.push(TreeNode::node("Else", vec![self.convert_stmt(*e)]));
-                    }
-                    v
-                }),
+            MetaStmt::If { cond, body, else_branch } => {
+                let mut v = vec![
+                    TreeNode::node("Cond", vec![self.convert_expr(*cond)]),
+                    TreeNode::node("Then", vec![self.convert_stmt(*body)]),
+                ];
+                if let Some(e) = else_branch {
+                    v.push(TreeNode::node("Else", vec![self.convert_stmt(*e)]));
+                }
+                ("IfStmt".into(), v)
+            }
 
-            MetaStmt::ForEach { var, iterable, body } =>
-                TreeNode::node("ForEachStmt", vec![
+            MetaStmt::ForEach { var, iterable, body } => (
+                "ForEachStmt".into(),
+                vec![
                     TreeNode::leaf(format!("Var({var})")),
                     TreeNode::node("Iterable", vec![self.convert_expr(*iterable)]),
                     TreeNode::node("Body", vec![self.convert_stmt(*body)]),
-                ]),
+                ],
+            ),
 
-            MetaStmt::Return(e) =>
-                TreeNode::node("ReturnStmt",
-                    e.map(|id| vec![self.convert_expr(id)]).unwrap_or_default()),
+            MetaStmt::Return(e) => (
+                "ReturnStmt".into(),
+                e.map(|id| vec![self.convert_expr(id)]).unwrap_or_default(),
+            ),
 
-            MetaStmt::Block(stmts) =>
-                TreeNode::node("Block",
-                    stmts.iter().map(|s| self.convert_stmt(*s)).collect()),
+            MetaStmt::Block(stmts) => (
+                "Block".into(),
+                stmts.iter().map(|s| self.convert_stmt(*s)).collect(),
+            ),
 
-            MetaStmt::Import(path) =>
-                TreeNode::leaf(format!("Import({path})")),
+            MetaStmt::Import(path) => (
+                "Import".into(),
+                vec![TreeNode::leaf(path.clone())],
+            ),
 
-            MetaStmt::MetaBlock(s) =>
-                TreeNode::node("MetaBlock", vec![self.convert_stmt(*s)]),
+            MetaStmt::MetaBlock(s) => (
+                "MetaBlock".into(),
+                vec![self.convert_stmt(*s)],
+            ),
 
-            MetaStmt::Gen(stmts) =>
-                TreeNode::node("Gen",
-                    stmts.iter().map(|s| self.convert_stmt(*s)).collect()),
+            MetaStmt::Gen(stmts) => (
+                "Gen".into(),
+                stmts.iter().map(|s| self.convert_stmt(*s)).collect(),
+            ),
 
-            MetaStmt::Print(e) =>
-                TreeNode::node("PrintStmt", vec![self.convert_expr(*e)]),
-        }
+            MetaStmt::Print(e) => (
+                "PrintStmt".into(),
+                vec![self.convert_expr(*e)],
+            ),
+        };
+
+        children.insert(0, TreeNode::leaf(format!("id: {id}")));
+        TreeNode::node(label, children)
     }
 
     fn convert_expr(&self, id: MetaExprId) -> TreeNode {
         let expr = self.get_expr(id).expect("invalid expr id");
-        match expr {
-            MetaExpr::Int(v) =>
-                TreeNode::leaf(format!("Int({v})")),
 
-            MetaExpr::String(s) =>
-                TreeNode::leaf(format!("String(\"{s}\")")),
+        let (label, mut children) = match expr {
+            MetaExpr::Int(v) => (
+                "Int".into(),
+                vec![TreeNode::leaf(v.to_string())],
+            ),
 
-            MetaExpr::Bool(b) =>
-                TreeNode::leaf(format!("Bool({b})")),
+            MetaExpr::String(s) => (
+                "String".into(),
+                vec![TreeNode::leaf(format!("\"{s}\""))],
+            ),
 
-            MetaExpr::Variable(name) =>
-                TreeNode::leaf(format!("Var({name})")),
+            MetaExpr::Bool(b) => (
+                "Bool".into(),
+                vec![TreeNode::leaf(b.to_string())],
+            ),
 
-            MetaExpr::StructLiteral { type_name, fields } =>
-                TreeNode::node(format!("StructLiteral({type_name})"),
-                    fields.iter().map(|(n, e)|
-                        TreeNode::node(n.clone(), vec![self.convert_expr(*e)])
-                    ).collect()),
+            MetaExpr::Variable(name) => (
+                "Var".into(),
+                vec![TreeNode::leaf(name.clone())],
+            ),
 
-            MetaExpr::List(items) =>
-                TreeNode::node("List",
-                    items.iter().map(|e| self.convert_expr(*e)).collect()),
+            MetaExpr::StructLiteral { type_name, fields } => (
+                format!("StructLiteral({type_name})"),
+                fields.iter()
+                    .map(|(n, e)| TreeNode::node(n.clone(), vec![self.convert_expr(*e)]))
+                    .collect(),
+            ),
 
-            MetaExpr::Call { callee, args } =>
-                TreeNode::node(format!("Call({callee})"),
-                    args.iter().map(|e| self.convert_expr(*e)).collect()),
+            MetaExpr::List(items) => (
+                "List".into(),
+                items.iter().map(|e| self.convert_expr(*e)).collect(),
+            ),
 
-            MetaExpr::Typeof(name) =>
-                TreeNode::leaf(format!("Typeof({name})")),
+            MetaExpr::Call { callee, args } => (
+                format!("Call({callee})"),
+                args.iter().map(|e| self.convert_expr(*e)).collect(),
+            ),
 
-            MetaExpr::Embed(path) =>
-                TreeNode::leaf(format!("Embed({path})")),
+            MetaExpr::Typeof(name) => (
+                "Typeof".into(),
+                vec![TreeNode::leaf(name.clone())],
+            ),
 
-            MetaExpr::Add(a, b) =>
-                TreeNode::node("Add", vec![self.convert_expr(*a), self.convert_expr(*b)]),
+            MetaExpr::Embed(path) => (
+                "Embed".into(),
+                vec![TreeNode::leaf(path.clone())],
+            ),
 
-            MetaExpr::Sub(a, b) =>
-                TreeNode::node("Sub", vec![self.convert_expr(*a), self.convert_expr(*b)]),
+            MetaExpr::Add(a, b) => (
+                "Add".into(),
+                vec![self.convert_expr(*a), self.convert_expr(*b)],
+            ),
 
-            MetaExpr::Mult(a, b) =>
-                TreeNode::node("Mult", vec![self.convert_expr(*a), self.convert_expr(*b)]),
+            MetaExpr::Sub(a, b) => (
+                "Sub".into(),
+                vec![self.convert_expr(*a), self.convert_expr(*b)],
+            ),
 
-            MetaExpr::Div(a, b) =>
-                TreeNode::node("Div", vec![self.convert_expr(*a), self.convert_expr(*b)]),
+            MetaExpr::Mult(a, b) => (
+                "Mult".into(),
+                vec![self.convert_expr(*a), self.convert_expr(*b)],
+            ),
 
-            MetaExpr::Equals(a, b) =>
-                TreeNode::node("Equals", vec![self.convert_expr(*a), self.convert_expr(*b)]),
-        }
+            MetaExpr::Div(a, b) => (
+                "Div".into(),
+                vec![self.convert_expr(*a), self.convert_expr(*b)],
+            ),
+
+            MetaExpr::Equals(a, b) => (
+                "Equals".into(),
+                vec![self.convert_expr(*a), self.convert_expr(*b)],
+            ),
+        };
+
+        children.insert(0, TreeNode::leaf(format!("id: {id}")));
+        TreeNode::node(label, children)
     }
 }
