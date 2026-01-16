@@ -1,5 +1,5 @@
-use rust_comp::semantics::types::type_subst::{unify, ApplySubst, TypeSubst};
-use rust_comp::semantics::types::types::*;
+use cronyx::semantics::types::type_subst::{unify, ApplySubst, TypeSubst};
+use cronyx::semantics::types::types::*;
 
 #[cfg(test)]
 mod type_subst_tests {

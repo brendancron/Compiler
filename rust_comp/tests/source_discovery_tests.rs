@@ -1,4 +1,4 @@
-use rust_comp::frontend::source_discovery::*;
+use cronyx::frontend::source_discovery::*;
 
 #[cfg(test)]
 mod type_check_tests {

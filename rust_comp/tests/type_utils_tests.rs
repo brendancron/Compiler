@@ -1,6 +1,6 @@
-use rust_comp::semantics::types::type_env::*;
-use rust_comp::semantics::types::type_utils::*;
-use rust_comp::semantics::types::types::*;
+use cronyx::semantics::types::type_env::*;
+use cronyx::semantics::types::type_utils::*;
+use cronyx::semantics::types::types::*;
 
 #[cfg(test)]
 mod type_utils_tests {

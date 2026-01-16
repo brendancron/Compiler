@@ -1,7 +1,7 @@
 use std::path::PathBuf;
-use rust_comp::frontend::lexer::*;
-use rust_comp::frontend::parser2::*;
-use rust_comp::util::formatters::tree_formatter::*;
+use cronyx::frontend::lexer::*;
+use cronyx::frontend::parser2::*;
+use cronyx::util::formatters::tree_formatter::*;
 use std::fs::{ create_dir_all, read_to_string, File};
 use std::fmt::Debug;
 use std::io::Write;
