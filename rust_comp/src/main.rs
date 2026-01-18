@@ -2,9 +2,10 @@ use std::path::PathBuf;
 use cronyx::frontend::lexer::*;
 use cronyx::frontend::parser2::*;
 use cronyx::util::formatters::tree_formatter::*;
+use cronyx::semantics::meta::meta_processor2::*;
 use std::fs::{ create_dir_all, read_to_string, File};
 use std::fmt::Debug;
-use std::io::Write;
+use std::io::{self, Write};
 
 fn main() {
 
@@ -23,8 +24,20 @@ fn main() {
         let _ = parse(&tokens, &mut parse_ctx).unwrap();
         let meta_ast = &(parse_ctx.ast);
         
+        let mut meta_ast_graph_file = to_file(out_dir, "meta_ast_graph.txt");
+        writeln!(meta_ast_graph_file, "{:?}", meta_ast);
+
         let mut meta_ast_file = to_file(out_dir, "meta_ast.txt");
         meta_ast.format_tree(&mut meta_ast_file);
+
+        // SEMANTIC ANALYSIS
+
+        // METAPROCESSING
+
+        let runtime_ast = process(&parse_ctx.ast, &mut io::stdout()).unwrap();
+        
+        let mut runtime_ast_file = to_file(out_dir, "runtime_ast.txt");
+        runtime_ast.format_tree(&mut runtime_ast_file);
     }
 
     let input = std::env::args().nth(1);
