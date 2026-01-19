@@ -1,4 +1,5 @@
 use crate::frontend::meta_ast::*;
+use crate::runtime::environment::*;
 use crate::runtime::interpreter2::*;
 use crate::runtime::value::Value;
 use crate::semantics::meta::runtime_ast::*;
@@ -330,15 +331,15 @@ pub fn process_stmt<W: Write>(
         }
 
         MetaStmt::MetaBlock(parsed_stmt) => {
-            let _processed_code = process_stmt(*parsed_stmt, ctx)?;
+            let processed_code = process_stmt(*parsed_stmt, ctx)?;
 
-            //interpreter::eval(
-            //    &processed_code,
-            //    ctx.env.clone(),
-            //    ctx.decls,
-            //    &mut Some(&mut meta_ctx),
-            //    ctx.out,
-            //)?;
+            eval(
+                ctx.runtime_ast,
+                &processed_code,
+                Environment::new(),
+                &mut None,
+                ctx.out,
+            )?;
 
             Ok(vec![])
         }

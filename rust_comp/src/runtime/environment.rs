@@ -4,14 +4,20 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 pub struct EnvHandler {
-    env: Rc<RefCell<Environment>>,
+    env: EnvRef,
 }
+
+pub type EnvRef = Rc<RefCell<Environment>>;
 
 impl EnvHandler {
     pub fn new() -> Self {
         Self {
             env: Environment::new(),
         }
+    }
+
+    pub fn from(env: EnvRef) -> Self {
+        Self { env }
     }
 
     pub fn push_scope(&mut self) {

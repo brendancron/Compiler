@@ -1,4 +1,4 @@
-use super::environment::{EnvHandler, Environment};
+use super::environment::{EnvHandler, EnvRef, Environment};
 use super::result::ExecResult;
 use super::value::{Function, Value};
 use crate::semantics::meta::meta_processor2::MetaContext;
@@ -265,14 +265,16 @@ pub fn eval_stmts<W: Write>(
 
 pub fn eval<W: Write>(
     ast: &RuntimeAst,
+    root_stmts: &Vec<RuntimeStmtId>,
+    env: EnvRef,
     meta_ctx: &mut Option<MetaContext>,
     out: &mut W,
 ) -> Result<ExecResult, EvalError> {
     let mut ctx = EvalCtx {
         ast,
-        env: &mut EnvHandler::new(),
+        env: &mut EnvHandler::from(env),
         meta_ctx,
         out,
     };
-    eval_stmts(&ast.sem_root_stmts, &mut ctx)
+    eval_stmts(&root_stmts, &mut ctx)
 }

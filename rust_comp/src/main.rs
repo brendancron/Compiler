@@ -1,5 +1,6 @@
 use cronyx::frontend::lexer::*;
 use cronyx::frontend::parser2::*;
+use cronyx::runtime::environment::*;
 use cronyx::runtime::interpreter2::*;
 use cronyx::semantics::meta::meta_processor2::*;
 use cronyx::util::formatters::tree_formatter::*;
@@ -41,7 +42,14 @@ fn main() {
 
         // EVALUATION
 
-        eval(&runtime_ast, &mut None, &mut io::stdout()).unwrap();
+        eval(
+            &runtime_ast,
+            &runtime_ast.sem_root_stmts,
+            Environment::new(),
+            &mut None,
+            &mut io::stdout(),
+        )
+        .unwrap();
     }
 
     let input = std::env::args().nth(1);
