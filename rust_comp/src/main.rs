@@ -1,14 +1,14 @@
-use std::path::PathBuf;
 use cronyx::frontend::lexer::*;
 use cronyx::frontend::parser2::*;
-use cronyx::util::formatters::tree_formatter::*;
+use cronyx::runtime::interpreter2::*;
 use cronyx::semantics::meta::meta_processor2::*;
-use std::fs::{ create_dir_all, read_to_string, File};
+use cronyx::util::formatters::tree_formatter::*;
 use std::fmt::Debug;
+use std::fs::{create_dir_all, read_to_string, File};
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 fn main() {
-
     fn run_pipeline(root_path: &PathBuf, out_dir: &PathBuf) {
         let buf = read_to_string(root_path).unwrap();
         create_dir_all(&out_dir).unwrap();
@@ -18,12 +18,12 @@ fn main() {
         let tokens = tokenize(&buf).unwrap();
         let mut tok_file = to_file(out_dir, "tokens.txt");
         dump(&tokens, &mut tok_file);
-        
+
         // PARSE
         let mut parse_ctx = ParseCtx::new();
         let _ = parse(&tokens, &mut parse_ctx).unwrap();
         let meta_ast = &(parse_ctx.ast);
-        
+
         let mut meta_ast_graph_file = to_file(out_dir, "meta_ast_graph.txt");
         writeln!(meta_ast_graph_file, "{:?}", meta_ast);
 
@@ -35,9 +35,13 @@ fn main() {
         // METAPROCESSING
 
         let runtime_ast = process(&parse_ctx.ast, &mut io::stdout()).unwrap();
-        
+
         let mut runtime_ast_file = to_file(out_dir, "runtime_ast.txt");
         runtime_ast.format_tree(&mut runtime_ast_file);
+
+        // EVALUATION
+
+        eval(&runtime_ast, &mut None, &mut io::stdout()).unwrap();
     }
 
     let input = std::env::args().nth(1);
@@ -46,18 +50,14 @@ fn main() {
     run_pipeline(&root_path, &out_path);
 }
 
-pub fn to_file(
-    out_dir: &PathBuf, 
-    file_name: &str,
-) -> File {
+pub fn to_file(out_dir: &PathBuf, file_name: &str) -> File {
     File::create(out_dir.join(file_name)).unwrap()
 }
 
-pub fn dump<T: Debug, W: Write>(
-    items: &[T],
-    out: &mut W,
-) { 
+pub fn dump<T: Debug, W: Write>(items: &[T], out: &mut W) {
     for item in items {
-        writeln!(out, "{item:?}").map_err(|e| e.to_string()).unwrap();
+        writeln!(out, "{item:?}")
+            .map_err(|e| e.to_string())
+            .unwrap();
     }
 }

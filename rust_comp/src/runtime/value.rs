@@ -1,5 +1,5 @@
-use crate::runtime::environment::EnvRef;
-use crate::semantics::meta::expanded_ast::ExpandedStmt;
+use crate::runtime::environment::*;
+use crate::semantics::meta::runtime_ast::*;
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -25,8 +25,8 @@ pub enum Value {
 #[derive(Debug, Clone)]
 pub struct Function {
     pub params: Vec<String>,
-    pub body: Box<ExpandedStmt>,
-    pub env: EnvRef,
+    pub body: RuntimeStmtId,
+    pub env: Rc<RefCell<Environment>>,
 }
 
 impl Value {

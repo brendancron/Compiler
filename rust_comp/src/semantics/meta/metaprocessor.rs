@@ -1,15 +1,15 @@
-use crate::util::external_resolver::ExternalResolver;
-use crate::runtime::environment::EnvRef;
 use crate::frontend::blueprint_ast::{BlueprintAst, BlueprintExpr, BlueprintStmt};
-use crate::semantics::meta::expanded_ast::{ExpandedExpr, ExpandedStmt};
+use crate::runtime::environment::EnvRef;
 use crate::runtime::value::{Function, Value};
+use crate::semantics::meta::expanded_ast::{ExpandedExpr, ExpandedStmt};
+use crate::util::external_resolver::ExternalResolver;
 use crate::{
     runtime::interpreter::{self, EvalError},
     util::decl_registry::{DeclRegistry, StructDef},
 };
 use std::io::Write;
-use std::rc::Rc;
 use std::path::Path;
+use std::rc::Rc;
 
 pub struct MetaProcessContext<'a, E: ExternalResolver, W: Write> {
     pub env: EnvRef,
@@ -130,7 +130,7 @@ pub fn process_expr<E: ExternalResolver, W: Write>(
                 None => Ok(call_expr),
             }
         }
-        
+
         BlueprintExpr::Typeof(id) => {
             let def = ctx
                 .decls
@@ -141,7 +141,8 @@ pub fn process_expr<E: ExternalResolver, W: Write>(
         }
 
         BlueprintExpr::Embed(file_path) => {
-            let contents = ctx.resolver
+            let contents = ctx
+                .resolver
                 .read_file(ctx.curr_dir, file_path)
                 .ok_or_else(|| MetaProcessError::EmbedFailed {
                     path: file_path.clone(),
@@ -149,7 +150,6 @@ pub fn process_expr<E: ExternalResolver, W: Write>(
                 })?;
             Ok(ExpandedExpr::String(contents))
         }
-
     }
 }
 
@@ -284,9 +284,7 @@ pub fn process_stmt<E: ExternalResolver, W: Write>(
             Ok(meta_ctx.emitted)
         }
 
-        BlueprintStmt::Import(_mod_name) => {
-            Ok(vec![])
-        }
+        BlueprintStmt::Import(_mod_name) => Ok(vec![]),
     }
 }
 

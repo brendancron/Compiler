@@ -1,11 +1,10 @@
 use crate::frontend::meta_ast::*;
-use crate::semantics::meta::runtime_ast::*;
+use crate::runtime::interpreter2::*;
 use crate::runtime::value::Value;
-use crate::runtime::interpreter::EvalError;
+use crate::semantics::meta::runtime_ast::*;
 use std::io::Write;
-use crate::util::formatters::tree_formatter::*;
 
-struct MetaProcessContext<'a, W: Write> {
+pub struct MetaProcessContext<'a, W: Write> {
     meta_ast: &'a MetaAst,
     runtime_ast: &'a mut RuntimeAst,
     out: &'a mut W,
@@ -31,7 +30,10 @@ pub struct MetaContext {
     pub emitted: Vec<RuntimeStmt>,
 }
 
-pub fn value_to_literal<W: Write>(val: Value, ctx: MetaProcessContext<W>) -> Result<RuntimeExprId, MetaProcessError> {
+pub fn value_to_literal<W: Write>(
+    val: Value,
+    ctx: MetaProcessContext<W>,
+) -> Result<RuntimeExprId, MetaProcessError> {
     match val {
         Value::Int(n) => {
             let expr = RuntimeExpr::Int(n);
@@ -61,9 +63,11 @@ pub fn process_expr<W: Write>(
     expr_id: MetaExprId,
     ctx: &mut MetaProcessContext<W>,
 ) -> Result<RuntimeExprId, MetaProcessError> {
-    match ctx.meta_ast
+    match ctx
+        .meta_ast
         .get_expr(expr_id)
-        .ok_or(MetaProcessError::ExprNotFound(expr_id))? {
+        .ok_or(MetaProcessError::ExprNotFound(expr_id))?
+    {
         MetaExpr::Int(i) => {
             let expr = RuntimeExpr::Int(*i);
             let id = ctx.runtime_ast.insert_expr(expr);
@@ -113,49 +117,34 @@ pub fn process_expr<W: Write>(
         }
 
         MetaExpr::Add(a, b) => {
-            let expr = RuntimeExpr::Add(
-                process_expr(*a, ctx)?,
-                process_expr(*b, ctx)?,
-            );
+            let expr = RuntimeExpr::Add(process_expr(*a, ctx)?, process_expr(*b, ctx)?);
             let id = ctx.runtime_ast.insert_expr(expr);
             Ok(id)
-        },
+        }
 
         MetaExpr::Sub(a, b) => {
-            let expr = RuntimeExpr::Sub(
-                process_expr(*a, ctx)?,
-                process_expr(*b, ctx)?,
-            );
+            let expr = RuntimeExpr::Sub(process_expr(*a, ctx)?, process_expr(*b, ctx)?);
             let id = ctx.runtime_ast.insert_expr(expr);
             Ok(id)
-        },
+        }
 
         MetaExpr::Mult(a, b) => {
-            let expr = RuntimeExpr::Mult(
-                process_expr(*a, ctx)?,
-                process_expr(*b, ctx)?,
-            );
+            let expr = RuntimeExpr::Mult(process_expr(*a, ctx)?, process_expr(*b, ctx)?);
             let id = ctx.runtime_ast.insert_expr(expr);
             Ok(id)
-        },
+        }
 
         MetaExpr::Div(a, b) => {
-            let expr = RuntimeExpr::Div(
-                process_expr(*a, ctx)?,
-                process_expr(*b, ctx)?,
-            );
+            let expr = RuntimeExpr::Div(process_expr(*a, ctx)?, process_expr(*b, ctx)?);
             let id = ctx.runtime_ast.insert_expr(expr);
             Ok(id)
-        },
+        }
 
         MetaExpr::Equals(a, b) => {
-            let expr = RuntimeExpr::Equals(
-                process_expr(*a, ctx)?,
-                process_expr(*b, ctx)?,
-            );
+            let expr = RuntimeExpr::Equals(process_expr(*a, ctx)?, process_expr(*b, ctx)?);
             let id = ctx.runtime_ast.insert_expr(expr);
             Ok(id)
-        },
+        }
 
         MetaExpr::Call { callee, args } => {
             let mut out_args = Vec::new();
@@ -185,7 +174,7 @@ pub fn process_expr<W: Write>(
             //    None => Ok(call_expr),
             //}
         }
-        
+
         MetaExpr::Typeof(ident) => {
             //let def = ctx
             //    .decls
@@ -202,7 +191,6 @@ pub fn process_expr<W: Write>(
             let id = ctx.runtime_ast.insert_expr(expr);
             Ok(id)
         }
-
     }
 }
 
@@ -223,7 +211,8 @@ pub fn process_stmt<W: Write>(
     stmt_id: MetaStmtId,
     ctx: &mut MetaProcessContext<W>,
 ) -> Result<Vec<RuntimeStmtId>, MetaProcessError> {
-    let ast_stmt = ctx.meta_ast
+    let ast_stmt = ctx
+        .meta_ast
         .get_stmt(stmt_id)
         .ok_or(MetaProcessError::StmtNotFound(stmt_id))?;
     match ast_stmt {
@@ -302,11 +291,7 @@ pub fn process_stmt<W: Write>(
             Ok(vec![id])
         }
 
-        MetaStmt::FnDecl {
-            name,
-            params,
-            body,
-        } => {
+        MetaStmt::FnDecl { name, params, body } => {
             let processed_body = process_to_block(*body, ctx)?;
 
             let stmt = RuntimeStmt::FnDecl {
@@ -345,7 +330,7 @@ pub fn process_stmt<W: Write>(
         }
 
         MetaStmt::MetaBlock(parsed_stmt) => {
-            let processed_code = process_stmt(*parsed_stmt, ctx)?;
+            let _processed_code = process_stmt(*parsed_stmt, ctx)?;
 
             //interpreter::eval(
             //    &processed_code,
@@ -358,9 +343,7 @@ pub fn process_stmt<W: Write>(
             Ok(vec![])
         }
 
-        MetaStmt::Import(_mod_name) => {
-            Ok(vec![])
-        }
+        MetaStmt::Import(_mod_name) => Ok(vec![]),
     }
 }
 
@@ -370,9 +353,11 @@ fn process_to_block<W: Write>(
     stmt_id: MetaStmtId,
     ctx: &mut MetaProcessContext<W>,
 ) -> Result<RuntimeStmtId, MetaProcessError> {
-    match ctx.meta_ast
+    match ctx
+        .meta_ast
         .get_stmt(stmt_id)
-        .ok_or(MetaProcessError::StmtNotFound(stmt_id))? {
+        .ok_or(MetaProcessError::StmtNotFound(stmt_id))?
+    {
         MetaStmt::Block(_) => {
             let processed = process_stmt(stmt_id, ctx)?;
             debug_assert!(
@@ -404,12 +389,7 @@ pub fn process_stmts<W: Write>(
     Ok(output)
 }
 
-pub fn process<W: Write>(
-    ast: &MetaAst,
-    out: &mut W,
-) -> Result<RuntimeAst, MetaProcessError> {
-    ast.format_tree(out);
-
+pub fn process<W: Write>(ast: &MetaAst, out: &mut W) -> Result<RuntimeAst, MetaProcessError> {
     let mut runtime_ast = RuntimeAst::new();
     let mut ctx = MetaProcessContext {
         meta_ast: ast,
