@@ -77,5 +77,7 @@ mod script_integration {
         use super::*;
 
         cx_test!(print_hello, "tests/01_vanilla/01_print", "hello");
+        cx_test!(math_math, "tests/01_vanilla/02_math", "math");
+        cx_test!(func_fib, "tests/01_vanilla/03_func", "fib");
     }
 }
