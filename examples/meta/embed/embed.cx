@@ -1,3 +1,0 @@
-var msg = embed("hello_world.txt");
-print(msg);
-

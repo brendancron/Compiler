@@ -1,0 +1,9 @@
+print("A");
+meta {
+    print("B");
+    meta {
+        print("C");
+    }
+    print("D");
+}
+print("E");

@@ -1,0 +1,5 @@
+if (false) {
+    print("FAILURE");
+} else {
+    print("else success");
+}

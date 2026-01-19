@@ -2,4 +2,3 @@ meta {
     var msg = "Hello";
     gen print(msg + "World");
 }
-

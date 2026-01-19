@@ -1,5 +1,0 @@
-print("A");
-meta { 
-    print("B");
-}
-print("C");
