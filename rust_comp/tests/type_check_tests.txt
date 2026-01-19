@@ -1,11 +1,10 @@
-use cronyx::util::external_resolver::DummyResolver;
-use cronyx::util::pipeline::*;
-use cronyx::semantics::types::type_checker::*;
-use cronyx::util::decl_registry::DeclRegistry;
 use cronyx::semantics::meta::expanded_ast::{ExpandedExpr, ExpandedStmt};
+use cronyx::semantics::types::type_checker::*;
 use cronyx::semantics::types::type_env::TypeEnv;
 use cronyx::semantics::types::type_subst::TypeSubst;
 use cronyx::semantics::types::types::*;
+use cronyx::util::decl_registry::DeclRegistry;
+use cronyx::util::external_resolver::DummyResolver;
 use std::io;
 use std::path::PathBuf;
 
@@ -16,10 +15,7 @@ mod type_check_tests {
     fn exec_parse_pipeline(source: &str) -> Vec<ExpandedStmt> {
         let pipeline = lexer_pipeline()
             .then(parser_pipeline())
-            .then(metaprocessor_pipeline(
-                io::stdout(),
-                DummyResolver{},
-            ));
+            .then(metaprocessor_pipeline(io::stdout(), DummyResolver {}));
 
         let mut pipeline_ctx = PipelineCtx {
             out_dir: PathBuf::from("../out"),
