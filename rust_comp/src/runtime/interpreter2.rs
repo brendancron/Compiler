@@ -1,6 +1,7 @@
 use super::environment::{EnvHandler, EnvRef, Environment};
 use super::result::ExecResult;
 use super::value::{Function, Value};
+use crate::frontend::id_provider::*;
 use crate::semantics::meta::meta_processor2::MetaContext;
 use crate::semantics::meta::runtime_ast::*;
 use crate::semantics::types::types::{self, Type};
@@ -8,8 +9,8 @@ use std::io::Write;
 
 #[derive(Debug)]
 pub enum EvalError {
-    ExprNotFound(RuntimeExprId),
-    StmtNotFound(RuntimeStmtId),
+    ExprNotFound(AstId),
+    StmtNotFound(AstId),
     UnknownStructType(String),
     UndefinedVariable(String),
     TypeError(Type),
@@ -32,10 +33,7 @@ pub struct EvalCtx<'a, W> {
     pub ast: &'a RuntimeAst,
 }
 
-pub fn eval_expr<W: Write>(
-    expr_id: RuntimeExprId,
-    ctx: &mut EvalCtx<W>,
-) -> Result<Value, EvalError> {
+pub fn eval_expr<W: Write>(expr_id: AstId, ctx: &mut EvalCtx<W>) -> Result<Value, EvalError> {
     match ctx
         .ast
         .get_expr(expr_id)
@@ -144,10 +142,7 @@ pub fn eval_expr<W: Write>(
     }
 }
 
-pub fn eval_stmt<W: Write>(
-    stmt_id: RuntimeStmtId,
-    ctx: &mut EvalCtx<W>,
-) -> Result<ExecResult, EvalError> {
+pub fn eval_stmt<W: Write>(stmt_id: AstId, ctx: &mut EvalCtx<W>) -> Result<ExecResult, EvalError> {
     match ctx
         .ast
         .get_stmt(stmt_id)
@@ -249,7 +244,7 @@ pub fn eval_stmt<W: Write>(
 }
 
 pub fn eval_stmts<W: Write>(
-    stmts: &Vec<RuntimeStmtId>,
+    stmts: &Vec<AstId>,
     ctx: &mut EvalCtx<W>,
 ) -> Result<ExecResult, EvalError> {
     for stmt in stmts {
@@ -265,7 +260,7 @@ pub fn eval_stmts<W: Write>(
 
 pub fn eval<W: Write>(
     ast: &RuntimeAst,
-    root_stmts: &Vec<RuntimeStmtId>,
+    root_stmts: &Vec<AstId>,
     env: EnvRef,
     meta_ctx: &mut Option<MetaContext>,
     out: &mut W,

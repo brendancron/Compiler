@@ -1,5 +1,5 @@
+use crate::frontend::id_provider::*;
 use crate::runtime::environment::*;
-use crate::semantics::meta::runtime_ast::*;
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -25,7 +25,7 @@ pub enum Value {
 #[derive(Debug, Clone)]
 pub struct Function {
     pub params: Vec<String>,
-    pub body: RuntimeStmtId,
+    pub body: AstId,
     pub env: Rc<RefCell<Environment>>,
 }
 

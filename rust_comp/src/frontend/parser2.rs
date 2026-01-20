@@ -1,14 +1,17 @@
+use super::id_provider::*;
 use super::meta_ast::*;
 use super::token::*;
 
 pub struct ParseCtx {
     pub ast: MetaAst,
+    pub id_provider: IdProvider,
 }
 
 impl ParseCtx {
     pub fn new() -> Self {
         Self {
             ast: MetaAst::new(),
+            id_provider: IdProvider::new(),
         }
     }
 }
@@ -100,30 +103,42 @@ fn parse_separated<T>(
     Ok(items)
 }
 
-fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<MetaExprId, ParseError> {
+fn parse_factor<'a>(
+    tokens: &'a [Token],
+    pos: &mut usize,
+    ctx: &mut ParseCtx,
+) -> Result<AstId, ParseError> {
     match tokens.get(*pos) {
         Some(tok) => match tok.token_type {
             TokenType::Number => {
                 consume_next(tokens, pos);
-                let id = ctx.ast.insert_expr(MetaExpr::Int(tok.expect_int()));
+                let id = ctx
+                    .ast
+                    .insert_expr(&mut ctx.id_provider, MetaExpr::Int(tok.expect_int()));
                 Ok(id)
             }
 
             TokenType::String => {
                 consume_next(tokens, pos);
-                let id = ctx.ast.insert_expr(MetaExpr::String(tok.expect_str()));
+                let id = ctx
+                    .ast
+                    .insert_expr(&mut ctx.id_provider, MetaExpr::String(tok.expect_str()));
                 Ok(id)
             }
 
             TokenType::True => {
                 consume_next(tokens, pos);
-                let id = ctx.ast.insert_expr(MetaExpr::Bool(true));
+                let id = ctx
+                    .ast
+                    .insert_expr(&mut ctx.id_provider, MetaExpr::Bool(true));
                 Ok(id)
             }
 
             TokenType::False => {
                 consume_next(tokens, pos);
-                let id = ctx.ast.insert_expr(MetaExpr::Bool(false));
+                let id = ctx
+                    .ast
+                    .insert_expr(&mut ctx.id_provider, MetaExpr::Bool(false));
                 Ok(id)
             }
 
@@ -139,7 +154,9 @@ fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) ->
                 consume(tokens, pos, TokenType::LeftParen)?;
                 let ident = consume(tokens, pos, TokenType::Identifier)?.expect_str();
                 consume(tokens, pos, TokenType::RightParen)?;
-                let id = ctx.ast.insert_expr(MetaExpr::Typeof(ident));
+                let id = ctx
+                    .ast
+                    .insert_expr(&mut ctx.id_provider, MetaExpr::Typeof(ident));
                 Ok(id)
             }
 
@@ -148,7 +165,9 @@ fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) ->
                 consume(tokens, pos, TokenType::LeftParen)?;
                 let file_path = consume(tokens, pos, TokenType::String)?.expect_str();
                 consume(tokens, pos, TokenType::RightParen)?;
-                let id = ctx.ast.insert_expr(MetaExpr::Embed(file_path));
+                let id = ctx
+                    .ast
+                    .insert_expr(&mut ctx.id_provider, MetaExpr::Embed(file_path));
                 Ok(id)
             }
 
@@ -167,7 +186,9 @@ fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) ->
                     )?;
                     consume(tokens, pos, TokenType::RightParen)?;
 
-                    let id = ctx.ast.insert_expr(MetaExpr::Call{ callee: name, args });
+                    let id = ctx
+                        .ast
+                        .insert_expr(&mut ctx.id_provider, MetaExpr::Call { callee: name, args });
                     Ok(id)
                 } else if check(tokens, *pos, TokenType::LeftBrace) {
                     consume(tokens, pos, TokenType::LeftBrace)?;
@@ -193,11 +214,12 @@ fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) ->
                         type_name: name,
                         fields,
                     };
-                    let id = ctx.ast.insert_expr(struct_literal);
+                    let id = ctx.ast.insert_expr(&mut ctx.id_provider, struct_literal);
                     Ok(id)
-
                 } else {
-                    let id = ctx.ast.insert_expr(MetaExpr::Variable(name));
+                    let id = ctx
+                        .ast
+                        .insert_expr(&mut ctx.id_provider, MetaExpr::Variable(name));
                     Ok(id)
                 }
             }
@@ -216,7 +238,9 @@ fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) ->
 
                 consume(tokens, pos, TokenType::RightBracket)?;
 
-                let id = ctx.ast.insert_expr(MetaExpr::List(elems));
+                let id = ctx
+                    .ast
+                    .insert_expr(&mut ctx.id_provider, MetaExpr::List(elems));
                 Ok(id)
             }
 
@@ -226,7 +250,11 @@ fn parse_factor<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) ->
     }
 }
 
-fn parse_term<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<MetaExprId, ParseError> {
+fn parse_term<'a>(
+    tokens: &'a [Token],
+    pos: &mut usize,
+    ctx: &mut ParseCtx,
+) -> Result<AstId, ParseError> {
     let mut left = parse_factor(tokens, pos, ctx)?;
 
     loop {
@@ -236,13 +264,13 @@ fn parse_term<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                     *pos += 1;
                     let right = parse_factor(tokens, pos, ctx)?;
                     let node = MetaExpr::Mult(left, right);
-                    left = ctx.ast.insert_expr(node);
+                    left = ctx.ast.insert_expr(&mut ctx.id_provider, node);
                 }
                 TokenType::Slash => {
                     *pos += 1;
                     let right = parse_factor(tokens, pos, ctx)?;
                     let node = MetaExpr::Div(left, right);
-                    left = ctx.ast.insert_expr(node);
+                    left = ctx.ast.insert_expr(&mut ctx.id_provider, node);
                 }
                 _ => return Ok(left),
             },
@@ -251,8 +279,11 @@ fn parse_term<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
     }
 }
 
-
-fn parse_expr<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<MetaExprId, ParseError> {
+fn parse_expr<'a>(
+    tokens: &'a [Token],
+    pos: &mut usize,
+    ctx: &mut ParseCtx,
+) -> Result<AstId, ParseError> {
     let mut left = parse_term(tokens, pos, ctx)?;
 
     loop {
@@ -262,21 +293,21 @@ fn parse_expr<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                     *pos += 1;
                     let right = parse_term(tokens, pos, ctx)?;
                     let node = MetaExpr::Add(left, right);
-                    left = ctx.ast.insert_expr(node);
+                    left = ctx.ast.insert_expr(&mut ctx.id_provider, node);
                 }
 
                 TokenType::Minus => {
                     *pos += 1;
                     let right = parse_term(tokens, pos, ctx)?;
                     let node = MetaExpr::Sub(left, right);
-                    left = ctx.ast.insert_expr(node);
+                    left = ctx.ast.insert_expr(&mut ctx.id_provider, node);
                 }
 
                 TokenType::EqualEqual => {
                     *pos += 1;
                     let right = parse_term(tokens, pos, ctx)?;
                     let node = MetaExpr::Equals(left, right);
-                    left = ctx.ast.insert_expr(node);
+                    left = ctx.ast.insert_expr(&mut ctx.id_provider, node);
                 }
 
                 _ => return Ok(left),
@@ -290,15 +321,20 @@ fn parse_expr_stmt<'a>(
     tokens: &'a [Token],
     pos: &mut usize,
     ctx: &mut ParseCtx,
-) -> Result<MetaStmtId, ParseError> {
+) -> Result<AstId, ParseError> {
     let expr = parse_expr(tokens, pos, ctx)?;
     consume(tokens, pos, TokenType::Semicolon)?;
-    let id = ctx.ast.insert_stmt(MetaStmt::ExprStmt(expr));
+    let id = ctx
+        .ast
+        .insert_stmt(&mut ctx.id_provider, MetaStmt::ExprStmt(expr));
     Ok(id)
 }
 
-fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<MetaStmtId, ParseError> {
-
+fn parse_stmt<'a>(
+    tokens: &'a [Token],
+    pos: &mut usize,
+    ctx: &mut ParseCtx,
+) -> Result<AstId, ParseError> {
     match tokens.get(*pos) {
         Some(tok) => match tok.token_type {
             TokenType::Print => {
@@ -307,7 +343,9 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                 let expr = parse_expr(tokens, pos, ctx)?;
                 consume(tokens, pos, TokenType::RightParen)?;
                 consume(tokens, pos, TokenType::Semicolon)?;
-                let id = ctx.ast.insert_stmt(MetaStmt::Print(expr));
+                let id = ctx
+                    .ast
+                    .insert_stmt(&mut ctx.id_provider, MetaStmt::Print(expr));
                 Ok(id)
             }
 
@@ -340,7 +378,7 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                     else_branch: else_branch,
                 };
 
-                let id = ctx.ast.insert_stmt(if_stmt);
+                let id = ctx.ast.insert_stmt(&mut ctx.id_provider, if_stmt);
                 Ok(id)
             }
 
@@ -360,7 +398,7 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                     body: inner,
                 };
 
-                let id = ctx.ast.insert_stmt(for_stmt);
+                let id = ctx.ast.insert_stmt(&mut ctx.id_provider, for_stmt);
                 Ok(id)
             }
 
@@ -375,7 +413,7 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                     expr,
                 };
 
-                let id = ctx.ast.insert_stmt(var_decl);
+                let id = ctx.ast.insert_stmt(&mut ctx.id_provider, var_decl);
                 Ok(id)
             }
 
@@ -390,7 +428,9 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                     ctx,
                     TokenType::Comma,
                     TokenType::RightParen,
-                    |tokens, pos, _ctx| Ok(consume(tokens, pos, TokenType::Identifier)?.expect_str()),
+                    |tokens, pos, _ctx| {
+                        Ok(consume(tokens, pos, TokenType::Identifier)?.expect_str())
+                    },
                 )?;
                 consume(tokens, pos, TokenType::RightParen)?;
 
@@ -398,38 +438,35 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                 let body = parse_block(tokens, pos, ctx)?;
                 consume(tokens, pos, TokenType::RightBrace)?;
 
-                let fn_decl = MetaStmt::FnDecl {
-                    name,
-                    params,
-                    body,
-                };
-                let id = ctx.ast.insert_stmt(fn_decl);
+                let fn_decl = MetaStmt::FnDecl { name, params, body };
+                let id = ctx.ast.insert_stmt(&mut ctx.id_provider, fn_decl);
                 Ok(id)
             }
             //parse_fn_decl(tokens, pos, ctx, BlueprintFuncType::Normal),
-
             TokenType::Struct => {
                 consume(tokens, pos, TokenType::Struct)?;
                 let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
                 consume(tokens, pos, TokenType::LeftBrace)?;
                 let fields = parse_separated(
                     tokens,
-                    pos, 
+                    pos,
                     ctx,
                     TokenType::Semicolon,
                     TokenType::RightBrace,
                     |tokens, pos, _ctx| {
-                        let field_name =
-                            consume(tokens, pos, TokenType::Identifier)?.expect_str();
+                        let field_name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
                         consume(tokens, pos, TokenType::Colon)?;
                         let type_name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
-                        Ok(MetaFieldDecl{ field_name, type_name } )
+                        Ok(MetaFieldDecl {
+                            field_name,
+                            type_name,
+                        })
                     },
                 )?;
 
                 consume(tokens, pos, TokenType::RightBrace)?;
-                let struct_decl = MetaStmt::StructDecl {name, fields};
-                let id = ctx.ast.insert_stmt(struct_decl);
+                let struct_decl = MetaStmt::StructDecl { name, fields };
+                let id = ctx.ast.insert_stmt(&mut ctx.id_provider, struct_decl);
                 Ok(id)
             }
 
@@ -441,9 +478,9 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                     Some(parse_expr(tokens, pos, ctx)?)
                 };
                 consume(tokens, pos, TokenType::Semicolon)?;
-                
+
                 let return_stmt = MetaStmt::Return(opt_expr);
-                let id = ctx.ast.insert_stmt(return_stmt);
+                let id = ctx.ast.insert_stmt(&mut ctx.id_provider, return_stmt);
                 Ok(id)
             }
 
@@ -451,7 +488,7 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                 consume(tokens, pos, TokenType::Gen)?;
                 let stmt = parse_stmt(tokens, pos, ctx)?;
                 let gen = MetaStmt::Gen(vec![stmt]);
-                let id = ctx.ast.insert_stmt(gen);
+                let id = ctx.ast.insert_stmt(&mut ctx.id_provider, gen);
                 Ok(id)
             }
 
@@ -469,7 +506,7 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
                 let mod_name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
                 consume(tokens, pos, TokenType::Semicolon)?;
                 let import = MetaStmt::Import(mod_name);
-                let id = ctx.ast.insert_stmt(import);
+                let id = ctx.ast.insert_stmt(&mut ctx.id_provider, import);
                 Ok(id)
             }
 
@@ -479,23 +516,27 @@ fn parse_stmt<'a>(tokens: &'a [Token], pos: &mut usize, ctx: &mut ParseCtx) -> R
     }
 }
 
-fn parse_meta_stmt(tokens: &[Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<MetaStmtId, ParseError> {
+fn parse_meta_stmt(
+    tokens: &[Token],
+    pos: &mut usize,
+    ctx: &mut ParseCtx,
+) -> Result<AstId, ParseError> {
     consume(tokens, pos, TokenType::Meta)?;
     let stmt = parse_stmt(tokens, pos, ctx)?;
     let meta_stmt = MetaStmt::MetaBlock(stmt);
-    let id = ctx.ast.insert_stmt(meta_stmt);
+    let id = ctx.ast.insert_stmt(&mut ctx.id_provider, meta_stmt);
     Ok(id)
 }
 
-fn parse_block(tokens: &[Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<MetaStmtId, ParseError> {
+fn parse_block(tokens: &[Token], pos: &mut usize, ctx: &mut ParseCtx) -> Result<AstId, ParseError> {
     let mut stmts = Vec::new();
 
     while *pos < tokens.len() && tokens[*pos].token_type != TokenType::RightBrace {
         stmts.push(parse_stmt(tokens, pos, ctx)?);
     }
-    
+
     let block_stmt = MetaStmt::Block(stmts);
-    let id = ctx.ast.insert_stmt(block_stmt);
+    let id = ctx.ast.insert_stmt(&mut ctx.id_provider, block_stmt);
     Ok(id)
 }
 

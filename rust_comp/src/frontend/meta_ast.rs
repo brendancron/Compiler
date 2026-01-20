@@ -1,109 +1,98 @@
-use std::collections::HashMap;
+use super::id_provider::*;
 use crate::util::formatters::tree_formatter::*;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct MetaAst {
-    pub sem_root_stmts: Vec<MetaStmtId>,
-    exprs: HashMap<MetaExprId, MetaExpr>,
-    stmts: HashMap<MetaStmtId, MetaStmt>,
-    current_expr_id: usize,
-    current_stmt_id: usize,
+    pub sem_root_stmts: Vec<AstId>,
+    exprs: HashMap<AstId, MetaExpr>,
+    stmts: HashMap<AstId, MetaStmt>,
 }
 
-pub type MetaExprId = usize;
-pub type MetaStmtId = usize;
+#[derive(Debug)]
+pub enum MetaAstNode {
+    Stmt(AstId),
+    Expr(AstId),
+}
 
 impl MetaAst {
-
     pub fn new() -> Self {
         Self {
             sem_root_stmts: vec![],
             exprs: HashMap::new(),
             stmts: HashMap::new(),
-            current_expr_id: 0,
-            current_stmt_id: 0,
         }
     }
 
-    pub fn insert_expr(&mut self, expr: MetaExpr) -> usize {
-        let id = self.current_expr_id;
+    pub fn insert_expr(&mut self, id_provider: &mut IdProvider, expr: MetaExpr) -> usize {
+        let id = id_provider.next();
         self.exprs.insert(id, expr);
-        self.current_expr_id += 1;
         id
     }
 
-    pub fn insert_stmt(&mut self, stmt: MetaStmt) -> usize {
-        let id = self.current_stmt_id;
+    pub fn insert_stmt(&mut self, id_provider: &mut IdProvider, stmt: MetaStmt) -> usize {
+        let id = id_provider.next();
         self.stmts.insert(id, stmt);
-        self.current_stmt_id += 1;
         id
     }
 
-    pub fn get_expr(&self, id: MetaExprId) -> Option<&MetaExpr> {
+    pub fn get_expr(&self, id: AstId) -> Option<&MetaExpr> {
         self.exprs.get(&id)
     }
 
-    pub fn get_stmt(&self, id: MetaStmtId) -> Option<&MetaStmt> {
+    pub fn get_stmt(&self, id: AstId) -> Option<&MetaStmt> {
         self.stmts.get(&id)
     }
-
 }
 
 #[derive(Debug, Clone)]
 pub enum MetaExpr {
-
     // LITERAL REPRESENTATION
-
     Int(i64),
     String(String),
     Bool(bool),
 
     StructLiteral {
         type_name: String,
-        fields: Vec<(String, MetaExprId)>,
+        fields: Vec<(String, AstId)>,
     },
 
     Variable(String),
 
-    List(Vec<MetaExprId>),
-
+    List(Vec<AstId>),
 
     Call {
         callee: String,
-        args: Vec<MetaExprId>,
+        args: Vec<AstId>,
     },
 
     Typeof(String),
-    
+
     Embed(String),
 
     // BINOPS
-
-    Add(MetaExprId, MetaExprId),
-    Sub(MetaExprId, MetaExprId),
-    Mult(MetaExprId, MetaExprId),
-    Div(MetaExprId, MetaExprId),
-    Equals(MetaExprId, MetaExprId),
+    Add(AstId, AstId),
+    Sub(AstId, AstId),
+    Mult(AstId, AstId),
+    Div(AstId, AstId),
+    Equals(AstId, AstId),
 }
 
 #[derive(Debug, Clone)]
 pub enum MetaStmt {
-    
     // RAW EXPR STMTS
+    ExprStmt(AstId),
 
-    ExprStmt(MetaExprId),
-    
     // DECLARATION
-
     VarDecl {
         name: String,
-        expr: MetaExprId,
+        expr: AstId,
     },
-    
+
     FnDecl {
         name: String,
         params: Vec<String>,
-        body: MetaStmtId,
+        body: AstId,
     },
 
     StructDecl {
@@ -112,35 +101,31 @@ pub enum MetaStmt {
     },
 
     // CONTROL
-
     If {
-        cond: MetaExprId,
-        body: MetaStmtId,
-        else_branch: Option<MetaStmtId>,
+        cond: AstId,
+        body: AstId,
+        else_branch: Option<AstId>,
     },
 
     ForEach {
         var: String,
-        iterable: MetaExprId,
-        body: MetaStmtId,
+        iterable: AstId,
+        body: AstId,
     },
 
-    Return(Option<MetaExprId>),
-    
-    Block(Vec<MetaStmtId>),
+    Return(Option<AstId>),
+
+    Block(Vec<AstId>),
 
     // UTIL
-
     Import(String),
-    
-    // META
 
-    MetaBlock(MetaStmtId),
-    Gen(Vec<MetaStmtId>),
+    // META
+    MetaBlock(AstId),
+    Gen(Vec<AstId>),
 
     // TEMPORARY
-
-    Print(MetaExprId),
+    Print(AstId),
 }
 
 #[derive(Debug, Clone)]
@@ -160,14 +145,11 @@ impl AsTree for MetaAst {
 }
 
 impl MetaAst {
-    fn convert_stmt(&self, id: MetaStmtId) -> TreeNode {
+    fn convert_stmt(&self, id: AstId) -> TreeNode {
         let stmt = self.get_stmt(id).expect("invalid stmt id");
 
         let (label, mut children): (String, Vec<TreeNode>) = match stmt {
-            MetaStmt::ExprStmt(e) => (
-                "ExprStmt".into(),
-                vec![self.convert_expr(*e)],
-            ),
+            MetaStmt::ExprStmt(e) => ("ExprStmt".into(), vec![self.convert_expr(*e)]),
 
             MetaStmt::VarDecl { name, expr } => (
                 "VarDecl".into(),
@@ -195,14 +177,19 @@ impl MetaAst {
                     TreeNode::leaf(format!("Name({name})")),
                     TreeNode::node(
                         "Fields",
-                        fields.iter()
+                        fields
+                            .iter()
                             .map(|f| TreeNode::leaf(format!("{}: {}", f.field_name, f.type_name)))
                             .collect(),
                     ),
                 ],
             ),
 
-            MetaStmt::If { cond, body, else_branch } => {
+            MetaStmt::If {
+                cond,
+                body,
+                else_branch,
+            } => {
                 let mut v = vec![
                     TreeNode::node("Cond", vec![self.convert_expr(*cond)]),
                     TreeNode::node("Then", vec![self.convert_stmt(*body)]),
@@ -213,7 +200,11 @@ impl MetaAst {
                 ("IfStmt".into(), v)
             }
 
-            MetaStmt::ForEach { var, iterable, body } => (
+            MetaStmt::ForEach {
+                var,
+                iterable,
+                body,
+            } => (
                 "ForEachStmt".into(),
                 vec![
                     TreeNode::leaf(format!("Var({var})")),
@@ -232,58 +223,38 @@ impl MetaAst {
                 stmts.iter().map(|s| self.convert_stmt(*s)).collect(),
             ),
 
-            MetaStmt::Import(path) => (
-                "Import".into(),
-                vec![TreeNode::leaf(path.clone())],
-            ),
+            MetaStmt::Import(path) => ("Import".into(), vec![TreeNode::leaf(path.clone())]),
 
-            MetaStmt::MetaBlock(s) => (
-                "MetaBlock".into(),
-                vec![self.convert_stmt(*s)],
-            ),
+            MetaStmt::MetaBlock(s) => ("MetaBlock".into(), vec![self.convert_stmt(*s)]),
 
             MetaStmt::Gen(stmts) => (
                 "Gen".into(),
                 stmts.iter().map(|s| self.convert_stmt(*s)).collect(),
             ),
 
-            MetaStmt::Print(e) => (
-                "PrintStmt".into(),
-                vec![self.convert_expr(*e)],
-            ),
+            MetaStmt::Print(e) => ("PrintStmt".into(), vec![self.convert_expr(*e)]),
         };
 
         children.insert(0, TreeNode::leaf(format!("id: {id}")));
         TreeNode::node(label, children)
     }
 
-    fn convert_expr(&self, id: MetaExprId) -> TreeNode {
+    fn convert_expr(&self, id: AstId) -> TreeNode {
         let expr = self.get_expr(id).expect("invalid expr id");
 
         let (label, mut children) = match expr {
-            MetaExpr::Int(v) => (
-                "Int".into(),
-                vec![TreeNode::leaf(v.to_string())],
-            ),
+            MetaExpr::Int(v) => ("Int".into(), vec![TreeNode::leaf(v.to_string())]),
 
-            MetaExpr::String(s) => (
-                "String".into(),
-                vec![TreeNode::leaf(format!("\"{s}\""))],
-            ),
+            MetaExpr::String(s) => ("String".into(), vec![TreeNode::leaf(format!("\"{s}\""))]),
 
-            MetaExpr::Bool(b) => (
-                "Bool".into(),
-                vec![TreeNode::leaf(b.to_string())],
-            ),
+            MetaExpr::Bool(b) => ("Bool".into(), vec![TreeNode::leaf(b.to_string())]),
 
-            MetaExpr::Variable(name) => (
-                "Var".into(),
-                vec![TreeNode::leaf(name.clone())],
-            ),
+            MetaExpr::Variable(name) => ("Var".into(), vec![TreeNode::leaf(name.clone())]),
 
             MetaExpr::StructLiteral { type_name, fields } => (
                 format!("StructLiteral({type_name})"),
-                fields.iter()
+                fields
+                    .iter()
                     .map(|(n, e)| TreeNode::node(n.clone(), vec![self.convert_expr(*e)]))
                     .collect(),
             ),
@@ -298,15 +269,9 @@ impl MetaAst {
                 args.iter().map(|e| self.convert_expr(*e)).collect(),
             ),
 
-            MetaExpr::Typeof(name) => (
-                "Typeof".into(),
-                vec![TreeNode::leaf(name.clone())],
-            ),
+            MetaExpr::Typeof(name) => ("Typeof".into(), vec![TreeNode::leaf(name.clone())]),
 
-            MetaExpr::Embed(path) => (
-                "Embed".into(),
-                vec![TreeNode::leaf(path.clone())],
-            ),
+            MetaExpr::Embed(path) => ("Embed".into(), vec![TreeNode::leaf(path.clone())]),
 
             MetaExpr::Add(a, b) => (
                 "Add".into(),

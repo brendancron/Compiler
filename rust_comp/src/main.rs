@@ -40,6 +40,8 @@ fn main() {
         let mut runtime_ast_file = to_file(out_dir, "runtime_ast.txt");
         runtime_ast.format_tree(&mut runtime_ast_file);
 
+        let mut runtime_ast_graph_file = to_file(out_dir, "runtime_ast_graph.txt");
+        writeln!(runtime_ast_graph_file, "{:?}", runtime_ast);
         // EVALUATION
 
         eval(

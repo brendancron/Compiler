@@ -1,105 +1,84 @@
-use std::collections::HashMap;
+use crate::frontend::id_provider::*;
 use crate::util::formatters::tree_formatter::*;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeAst {
-    pub sem_root_stmts: Vec<RuntimeStmtId>,
-    exprs: HashMap<RuntimeExprId, RuntimeExpr>,
-    stmts: HashMap<RuntimeStmtId, RuntimeStmt>,
-    current_expr_id: usize,
-    current_stmt_id: usize,
+    pub sem_root_stmts: Vec<AstId>,
+    exprs: HashMap<AstId, RuntimeExpr>,
+    stmts: HashMap<AstId, RuntimeStmt>,
 }
 
-pub type RuntimeExprId = usize;
-pub type RuntimeStmtId = usize;
-
 impl RuntimeAst {
-
     pub fn new() -> Self {
         Self {
             sem_root_stmts: vec![],
             exprs: HashMap::new(),
             stmts: HashMap::new(),
-            current_expr_id: 0,
-            current_stmt_id: 0,
         }
     }
 
-    pub fn insert_expr(&mut self, expr: RuntimeExpr) -> usize {
-        let id = self.current_expr_id;
+    pub fn insert_expr(&mut self, id: AstId, expr: RuntimeExpr) {
         self.exprs.insert(id, expr);
-        self.current_expr_id += 1;
-        id
     }
 
-    pub fn insert_stmt(&mut self, stmt: RuntimeStmt) -> usize {
-        let id = self.current_stmt_id;
+    pub fn insert_stmt(&mut self, id: AstId, stmt: RuntimeStmt) {
         self.stmts.insert(id, stmt);
-        self.current_stmt_id += 1;
-        id
     }
 
-    pub fn get_expr(&self, id: RuntimeExprId) -> Option<&RuntimeExpr> {
+    pub fn get_expr(&self, id: AstId) -> Option<&RuntimeExpr> {
         self.exprs.get(&id)
     }
 
-    pub fn get_stmt(&self, id: RuntimeStmtId) -> Option<&RuntimeStmt> {
+    pub fn get_stmt(&self, id: AstId) -> Option<&RuntimeStmt> {
         self.stmts.get(&id)
     }
-
 }
 
 #[derive(Debug, Clone)]
 pub enum RuntimeExpr {
-
     // LITERAL REPRESENTATION
-
     Int(i64),
     String(String),
     Bool(bool),
 
     StructLiteral {
         type_name: String,
-        fields: Vec<(String, RuntimeExprId)>,
+        fields: Vec<(String, AstId)>,
     },
 
     Variable(String),
 
-    List(Vec<RuntimeExprId>),
-
+    List(Vec<AstId>),
 
     Call {
         callee: String,
-        args: Vec<RuntimeExprId>,
+        args: Vec<AstId>,
     },
 
     // BINOPS
-
-    Add(RuntimeExprId, RuntimeExprId),
-    Sub(RuntimeExprId, RuntimeExprId),
-    Mult(RuntimeExprId, RuntimeExprId),
-    Div(RuntimeExprId, RuntimeExprId),
-    Equals(RuntimeExprId, RuntimeExprId),
+    Add(AstId, AstId),
+    Sub(AstId, AstId),
+    Mult(AstId, AstId),
+    Div(AstId, AstId),
+    Equals(AstId, AstId),
 }
 
 #[derive(Debug, Clone)]
 pub enum RuntimeStmt {
-    
     // RAW EXPR STMTS
+    ExprStmt(AstId),
 
-    ExprStmt(RuntimeExprId),
-    
     // DECLARATION
-
     VarDecl {
         name: String,
-        expr: RuntimeExprId,
+        expr: AstId,
     },
-    
+
     FnDecl {
         name: String,
         params: Vec<String>,
-        body: RuntimeStmtId,
+        body: AstId,
     },
 
     StructDecl {
@@ -108,34 +87,30 @@ pub enum RuntimeStmt {
     },
 
     // CONTROL
-
     If {
-        cond: RuntimeExprId,
-        body: RuntimeStmtId,
-        else_branch: Option<RuntimeStmtId>,
+        cond: AstId,
+        body: AstId,
+        else_branch: Option<AstId>,
     },
 
     ForEach {
         var: String,
-        iterable: RuntimeExprId,
-        body: RuntimeStmtId,
+        iterable: AstId,
+        body: AstId,
     },
 
-    Return(Option<RuntimeExprId>),
-    
-    Block(Vec<RuntimeStmtId>),
+    Return(Option<AstId>),
+
+    Block(Vec<AstId>),
 
     // UTIL
-
     Import(String),
-    
-    // META
 
-    Gen(Vec<RuntimeStmtId>),
+    // META
+    Gen(Vec<AstId>),
 
     // TEMPORARY
-
-    Print(RuntimeExprId),
+    Print(AstId),
 }
 
 #[derive(Debug, Clone)]
@@ -155,14 +130,11 @@ impl AsTree for RuntimeAst {
 }
 
 impl RuntimeAst {
-    fn convert_stmt(&self, id: RuntimeStmtId) -> TreeNode {
+    fn convert_stmt(&self, id: AstId) -> TreeNode {
         let stmt = self.get_stmt(id).expect("invalid stmt id");
 
         let (label, mut children): (String, Vec<TreeNode>) = match stmt {
-            RuntimeStmt::ExprStmt(e) => (
-                "ExprStmt".into(),
-                vec![self.convert_expr(*e)],
-            ),
+            RuntimeStmt::ExprStmt(e) => ("ExprStmt".into(), vec![self.convert_expr(*e)]),
 
             RuntimeStmt::VarDecl { name, expr } => (
                 "VarDecl".into(),
@@ -190,14 +162,19 @@ impl RuntimeAst {
                     TreeNode::leaf(format!("Name({name})")),
                     TreeNode::node(
                         "Fields",
-                        fields.iter()
+                        fields
+                            .iter()
                             .map(|f| TreeNode::leaf(format!("{}: {}", f.field_name, f.type_name)))
                             .collect(),
                     ),
                 ],
             ),
 
-            RuntimeStmt::If { cond, body, else_branch } => {
+            RuntimeStmt::If {
+                cond,
+                body,
+                else_branch,
+            } => {
                 let mut v = vec![
                     TreeNode::node("Cond", vec![self.convert_expr(*cond)]),
                     TreeNode::node("Then", vec![self.convert_stmt(*body)]),
@@ -208,7 +185,11 @@ impl RuntimeAst {
                 ("IfStmt".into(), v)
             }
 
-            RuntimeStmt::ForEach { var, iterable, body } => (
+            RuntimeStmt::ForEach {
+                var,
+                iterable,
+                body,
+            } => (
                 "ForEachStmt".into(),
                 vec![
                     TreeNode::leaf(format!("Var({var})")),
@@ -227,53 +208,36 @@ impl RuntimeAst {
                 stmts.iter().map(|s| self.convert_stmt(*s)).collect(),
             ),
 
-            RuntimeStmt::Import(path) => (
-                "Import".into(),
-                vec![TreeNode::leaf(path.clone())],
-            ),
+            RuntimeStmt::Import(path) => ("Import".into(), vec![TreeNode::leaf(path.clone())]),
 
             RuntimeStmt::Gen(stmts) => (
                 "Gen".into(),
                 stmts.iter().map(|s| self.convert_stmt(*s)).collect(),
             ),
 
-            RuntimeStmt::Print(e) => (
-                "PrintStmt".into(),
-                vec![self.convert_expr(*e)],
-            ),
+            RuntimeStmt::Print(e) => ("PrintStmt".into(), vec![self.convert_expr(*e)]),
         };
 
         children.insert(0, TreeNode::leaf(format!("id: {id}")));
         TreeNode::node(label, children)
     }
 
-    fn convert_expr(&self, id: RuntimeExprId) -> TreeNode {
+    fn convert_expr(&self, id: AstId) -> TreeNode {
         let expr = self.get_expr(id).expect("invalid expr id");
 
         let (label, mut children) = match expr {
-            RuntimeExpr::Int(v) => (
-                "Int".into(),
-                vec![TreeNode::leaf(v.to_string())],
-            ),
+            RuntimeExpr::Int(v) => ("Int".into(), vec![TreeNode::leaf(v.to_string())]),
 
-            RuntimeExpr::String(s) => (
-                "String".into(),
-                vec![TreeNode::leaf(format!("\"{s}\""))],
-            ),
+            RuntimeExpr::String(s) => ("String".into(), vec![TreeNode::leaf(format!("\"{s}\""))]),
 
-            RuntimeExpr::Bool(b) => (
-                "Bool".into(),
-                vec![TreeNode::leaf(b.to_string())],
-            ),
+            RuntimeExpr::Bool(b) => ("Bool".into(), vec![TreeNode::leaf(b.to_string())]),
 
-            RuntimeExpr::Variable(name) => (
-                "Var".into(),
-                vec![TreeNode::leaf(name.clone())],
-            ),
+            RuntimeExpr::Variable(name) => ("Var".into(), vec![TreeNode::leaf(name.clone())]),
 
             RuntimeExpr::StructLiteral { type_name, fields } => (
                 format!("StructLiteral({type_name})"),
-                fields.iter()
+                fields
+                    .iter()
                     .map(|(n, e)| TreeNode::node(n.clone(), vec![self.convert_expr(*e)]))
                     .collect(),
             ),
