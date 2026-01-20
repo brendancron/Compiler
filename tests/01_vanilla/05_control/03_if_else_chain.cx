@@ -1,0 +1,11 @@
+if (1 == 5) {
+    print("FAILURE");
+} else if (2 == 5) {
+    print("FAILURE");
+} else if (3 == 5) {
+    print("FAILURE");
+} else if (4 == 5) {
+    print("FAILURE");
+} else if (5 == 5) {
+    print("SUCCESS");
+}
