@@ -1,6 +1,6 @@
 use crate::frontend::id_provider::*;
 use crate::frontend::meta_ast::*;
-use crate::runtime::interpreter2::*;
+use crate::runtime::interpreter::*;
 use crate::runtime::value::Value;
 use crate::semantics::meta::runtime_ast::*;
 use std::collections::VecDeque;

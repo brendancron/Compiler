@@ -1,8 +1,8 @@
 use cronyx::frontend::lexer::*;
-use cronyx::frontend::parser2::*;
+use cronyx::frontend::parser::*;
 use cronyx::runtime::environment::*;
-use cronyx::runtime::interpreter2::*;
-use cronyx::semantics::meta::meta_processor2::*;
+use cronyx::runtime::interpreter::*;
+use cronyx::semantics::meta::meta_processor::*;
 use cronyx::util::formatters::tree_formatter::*;
 use std::fmt::Debug;
 use std::fs::{create_dir_all, read_to_string, File};

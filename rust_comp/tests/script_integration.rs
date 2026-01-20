@@ -3,10 +3,10 @@ use std::io::{self, Cursor};
 use std::path::PathBuf;
 
 use cronyx::frontend::lexer::*;
-use cronyx::frontend::parser2::*;
+use cronyx::frontend::parser::*;
 use cronyx::runtime::environment::*;
-use cronyx::runtime::interpreter2::*;
-use cronyx::semantics::meta::meta_processor2::*;
+use cronyx::runtime::interpreter::*;
+use cronyx::semantics::meta::meta_processor::*;
 
 pub fn run_test(root_path: &PathBuf, out_path: &PathBuf) {
     eprintln!("input : {}", root_path.display());

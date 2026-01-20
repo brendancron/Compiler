@@ -1,4 +1,4 @@
 pub mod expanded_ast;
-pub mod meta_processor2;
+pub mod meta_processor;
 pub mod runtime_ast;
 //pub mod substitution;
