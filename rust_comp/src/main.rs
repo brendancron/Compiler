@@ -35,7 +35,7 @@ fn main() {
 
         // METAPROCESSING
 
-        let runtime_ast = process(&parse_ctx.ast, &mut io::stdout()).unwrap();
+        let runtime_ast = process(&meta_ast, &mut io::stdout(), &meta_ast.sem_root_stmts).unwrap();
 
         let mut runtime_ast_file = to_file(out_dir, "runtime_ast.txt");
         runtime_ast.format_tree(&mut runtime_ast_file);

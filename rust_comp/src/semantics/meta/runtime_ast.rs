@@ -35,6 +35,14 @@ impl RuntimeAst {
     }
 }
 
+// For util purposes
+
+#[derive(Debug, Clone)]
+pub enum RuntimeNode {
+    Expr(RuntimeExpr),
+    Stmt(RuntimeStmt),
+}
+
 #[derive(Debug, Clone)]
 pub enum RuntimeExpr {
     // LITERAL REPRESENTATION
@@ -131,7 +139,9 @@ impl AsTree for RuntimeAst {
 
 impl RuntimeAst {
     fn convert_stmt(&self, id: AstId) -> TreeNode {
-        let stmt = self.get_stmt(id).expect("invalid stmt id");
+        let stmt = self
+            .get_stmt(id)
+            .unwrap_or_else(|| panic!("invalid stmt id: {}", id));
 
         let (label, mut children): (String, Vec<TreeNode>) = match stmt {
             RuntimeStmt::ExprStmt(e) => ("ExprStmt".into(), vec![self.convert_expr(*e)]),

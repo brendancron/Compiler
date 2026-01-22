@@ -1,5 +1,7 @@
+use super::dependency_scheduler::*;
 use crate::frontend::id_provider::*;
 use crate::frontend::meta_ast::*;
+use crate::runtime::environment::*;
 use crate::runtime::interpreter::*;
 use crate::runtime::value::Value;
 use crate::semantics::meta::runtime_ast::*;
@@ -11,6 +13,8 @@ pub struct MetaProcessContext<'a, W: Write> {
     runtime_ast: &'a mut RuntimeAst,
     out: &'a mut W,
     id_provider: &'a mut IdProvider,
+    dependency_scheduler: &'a mut DependencyScheduler<Dependency, Event>,
+    dependency_queue: VecDeque<Dependency>,
 }
 
 #[derive(Debug)]
@@ -34,25 +38,20 @@ pub struct MetaContext {
 }
 
 #[derive(Debug)]
-pub struct WorkItem {
-    runtime_id: usize,
-    node: MetaAstNode,
+pub enum Event {
+    DependencyChain(Dependency),
+    MetaExec(AstId),
 }
 
-impl WorkItem {
-    fn from_expr(id_provider: &mut IdProvider, meta_expr_id: AstId) -> Self {
-        Self {
-            runtime_id: id_provider.next(),
-            node: MetaAstNode::Expr(meta_expr_id),
-        }
-    }
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub enum Dependency {
+    NodeDone(AstId),
+}
 
-    fn from_stmt(id_provider: &mut IdProvider, meta_stmt_id: AstId) -> Self {
-        Self {
-            runtime_id: id_provider.next(),
-            node: MetaAstNode::Stmt(meta_stmt_id),
-        }
-    }
+#[derive(Debug)]
+pub enum WorkItem {
+    LowerExpr { meta_id: AstId, runtime_id: AstId },
+    LowerStmt { meta_id: AstId, runtime_id: AstId },
 }
 
 pub struct WorkQueue {
@@ -70,23 +69,57 @@ impl WorkQueue {
         self.queue.push_back(item);
     }
 
-    pub fn queue_expr(&mut self, id_provider: &mut IdProvider, id: AstId) -> AstId {
-        let item = WorkItem::from_expr(id_provider, id);
-        let id = item.runtime_id;
+    pub fn queue_expr(&mut self, id_provider: &mut IdProvider, meta_id: AstId) -> AstId {
+        let runtime_id = id_provider.next();
+        let item = WorkItem::LowerExpr {
+            meta_id,
+            runtime_id,
+        };
         self.queue(item);
-        id
+        runtime_id
     }
 
-    pub fn queue_stmt(&mut self, id_provider: &mut IdProvider, id: AstId) -> AstId {
-        let item = WorkItem::from_stmt(id_provider, id);
-        let id = item.runtime_id;
+    pub fn queue_stmt(&mut self, id_provider: &mut IdProvider, meta_id: AstId) -> AstId {
+        let runtime_id = id_provider.next();
+        let item = WorkItem::LowerStmt {
+            meta_id,
+            runtime_id,
+        };
         self.queue(item);
-        id
+        runtime_id
     }
 
     pub fn next(&mut self) -> Option<WorkItem> {
         self.queue.pop_front()
     }
+}
+
+pub fn insert_node<W: Write>(
+    node_id: AstId,
+    node: RuntimeNode,
+    children: Vec<AstId>,
+    ctx: &mut MetaProcessContext<W>,
+) {
+    match node {
+        RuntimeNode::Expr(expr) => ctx.runtime_ast.insert_expr(node_id, expr),
+        RuntimeNode::Stmt(stmt) => ctx.runtime_ast.insert_stmt(node_id, stmt),
+    }
+    ctx.dependency_scheduler.add_task(
+        &children
+            .iter()
+            .map(|&c| Dependency::NodeDone(c))
+            .collect::<Vec<_>>(),
+        Event::DependencyChain(Dependency::NodeDone(node_id)),
+    );
+}
+
+pub fn insert_leaf<W: Write>(node_id: AstId, node: RuntimeNode, ctx: &mut MetaProcessContext<W>) {
+    match node {
+        RuntimeNode::Expr(expr) => ctx.runtime_ast.insert_expr(node_id, expr),
+        RuntimeNode::Stmt(stmt) => ctx.runtime_ast.insert_stmt(node_id, stmt),
+    }
+    ctx.dependency_queue
+        .push_back(Dependency::NodeDone(node_id));
 }
 
 pub fn process_expr<W: Write>(
@@ -102,15 +135,15 @@ pub fn process_expr<W: Write>(
     match meta_expr {
         MetaExpr::Int(i) => {
             let expr = RuntimeExpr::Int(*i);
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
         }
         MetaExpr::String(s) => {
             let expr = RuntimeExpr::String(s.clone());
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
         }
         MetaExpr::Bool(b) => {
             let expr = RuntimeExpr::Bool(*b);
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
         }
 
         MetaExpr::StructLiteral { type_name, fields } => {
@@ -126,7 +159,7 @@ pub fn process_expr<W: Write>(
                 fields: out_fields,
             };
 
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
         }
 
         //MetaExpr::Variable(name) => match ctx.env.borrow().get(name) {
@@ -136,7 +169,7 @@ pub fn process_expr<W: Write>(
         //TODO replace the value to lit inlining
         MetaExpr::Variable(name) => {
             let expr = RuntimeExpr::Variable(name.clone());
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
         }
 
         MetaExpr::List(exprs) => {
@@ -146,43 +179,68 @@ pub fn process_expr<W: Write>(
                 ids.push(id);
             }
 
-            let expr = RuntimeExpr::List(ids);
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            let expr = RuntimeExpr::List(ids.clone());
+            insert_node(runtime_expr_id, RuntimeNode::Expr(expr), ids, ctx);
         }
 
         MetaExpr::Add(a, b) => {
             let a_id = work_queue.queue_expr(ctx.id_provider, *a);
             let b_id = work_queue.queue_expr(ctx.id_provider, *b);
             let expr = RuntimeExpr::Add(a_id, b_id);
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_node(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                vec![a_id, b_id],
+                ctx,
+            );
         }
 
         MetaExpr::Sub(a, b) => {
             let a_id = work_queue.queue_expr(ctx.id_provider, *a);
             let b_id = work_queue.queue_expr(ctx.id_provider, *b);
             let expr = RuntimeExpr::Sub(a_id, b_id);
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_node(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                vec![a_id, b_id],
+                ctx,
+            );
         }
 
         MetaExpr::Mult(a, b) => {
             let a_id = work_queue.queue_expr(ctx.id_provider, *a);
             let b_id = work_queue.queue_expr(ctx.id_provider, *b);
             let expr = RuntimeExpr::Mult(a_id, b_id);
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_node(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                vec![a_id, b_id],
+                ctx,
+            );
         }
 
         MetaExpr::Div(a, b) => {
             let a_id = work_queue.queue_expr(ctx.id_provider, *a);
             let b_id = work_queue.queue_expr(ctx.id_provider, *b);
             let expr = RuntimeExpr::Div(a_id, b_id);
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_node(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                vec![a_id, b_id],
+                ctx,
+            );
         }
 
         MetaExpr::Equals(a, b) => {
             let a_id = work_queue.queue_expr(ctx.id_provider, *a);
             let b_id = work_queue.queue_expr(ctx.id_provider, *b);
             let expr = RuntimeExpr::Equals(a_id, b_id);
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_node(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                vec![a_id, b_id],
+                ctx,
+            );
         }
 
         MetaExpr::Call { callee, args } => {
@@ -195,10 +253,10 @@ pub fn process_expr<W: Write>(
 
             let expr = RuntimeExpr::Call {
                 callee: callee.clone(),
-                args: out_args,
+                args: out_args.clone(),
             };
 
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_node(runtime_expr_id, RuntimeNode::Expr(expr), out_args, ctx);
         }
 
         //match ctx.env.borrow().get(&callee) {
@@ -221,12 +279,12 @@ pub fn process_expr<W: Write>(
             //    .ok_or_else(|| MetaProcessError::UnknownType(ident.clone()))?;
 
             let type_expr = RuntimeExpr::String(ident.clone());
-            ctx.runtime_ast.insert_expr(runtime_expr_id, type_expr);
+            insert_leaf(runtime_expr_id, RuntimeNode::Expr(type_expr), ctx);
         }
 
         MetaExpr::Embed(file_path) => {
             let expr = RuntimeExpr::String(file_path.clone());
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
         }
     };
     Ok(())
@@ -246,7 +304,7 @@ pub fn process_stmt<W: Write>(
         MetaStmt::ExprStmt(expr) => {
             let expr_id = work_queue.queue_expr(ctx.id_provider, *expr);
             let stmt = RuntimeStmt::ExprStmt(expr_id);
-            ctx.runtime_ast.insert_stmt(runtime_stmt_id, stmt);
+            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), vec![expr_id], ctx);
         }
 
         MetaStmt::VarDecl { name, expr } => {
@@ -255,13 +313,13 @@ pub fn process_stmt<W: Write>(
                 name: name.clone(),
                 expr: expr_id,
             };
-            ctx.runtime_ast.insert_stmt(runtime_stmt_id, stmt);
+            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), vec![expr_id], ctx);
         }
 
         MetaStmt::Print(expr) => {
             let expr_id = work_queue.queue_expr(ctx.id_provider, *expr);
             let stmt = RuntimeStmt::Print(expr_id);
-            ctx.runtime_ast.insert_stmt(runtime_stmt_id, stmt);
+            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), vec![expr_id], ctx);
         }
 
         MetaStmt::If {
@@ -282,7 +340,12 @@ pub fn process_stmt<W: Write>(
                 else_branch: else_id,
             };
 
-            ctx.runtime_ast.insert_stmt(runtime_stmt_id, stmt);
+            let mut children = vec![cond_id, body_id];
+            if let Some(eid) = else_id {
+                children.push(eid);
+            }
+
+            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), children, ctx);
         }
 
         MetaStmt::ForEach {
@@ -299,7 +362,12 @@ pub fn process_stmt<W: Write>(
                 body: body_id,
             };
 
-            ctx.runtime_ast.insert_stmt(runtime_stmt_id, stmt);
+            insert_node(
+                runtime_stmt_id,
+                RuntimeNode::Stmt(stmt),
+                vec![iterable_id, body_id],
+                ctx,
+            );
         }
 
         MetaStmt::Block(stmts) => {
@@ -310,8 +378,8 @@ pub fn process_stmt<W: Write>(
                 child_ids.push(stmt_id);
             }
 
-            let stmt = RuntimeStmt::Block(child_ids);
-            ctx.runtime_ast.insert_stmt(runtime_stmt_id, stmt);
+            let stmt = RuntimeStmt::Block(child_ids.clone());
+            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), child_ids, ctx);
         }
 
         MetaStmt::FnDecl { name, params, body } => {
@@ -323,7 +391,7 @@ pub fn process_stmt<W: Write>(
                 body: body_id,
             };
 
-            ctx.runtime_ast.insert_stmt(runtime_stmt_id, stmt);
+            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), vec![body_id], ctx);
         }
 
         MetaStmt::StructDecl { name, fields } => {
@@ -339,33 +407,31 @@ pub fn process_stmt<W: Write>(
             let expr_id = expr.map(|e| work_queue.queue_expr(ctx.id_provider, e));
 
             let stmt = RuntimeStmt::Return(expr_id);
-            ctx.runtime_ast.insert_stmt(runtime_stmt_id, stmt);
+
+            let mut children = Vec::new();
+            if let Some(id) = expr_id {
+                children.push(id);
+            }
+
+            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), children, ctx);
         }
 
         MetaStmt::Gen(stmts) => {
-            let mut child_ids = Vec::with_capacity(stmts.len());
+            let child_ids: Vec<_> = stmts
+                .iter()
+                .map(|s| work_queue.queue_stmt(ctx.id_provider, *s))
+                .collect();
 
-            for meta_stmt in stmts {
-                let id = work_queue.queue_stmt(ctx.id_provider, *meta_stmt);
-                child_ids.push(id);
-            }
+            let stmt = RuntimeStmt::Gen(child_ids.clone());
 
-            let stmt = RuntimeStmt::Gen(child_ids);
-            ctx.runtime_ast.insert_stmt(runtime_stmt_id, stmt);
+            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), child_ids, ctx);
         }
 
         MetaStmt::MetaBlock(parsed_stmt) => {
-            work_queue.queue_expr(ctx.id_provider, *parsed_stmt);
-            // TODO we need to somehow queue this expr id in such a way that eval gets called as a
-            // callback
+            let body_id = work_queue.queue_stmt(ctx.id_provider, *parsed_stmt);
 
-            //eval(
-            //    ctx.runtime_ast,
-            //    &processed_code,
-            //    Environment::new(),
-            //    &mut None,
-            //    ctx.out,
-            //)?;
+            ctx.dependency_scheduler
+                .add_task(&[Dependency::NodeDone(body_id)], Event::MetaExec(body_id));
         }
 
         MetaStmt::Import(_mod_name) => {}
@@ -403,29 +469,69 @@ pub fn value_to_literal<W: Write>(
     }
 }
 
-pub fn process<W: Write>(ast: &MetaAst, out: &mut W) -> Result<RuntimeAst, MetaProcessError> {
+pub fn process<W: Write>(
+    ast: &MetaAst,
+    out: &mut W,
+    root_stmts: &Vec<AstId>,
+) -> Result<RuntimeAst, MetaProcessError> {
     let mut runtime_ast = RuntimeAst::new();
     let mut ctx = MetaProcessContext {
         meta_ast: ast,
         runtime_ast: &mut runtime_ast,
         out,
         id_provider: &mut IdProvider::new(),
+        dependency_scheduler: &mut DependencyScheduler::new(),
+        dependency_queue: VecDeque::new(),
     };
 
     let mut work_queue = WorkQueue::new();
 
-    for stmt in &ast.sem_root_stmts {
+    for stmt in root_stmts {
         let runtime_id = work_queue.queue_stmt(ctx.id_provider, *stmt);
         ctx.runtime_ast.sem_root_stmts.push(runtime_id);
     }
 
     while let Some(work_item) = work_queue.next() {
-        match work_item.node {
-            MetaAstNode::Expr(meta_id) => {
-                process_expr(meta_id, work_item.runtime_id, &mut work_queue, &mut ctx)?;
+        println!("{:?}", work_item);
+        match work_item {
+            WorkItem::LowerExpr {
+                runtime_id,
+                meta_id,
+            } => {
+                process_expr(meta_id, runtime_id, &mut work_queue, &mut ctx)?;
             }
-            MetaAstNode::Stmt(meta_id) => {
-                process_stmt(meta_id, work_item.runtime_id, &mut work_queue, &mut ctx)?;
+
+            WorkItem::LowerStmt {
+                runtime_id,
+                meta_id,
+            } => {
+                process_stmt(meta_id, runtime_id, &mut work_queue, &mut ctx)?;
+            }
+        }
+
+        println!("{:?}", ctx.dependency_scheduler);
+
+        while let Some(dep) = ctx.dependency_queue.pop_front() {
+            println!("dependency completed: {:?}", dep);
+            let events = ctx.dependency_scheduler.resolve_dependency(dep);
+            for event in events {
+                println!("event emitted: {:?}", event);
+                match event {
+                    Event::DependencyChain(dependency) => {
+                        ctx.dependency_queue.push_back(dependency);
+                    }
+
+                    Event::MetaExec(ast_id) => {
+                        let stmts = vec![ast_id];
+                        eval(
+                            ctx.runtime_ast,
+                            &stmts,
+                            Environment::new(),
+                            &mut None,
+                            ctx.out,
+                        )?;
+                    }
+                }
             }
         }
     }
