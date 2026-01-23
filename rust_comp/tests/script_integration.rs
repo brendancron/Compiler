@@ -125,4 +125,38 @@ mod script_integration {
         // Embed
         cx_test!(embed_embed, "tests/01_vanilla/10_embed", "embed");
     }
+
+    #[cfg(test)]
+    mod meta {
+        use super::*;
+
+        // comptime
+        cx_test!(comptime_basic, "tests/02_meta/comptime", "basic");
+        cx_test!(comptime_nested, "tests/02_meta/comptime", "nested");
+
+        // gen
+        cx_test!(gen_basic, "tests/02_meta/gen", "basic");
+        cx_test!(gen_nested, "tests/02_meta/gen", "nested");
+        cx_test!(gen_env, "tests/02_meta/gen", "gen_env");
+        cx_test!(gen_meta, "tests/02_meta/gen", "gen_meta");
+
+        // fn (meta functions)
+        cx_test!(meta_fn, "tests/02_meta/fn", "meta_fn");
+        cx_test!(meta_fib, "tests/02_meta/fn", "fib");
+
+        // reflection
+        cx_test!(
+            reflection_type_name,
+            "tests/02_meta/reflection",
+            "type_name"
+        );
+
+        // substitution
+        cx_test!(
+            substitution_greeting,
+            "tests/02_meta/substitution",
+            "greeting"
+        );
+        cx_test!(substitution_sub1, "tests/02_meta/substitution", "sub1");
+    }
 }
