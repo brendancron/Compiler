@@ -1,4 +1,0 @@
-(executable
- (name caml_comp)
- (public_name caml_comp)
- (libraries components models))
