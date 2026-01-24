@@ -665,7 +665,7 @@ pub fn process<W: Write>(meta_ast: &MetaAst, out: &mut W) -> Result<RuntimeAst, 
         &mut dependency_scheduler,
         &mut completion_queue,
         &mut work_queue,
-    );
+    )?;
 
     Ok(runtime_ast)
 }
