@@ -8,15 +8,6 @@ use crate::semantics::meta::runtime_ast::*;
 use std::collections::VecDeque;
 use std::io::Write;
 
-pub struct MetaProcessContext<'a, W: Write> {
-    meta_ast: &'a MetaAst,
-    runtime_ast: &'a mut RuntimeAst,
-    out: &'a mut W,
-    id_provider: &'a mut IdProvider,
-    dependency_scheduler: &'a mut DependencyScheduler<Dependency, Event>,
-    dependency_queue: VecDeque<Dependency>,
-}
-
 #[derive(Debug)]
 pub enum MetaProcessError {
     ExprNotFound(AstId),
@@ -94,17 +85,18 @@ impl WorkQueue {
     }
 }
 
-pub fn insert_node<W: Write>(
+pub fn insert_node(
     node_id: AstId,
     node: RuntimeNode,
     children: Vec<AstId>,
-    ctx: &mut MetaProcessContext<W>,
+    dependency_scheduler: &mut DependencyScheduler<Dependency, Event>,
+    ast: &mut RuntimeAst,
 ) {
     match node {
-        RuntimeNode::Expr(expr) => ctx.runtime_ast.insert_expr(node_id, expr),
-        RuntimeNode::Stmt(stmt) => ctx.runtime_ast.insert_stmt(node_id, stmt),
+        RuntimeNode::Expr(expr) => ast.insert_expr(node_id, expr),
+        RuntimeNode::Stmt(stmt) => ast.insert_stmt(node_id, stmt),
     }
-    ctx.dependency_scheduler.add_task(
+    dependency_scheduler.add_task(
         &children
             .iter()
             .map(|&c| Dependency::NodeDone(c))
@@ -113,44 +105,66 @@ pub fn insert_node<W: Write>(
     );
 }
 
-pub fn insert_leaf<W: Write>(node_id: AstId, node: RuntimeNode, ctx: &mut MetaProcessContext<W>) {
+pub fn insert_leaf(
+    node_id: AstId,
+    node: RuntimeNode,
+    completion_queue: &mut VecDeque<Dependency>,
+    ast: &mut RuntimeAst,
+) {
     match node {
-        RuntimeNode::Expr(expr) => ctx.runtime_ast.insert_expr(node_id, expr),
-        RuntimeNode::Stmt(stmt) => ctx.runtime_ast.insert_stmt(node_id, stmt),
+        RuntimeNode::Expr(expr) => ast.insert_expr(node_id, expr),
+        RuntimeNode::Stmt(stmt) => ast.insert_stmt(node_id, stmt),
     }
-    ctx.dependency_queue
-        .push_back(Dependency::NodeDone(node_id));
+    completion_queue.push_back(Dependency::NodeDone(node_id));
 }
 
-pub fn process_expr<W: Write>(
+pub fn process_expr(
     meta_expr_id: AstId,
     runtime_expr_id: AstId,
     work_queue: &mut WorkQueue,
-    ctx: &mut MetaProcessContext<W>,
+    dependency_scheduler: &mut DependencyScheduler<Dependency, Event>,
+    completion_queue: &mut VecDeque<Dependency>,
+    meta_ast: &MetaAst,
+    runtime_ast: &mut RuntimeAst,
+    id_provider: &mut IdProvider,
 ) -> Result<(), MetaProcessError> {
-    let meta_expr = ctx
-        .meta_ast
+    let meta_expr = meta_ast
         .get_expr(meta_expr_id)
         .ok_or(MetaProcessError::ExprNotFound(meta_expr_id))?;
     match meta_expr {
         MetaExpr::Int(i) => {
             let expr = RuntimeExpr::Int(*i);
-            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
+            insert_leaf(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                completion_queue,
+                runtime_ast,
+            );
         }
         MetaExpr::String(s) => {
             let expr = RuntimeExpr::String(s.clone());
-            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
+            insert_leaf(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                completion_queue,
+                runtime_ast,
+            );
         }
         MetaExpr::Bool(b) => {
             let expr = RuntimeExpr::Bool(*b);
-            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
+            insert_leaf(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                completion_queue,
+                runtime_ast,
+            );
         }
 
         MetaExpr::StructLiteral { type_name, fields } => {
             let mut out_fields = Vec::with_capacity(fields.len());
 
             for (name, meta_expr_id) in fields {
-                let field_expr_id = work_queue.queue_expr(ctx.id_provider, *meta_expr_id);
+                let field_expr_id = work_queue.queue_expr(id_provider, *meta_expr_id);
                 out_fields.push((name.clone(), field_expr_id));
             }
 
@@ -159,7 +173,12 @@ pub fn process_expr<W: Write>(
                 fields: out_fields,
             };
 
-            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
+            insert_leaf(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                completion_queue,
+                runtime_ast,
+            );
         }
 
         //MetaExpr::Variable(name) => match ctx.env.borrow().get(name) {
@@ -169,77 +188,93 @@ pub fn process_expr<W: Write>(
         //TODO replace the value to lit inlining
         MetaExpr::Variable(name) => {
             let expr = RuntimeExpr::Variable(name.clone());
-            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
+            insert_leaf(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                completion_queue,
+                runtime_ast,
+            );
         }
 
         MetaExpr::List(exprs) => {
             let mut ids = Vec::with_capacity(exprs.len());
             for e in exprs {
-                let id = work_queue.queue_expr(ctx.id_provider, *e);
+                let id = work_queue.queue_expr(id_provider, *e);
                 ids.push(id);
             }
 
             let expr = RuntimeExpr::List(ids.clone());
-            insert_node(runtime_expr_id, RuntimeNode::Expr(expr), ids, ctx);
+            insert_node(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                ids,
+                dependency_scheduler,
+                runtime_ast,
+            );
         }
 
         MetaExpr::Add(a, b) => {
-            let a_id = work_queue.queue_expr(ctx.id_provider, *a);
-            let b_id = work_queue.queue_expr(ctx.id_provider, *b);
+            let a_id = work_queue.queue_expr(id_provider, *a);
+            let b_id = work_queue.queue_expr(id_provider, *b);
             let expr = RuntimeExpr::Add(a_id, b_id);
             insert_node(
                 runtime_expr_id,
                 RuntimeNode::Expr(expr),
                 vec![a_id, b_id],
-                ctx,
+                dependency_scheduler,
+                runtime_ast,
             );
         }
 
         MetaExpr::Sub(a, b) => {
-            let a_id = work_queue.queue_expr(ctx.id_provider, *a);
-            let b_id = work_queue.queue_expr(ctx.id_provider, *b);
+            let a_id = work_queue.queue_expr(id_provider, *a);
+            let b_id = work_queue.queue_expr(id_provider, *b);
             let expr = RuntimeExpr::Sub(a_id, b_id);
             insert_node(
                 runtime_expr_id,
                 RuntimeNode::Expr(expr),
                 vec![a_id, b_id],
-                ctx,
+                dependency_scheduler,
+                runtime_ast,
             );
         }
 
         MetaExpr::Mult(a, b) => {
-            let a_id = work_queue.queue_expr(ctx.id_provider, *a);
-            let b_id = work_queue.queue_expr(ctx.id_provider, *b);
+            let a_id = work_queue.queue_expr(id_provider, *a);
+            let b_id = work_queue.queue_expr(id_provider, *b);
             let expr = RuntimeExpr::Mult(a_id, b_id);
             insert_node(
                 runtime_expr_id,
                 RuntimeNode::Expr(expr),
                 vec![a_id, b_id],
-                ctx,
+                dependency_scheduler,
+                runtime_ast,
             );
         }
 
         MetaExpr::Div(a, b) => {
-            let a_id = work_queue.queue_expr(ctx.id_provider, *a);
-            let b_id = work_queue.queue_expr(ctx.id_provider, *b);
+            let a_id = work_queue.queue_expr(id_provider, *a);
+            let b_id = work_queue.queue_expr(id_provider, *b);
             let expr = RuntimeExpr::Div(a_id, b_id);
             insert_node(
                 runtime_expr_id,
                 RuntimeNode::Expr(expr),
                 vec![a_id, b_id],
-                ctx,
+                dependency_scheduler,
+                runtime_ast,
             );
         }
 
         MetaExpr::Equals(a, b) => {
-            let a_id = work_queue.queue_expr(ctx.id_provider, *a);
-            let b_id = work_queue.queue_expr(ctx.id_provider, *b);
+            let a_id = work_queue.queue_expr(id_provider, *a);
+            let b_id = work_queue.queue_expr(id_provider, *b);
             let expr = RuntimeExpr::Equals(a_id, b_id);
             insert_node(
                 runtime_expr_id,
                 RuntimeNode::Expr(expr),
                 vec![a_id, b_id],
-                ctx,
+                dependency_scheduler,
+                runtime_ast,
             );
         }
 
@@ -247,7 +282,7 @@ pub fn process_expr<W: Write>(
             let mut out_args = Vec::with_capacity(args.len());
 
             for meta_arg in args {
-                let arg_id = work_queue.queue_expr(ctx.id_provider, *meta_arg);
+                let arg_id = work_queue.queue_expr(id_provider, *meta_arg);
                 out_args.push(arg_id);
             }
 
@@ -256,7 +291,13 @@ pub fn process_expr<W: Write>(
                 args: out_args.clone(),
             };
 
-            insert_node(runtime_expr_id, RuntimeNode::Expr(expr), out_args, ctx);
+            insert_node(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                out_args,
+                dependency_scheduler,
+                runtime_ast,
+            );
         }
 
         //match ctx.env.borrow().get(&callee) {
@@ -279,47 +320,78 @@ pub fn process_expr<W: Write>(
             //    .ok_or_else(|| MetaProcessError::UnknownType(ident.clone()))?;
 
             let type_expr = RuntimeExpr::String(ident.clone());
-            insert_leaf(runtime_expr_id, RuntimeNode::Expr(type_expr), ctx);
+            insert_leaf(
+                runtime_expr_id,
+                RuntimeNode::Expr(type_expr),
+                completion_queue,
+                runtime_ast,
+            );
         }
 
         MetaExpr::Embed(file_path) => {
             let expr = RuntimeExpr::String(file_path.clone());
-            insert_leaf(runtime_expr_id, RuntimeNode::Expr(expr), ctx);
+            insert_leaf(
+                runtime_expr_id,
+                RuntimeNode::Expr(expr),
+                completion_queue,
+                runtime_ast,
+            );
         }
     };
     Ok(())
 }
 
-pub fn process_stmt<W: Write>(
+pub fn process_stmt(
     meta_stmt_id: AstId,
     runtime_stmt_id: AstId,
     work_queue: &mut WorkQueue,
-    ctx: &mut MetaProcessContext<W>,
+    dependency_scheduler: &mut DependencyScheduler<Dependency, Event>,
+    completion_queue: &mut VecDeque<Dependency>,
+    meta_ast: &MetaAst,
+    runtime_ast: &mut RuntimeAst,
+    id_provider: &mut IdProvider,
 ) -> Result<(), MetaProcessError> {
-    let meta_stmt = ctx
-        .meta_ast
+    let meta_stmt = meta_ast
         .get_stmt(meta_stmt_id)
         .ok_or(MetaProcessError::StmtNotFound(meta_stmt_id))?;
     match meta_stmt {
         MetaStmt::ExprStmt(expr) => {
-            let expr_id = work_queue.queue_expr(ctx.id_provider, *expr);
+            let expr_id = work_queue.queue_expr(id_provider, *expr);
             let stmt = RuntimeStmt::ExprStmt(expr_id);
-            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), vec![expr_id], ctx);
+            insert_node(
+                runtime_stmt_id,
+                RuntimeNode::Stmt(stmt),
+                vec![expr_id],
+                dependency_scheduler,
+                runtime_ast,
+            );
         }
 
         MetaStmt::VarDecl { name, expr } => {
-            let expr_id = work_queue.queue_expr(ctx.id_provider, *expr);
+            let expr_id = work_queue.queue_expr(id_provider, *expr);
             let stmt = RuntimeStmt::VarDecl {
                 name: name.clone(),
                 expr: expr_id,
             };
-            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), vec![expr_id], ctx);
+            insert_node(
+                runtime_stmt_id,
+                RuntimeNode::Stmt(stmt),
+                vec![expr_id],
+                dependency_scheduler,
+                runtime_ast,
+            );
         }
 
         MetaStmt::Print(expr) => {
-            let expr_id = work_queue.queue_expr(ctx.id_provider, *expr);
+            let expr_id = work_queue.queue_expr(id_provider, *expr);
             let stmt = RuntimeStmt::Print(expr_id);
-            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), vec![expr_id], ctx);
+            insert_node(
+                runtime_stmt_id,
+                RuntimeNode::Stmt(stmt),
+                vec![expr_id],
+                dependency_scheduler,
+                runtime_ast,
+            );
         }
 
         MetaStmt::If {
@@ -327,12 +399,12 @@ pub fn process_stmt<W: Write>(
             body,
             else_branch,
         } => {
-            let cond_id = work_queue.queue_expr(ctx.id_provider, *cond);
-            let body_id = work_queue.queue_stmt(ctx.id_provider, *body);
+            let cond_id = work_queue.queue_expr(id_provider, *cond);
+            let body_id = work_queue.queue_stmt(id_provider, *body);
 
             let else_id = else_branch
                 .as_ref()
-                .map(|s| work_queue.queue_stmt(ctx.id_provider, *s));
+                .map(|s| work_queue.queue_stmt(id_provider, *s));
 
             let stmt = RuntimeStmt::If {
                 cond: cond_id,
@@ -345,7 +417,13 @@ pub fn process_stmt<W: Write>(
                 children.push(eid);
             }
 
-            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), children, ctx);
+            insert_node(
+                runtime_stmt_id,
+                RuntimeNode::Stmt(stmt),
+                children,
+                dependency_scheduler,
+                runtime_ast,
+            );
         }
 
         MetaStmt::ForEach {
@@ -353,8 +431,8 @@ pub fn process_stmt<W: Write>(
             iterable,
             body,
         } => {
-            let iterable_id = work_queue.queue_expr(ctx.id_provider, *iterable);
-            let body_id = work_queue.queue_stmt(ctx.id_provider, *body);
+            let iterable_id = work_queue.queue_expr(id_provider, *iterable);
+            let body_id = work_queue.queue_stmt(id_provider, *body);
 
             let stmt = RuntimeStmt::ForEach {
                 var: var.clone(),
@@ -366,24 +444,32 @@ pub fn process_stmt<W: Write>(
                 runtime_stmt_id,
                 RuntimeNode::Stmt(stmt),
                 vec![iterable_id, body_id],
-                ctx,
+                dependency_scheduler,
+                runtime_ast,
             );
         }
 
         MetaStmt::Block(stmts) => {
-            let mut child_ids = Vec::with_capacity(stmts.len());
+            let mut children = Vec::with_capacity(stmts.len());
 
             for meta_stmt in stmts {
-                let stmt_id = work_queue.queue_stmt(ctx.id_provider, *meta_stmt);
-                child_ids.push(stmt_id);
+                let stmt_id = work_queue.queue_stmt(id_provider, *meta_stmt);
+                children.push(stmt_id);
             }
 
-            let stmt = RuntimeStmt::Block(child_ids.clone());
-            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), child_ids, ctx);
+            let stmt = RuntimeStmt::Block(children.clone());
+
+            insert_node(
+                runtime_stmt_id,
+                RuntimeNode::Stmt(stmt),
+                children,
+                dependency_scheduler,
+                runtime_ast,
+            );
         }
 
         MetaStmt::FnDecl { name, params, body } => {
-            let body_id = work_queue.queue_stmt(ctx.id_provider, *body);
+            let body_id = work_queue.queue_stmt(id_provider, *body);
 
             let stmt = RuntimeStmt::FnDecl {
                 name: name.clone(),
@@ -391,7 +477,13 @@ pub fn process_stmt<W: Write>(
                 body: body_id,
             };
 
-            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), vec![body_id], ctx);
+            insert_node(
+                runtime_stmt_id,
+                RuntimeNode::Stmt(stmt),
+                vec![body_id],
+                dependency_scheduler,
+                runtime_ast,
+            );
         }
 
         MetaStmt::StructDecl { name, fields } => {
@@ -404,7 +496,7 @@ pub fn process_stmt<W: Write>(
         }
 
         MetaStmt::Return(expr) => {
-            let expr_id = expr.map(|e| work_queue.queue_expr(ctx.id_provider, e));
+            let expr_id = expr.map(|e| work_queue.queue_expr(id_provider, e));
 
             let stmt = RuntimeStmt::Return(expr_id);
 
@@ -413,24 +505,36 @@ pub fn process_stmt<W: Write>(
                 children.push(id);
             }
 
-            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), children, ctx);
+            insert_node(
+                runtime_stmt_id,
+                RuntimeNode::Stmt(stmt),
+                children,
+                dependency_scheduler,
+                runtime_ast,
+            );
         }
 
         MetaStmt::Gen(stmts) => {
-            let child_ids: Vec<_> = stmts
+            let children: Vec<_> = stmts
                 .iter()
-                .map(|s| work_queue.queue_stmt(ctx.id_provider, *s))
+                .map(|s| work_queue.queue_stmt(id_provider, *s))
                 .collect();
 
-            let stmt = RuntimeStmt::Gen(child_ids.clone());
+            let stmt = RuntimeStmt::Gen(children.clone());
 
-            insert_node(runtime_stmt_id, RuntimeNode::Stmt(stmt), child_ids, ctx);
+            insert_node(
+                runtime_stmt_id,
+                RuntimeNode::Stmt(stmt),
+                children,
+                dependency_scheduler,
+                runtime_ast,
+            );
         }
 
         MetaStmt::MetaBlock(parsed_stmt) => {
-            let body_id = work_queue.queue_stmt(ctx.id_provider, *parsed_stmt);
+            let body_id = work_queue.queue_stmt(id_provider, *parsed_stmt);
 
-            ctx.dependency_scheduler
+            dependency_scheduler
                 .add_task(&[Dependency::NodeDone(body_id)], Event::MetaExec(body_id));
         }
 
@@ -442,22 +546,22 @@ pub fn process_stmt<W: Write>(
 pub fn value_to_literal<W: Write>(
     val: Value,
     runtime_expr_id: AstId,
-    ctx: MetaProcessContext<W>,
+    runtime_ast: &mut RuntimeAst,
 ) -> Result<(), MetaProcessError> {
     match val {
         Value::Int(n) => {
             let expr = RuntimeExpr::Int(n);
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            runtime_ast.insert_expr(runtime_expr_id, expr);
             Ok(())
         }
         Value::String(s) => {
             let expr = RuntimeExpr::String(s);
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            runtime_ast.insert_expr(runtime_expr_id, expr);
             Ok(())
         }
         Value::Bool(b) => {
             let expr = RuntimeExpr::Bool(b);
-            ctx.runtime_ast.insert_expr(runtime_expr_id, expr);
+            runtime_ast.insert_expr(runtime_expr_id, expr);
             Ok(())
         }
         Value::Unit => Err(MetaProcessError::Unimplemented(
@@ -470,25 +574,20 @@ pub fn value_to_literal<W: Write>(
 }
 
 pub fn process<W: Write>(
-    ast: &MetaAst,
+    meta_ast: &MetaAst,
     out: &mut W,
     root_stmts: &Vec<AstId>,
 ) -> Result<RuntimeAst, MetaProcessError> {
     let mut runtime_ast = RuntimeAst::new();
-    let mut ctx = MetaProcessContext {
-        meta_ast: ast,
-        runtime_ast: &mut runtime_ast,
-        out,
-        id_provider: &mut IdProvider::new(),
-        dependency_scheduler: &mut DependencyScheduler::new(),
-        dependency_queue: VecDeque::new(),
-    };
+    let mut id_provider = IdProvider::new();
+    let mut dependency_scheduler = DependencyScheduler::new();
+    let mut completion_queue = VecDeque::new();
 
     let mut work_queue = WorkQueue::new();
 
     for stmt in root_stmts {
-        let runtime_id = work_queue.queue_stmt(ctx.id_provider, *stmt);
-        ctx.runtime_ast.sem_root_stmts.push(runtime_id);
+        let runtime_id = work_queue.queue_stmt(&mut id_provider, *stmt);
+        runtime_ast.sem_root_stmts.push(runtime_id);
     }
 
     while let Some(work_item) = work_queue.next() {
@@ -498,38 +597,50 @@ pub fn process<W: Write>(
                 runtime_id,
                 meta_id,
             } => {
-                process_expr(meta_id, runtime_id, &mut work_queue, &mut ctx)?;
+                process_expr(
+                    meta_id,
+                    runtime_id,
+                    &mut work_queue,
+                    &mut dependency_scheduler,
+                    &mut completion_queue,
+                    meta_ast,
+                    &mut runtime_ast,
+                    &mut id_provider,
+                )?;
             }
 
             WorkItem::LowerStmt {
                 runtime_id,
                 meta_id,
             } => {
-                process_stmt(meta_id, runtime_id, &mut work_queue, &mut ctx)?;
+                process_stmt(
+                    meta_id,
+                    runtime_id,
+                    &mut work_queue,
+                    &mut dependency_scheduler,
+                    &mut completion_queue,
+                    meta_ast,
+                    &mut runtime_ast,
+                    &mut id_provider,
+                )?;
             }
         }
 
-        println!("{:?}", ctx.dependency_scheduler);
+        println!("{:?}", dependency_scheduler);
 
-        while let Some(dep) = ctx.dependency_queue.pop_front() {
+        while let Some(dep) = completion_queue.pop_front() {
             println!("dependency completed: {:?}", dep);
-            let events = ctx.dependency_scheduler.resolve_dependency(dep);
+            let events = dependency_scheduler.resolve_dependency(dep);
             for event in events {
                 println!("event emitted: {:?}", event);
                 match event {
                     Event::DependencyChain(dependency) => {
-                        ctx.dependency_queue.push_back(dependency);
+                        completion_queue.push_back(dependency);
                     }
 
                     Event::MetaExec(ast_id) => {
                         let stmts = vec![ast_id];
-                        eval(
-                            ctx.runtime_ast,
-                            &stmts,
-                            Environment::new(),
-                            &mut None,
-                            ctx.out,
-                        )?;
+                        eval(&runtime_ast, &stmts, Environment::new(), &mut None, out)?;
                     }
                 }
             }
