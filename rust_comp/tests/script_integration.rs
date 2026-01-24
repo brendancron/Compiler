@@ -19,7 +19,7 @@ pub fn run_test(root_path: &PathBuf, out_path: &PathBuf) {
     let _ = parse(&tokens, &mut parse_ctx).unwrap();
     let meta_ast = &(parse_ctx.ast);
 
-    let runtime_ast = process(meta_ast, &mut io::stdout(), &meta_ast.sem_root_stmts).unwrap();
+    let runtime_ast = process(meta_ast, &mut io::stdout()).unwrap();
 
     let mut eval_buf = Cursor::new(Vec::<u8>::new());
 

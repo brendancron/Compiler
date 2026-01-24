@@ -573,20 +573,18 @@ pub fn value_to_literal<W: Write>(
     }
 }
 
-pub fn process<W: Write>(
+pub fn process_root<W: Write>(
     meta_ast: &MetaAst,
-    out: &mut W,
     root_stmts: &Vec<AstId>,
-) -> Result<RuntimeAst, MetaProcessError> {
-    let mut runtime_ast = RuntimeAst::new();
-    let mut id_provider = IdProvider::new();
-    let mut dependency_scheduler = DependencyScheduler::new();
-    let mut completion_queue = VecDeque::new();
-
-    let mut work_queue = WorkQueue::new();
-
+    runtime_ast: &mut RuntimeAst,
+    out: &mut W,
+    id_provider: &mut IdProvider,
+    dependency_scheduler: &mut DependencyScheduler<Dependency, Event>,
+    completion_queue: &mut VecDeque<Dependency>,
+    work_queue: &mut WorkQueue,
+) -> Result<(), MetaProcessError> {
     for stmt in root_stmts {
-        let runtime_id = work_queue.queue_stmt(&mut id_provider, *stmt);
+        let runtime_id = work_queue.queue_stmt(id_provider, *stmt);
         runtime_ast.sem_root_stmts.push(runtime_id);
     }
 
@@ -600,12 +598,12 @@ pub fn process<W: Write>(
                 process_expr(
                     meta_id,
                     runtime_id,
-                    &mut work_queue,
-                    &mut dependency_scheduler,
-                    &mut completion_queue,
+                    work_queue,
+                    dependency_scheduler,
+                    completion_queue,
                     meta_ast,
-                    &mut runtime_ast,
-                    &mut id_provider,
+                    runtime_ast,
+                    id_provider,
                 )?;
             }
 
@@ -616,12 +614,12 @@ pub fn process<W: Write>(
                 process_stmt(
                     meta_id,
                     runtime_id,
-                    &mut work_queue,
-                    &mut dependency_scheduler,
-                    &mut completion_queue,
+                    work_queue,
+                    dependency_scheduler,
+                    completion_queue,
                     meta_ast,
-                    &mut runtime_ast,
-                    &mut id_provider,
+                    runtime_ast,
+                    id_provider,
                 )?;
             }
         }
@@ -646,6 +644,28 @@ pub fn process<W: Write>(
             }
         }
     }
+
+    Ok(())
+}
+
+pub fn process<W: Write>(meta_ast: &MetaAst, out: &mut W) -> Result<RuntimeAst, MetaProcessError> {
+    let mut runtime_ast = RuntimeAst::new();
+    let mut id_provider = IdProvider::new();
+    let mut dependency_scheduler = DependencyScheduler::new();
+    let mut completion_queue = VecDeque::new();
+
+    let mut work_queue = WorkQueue::new();
+
+    process_root(
+        meta_ast,
+        &meta_ast.sem_root_stmts,
+        &mut runtime_ast,
+        out,
+        &mut id_provider,
+        &mut dependency_scheduler,
+        &mut completion_queue,
+        &mut work_queue,
+    );
 
     Ok(runtime_ast)
 }
