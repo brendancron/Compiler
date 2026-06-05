@@ -1,35 +1,29 @@
 trait Summary {
-    fn summarize(self) -> string;
+    fn summarize(): String;
 }
 
-struct Article {
-    title: string;
-    author: string
-}
+class Article(title: String, author: String)
 
-struct Tweet {
-    username: string;
-    content: string
-}
+class Tweet(username: String, content: String)
 
 impl Summary for Article {
-    fn summarize(self) -> string {
-        return self.title + " by " + self.author;
+    fn summarize(): String {
+        return this.title + " by " + this.author;
     }
 }
 
 impl Summary for Tweet {
-    fn summarize(self) -> string {
-        return self.username + ": " + self.content;
+    fn summarize(): String {
+        return this.username + ": " + this.content;
     }
 }
 
-fn notify<T: Summary>(item) {
+fn notify(item) {
     print("Breaking news: " + item.summarize());
 }
 
-var a = Article { title: "Cronyx 0.1.4", author: "brendancron" };
-var t = Tweet { username: "cronyx_lang", content: "traits are here" };
+var a = Article("Cronyx 0.1.4", "brendancron");
+var t = Tweet("cronyx_lang", "traits are here");
 
 notify(a);
 notify(t);

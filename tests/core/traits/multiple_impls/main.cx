@@ -1,32 +1,25 @@
 trait Show {
-    fn show(self) -> string;
+    fn show(): String;
 }
 
-struct Point {
-    x: int;
-    y: int
-}
+class Point(x: Int, y: Int)
 
-struct Color {
-    r: int;
-    g: int;
-    b: int
-}
+class Color(r: Int, g: Int, b: Int)
 
 impl Show for Point {
-    fn show(self) -> string {
-        return "(" + to_string(self.x) + ", " + to_string(self.y) + ")";
+    fn show(): String {
+        return "(" + to_string(this.x) + ", " + to_string(this.y) + ")";
     }
 }
 
 impl Show for Color {
-    fn show(self) -> string {
-        return "rgb(" + to_string(self.r) + ", " + to_string(self.g) + ", " + to_string(self.b) + ")";
+    fn show(): String {
+        return "rgb(" + to_string(this.r) + ", " + to_string(this.g) + ", " + to_string(this.b) + ")";
     }
 }
 
-var p = Point { x: 1, y: 2 };
-var c = Color { r: 255, g: 128, b: 0 };
+var p = Point(1, 2);
+var c = Color(255, 128, 0);
 
 print(p.show());
 print(c.show());

@@ -1,0 +1,9 @@
+class Counter(
+    value: Int = 0,
+)
+
+var c = Counter();
+c.value = c.value + 1;
+c.value = c.value + 1;
+c.value = c.value + 1;
+print(c.value);

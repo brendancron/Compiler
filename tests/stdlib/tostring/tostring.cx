@@ -7,16 +7,13 @@ print(true.to_string());
 print(false.to_string());
 print("hello".to_string());
 
-struct Point {
-    x: int;
-    y: int
-}
+class Point(x: Int, y: Int)
 
 impl ToString for Point {
-    fn to_string(self) -> string {
-        return "(" + self.x.to_string() + ", " + self.y.to_string() + ")";
+    fn to_string(): String {
+        return "(" + this.x.to_string() + ", " + this.y.to_string() + ")";
     }
 }
 
-var p = Point { x: 3, y: 4 };
+var p = Point(3, 4);
 print(p.to_string());

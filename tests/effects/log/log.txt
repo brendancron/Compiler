@@ -1,2 +1,6 @@
-Hello, Brendan
-Log: Hello, Brendan
+Hello, Alice
+Hello, Bob
+Hello, Charlie
+[Log] Hello, Alice
+[Log] Hello, Bob
+[Log] Hello, Charlie

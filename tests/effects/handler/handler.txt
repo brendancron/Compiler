@@ -1,2 +1,3 @@
-From inline handler: Hello, Brendan
-From handler definition: Hello, Brendan
+[Log] Hello, Alice
+[Log] Hello, Bob
+[Log] Hello, Charlie

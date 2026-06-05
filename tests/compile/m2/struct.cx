@@ -1,12 +1,9 @@
-struct Point {
-    x: int;
-    y: int
-}
+class Point(x: Int, y: Int)
 
-fn distance_sq(p: Point): int {
+fn distance_sq(p: Point): Int {
     return p.x * p.x + p.y * p.y;
 }
 
-var p = Point { x: 3, y: 4 };
+var p = Point(3, 4);
 print(to_string(distance_sq(p)));
 free(p);

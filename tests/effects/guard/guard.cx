@@ -1,0 +1,17 @@
+effect Control {
+    ctl guard(cond: Bool): Unit;
+}
+
+run {
+    print("First");
+    guard(true);
+    print("Second");
+    guard(false);
+    print("Third");
+} handle Control {
+    ctl guard(cond) {
+        if (cond) {
+            resume;
+        }
+    }
+}

@@ -2,10 +2,10 @@
 // The type checker refines T in each match arm, making eval total and cast-free.
 
 enum Expr<T> {
-    Lit(int)                            : Expr<int>,
-    Add(Expr<int>, Expr<int>)           : Expr<int>,
-    BoolLit(bool)                       : Expr<bool>,
-    If<A>(Expr<bool>, Expr<A>, Expr<A>) : Expr<A>,
+    Lit(Int)                            : Expr<Int>,
+    Add(Expr<Int>, Expr<Int>)           : Expr<Int>,
+    BoolLit(Bool)                       : Expr<Bool>,
+    If<A>(Expr<Bool>, Expr<A>, Expr<A>) : Expr<A>,
     Pair<A, B>(Expr<A>, Expr<B>)        : Expr<(A, B)>,
     Fst<A, B>(Expr<(A, B)>)             : Expr<A>,
 }
@@ -15,7 +15,7 @@ fn eval<T>(e: Expr<T>): T {
         Expr::Lit(n)      => n,
         Expr::Add(l, r)   => eval(l) + eval(r),
         Expr::BoolLit(b)  => b,
-        Expr::If(c, t, f) => { if (eval(c)) { return eval(t); } else { return eval(f); } }
+        Expr::If(c, t, f) => { if (eval(c)) { return eval(t); } else { return eval(f); } },
         Expr::Pair(a, b)  => (eval(a), eval(b)),
         Expr::Fst(p)      => eval(p).0,
     }
@@ -26,8 +26,8 @@ print(eval(Expr::If(Expr::BoolLit(true), Expr::Lit(1), Expr::Lit(0))));
 
 // Length-indexed list: head() is statically safe — Nil cannot reach it.
 
-struct Zero {}
-struct Succ<N> {}
+class Zero;
+class Succ<N>;
 
 enum Vec<N, T> {
     Nil<T>               : Vec<Zero, T>,

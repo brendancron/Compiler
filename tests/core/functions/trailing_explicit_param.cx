@@ -1,4 +1,4 @@
-fn apply(f: fn(int): int): int {
+fn apply(f: fn(Int): Int): Int {
     return f(10);
 }
 print(apply { x -> x + 5 });

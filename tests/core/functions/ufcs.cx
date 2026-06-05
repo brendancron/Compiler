@@ -1,0 +1,44 @@
+// Uniform Function Call Syntax: `x.f(args)` is sugar for `f(x, args)`.
+
+fn double(n: Int): Int {
+    return n * 2;
+}
+
+fn add(a: Int, b: Int): Int {
+    return a + b;
+}
+
+fn shout(s: String): String {
+    return s + "!";
+}
+
+// Free function called as method
+print(5.double());
+print(double(5));
+
+// Multi-arg: receiver is first param
+print(3.add(4));
+print(add(3, 4));
+
+// Chaining free functions
+print(2.double().double().add(1));
+
+// Strings
+print("hi".shout());
+print("hi".shout().shout());
+
+// Works on a class instance too
+class Box(value: Int)
+
+fn unwrap(b: Box): Int {
+    return b.value;
+}
+
+fn doubled(b: Box): Int {
+    return b.value * 2;
+}
+
+var b = Box(7);
+print(b.unwrap());
+print(b.doubled());
+print(unwrap(b));

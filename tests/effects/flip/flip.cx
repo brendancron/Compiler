@@ -1,9 +1,9 @@
-effect flip {
-    ctl flip(): bool;
+effect Flip {
+    ctl flip(): Bool;
 }
 
+print("I'm thirsty");
 run {
-    print("I'm thirsty");
     var wants_tea = flip();
     var wants_coffee = flip();
     if (wants_tea) {
@@ -13,9 +13,10 @@ run {
     } else {
         print("I'm having water");
     }
-} handle flip {
+} handle Flip {
     ctl flip() {
-        resume false;
         resume true;
+        resume false;
     }
 }
+print("I'm quenched")

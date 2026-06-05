@@ -1,11 +1,11 @@
 // Expected: effect row lists all effects, sorted alphabetically.
 
-effect io {
-    ctl emit(val: int): unit;
-    ctl request(): int;
+effect Io {
+    ctl emit(val: Int): Unit;
+    ctl request(): Int;
 }
 
-fn ping_pong(n: int) {
+fn ping_pong(n: Int) {
     emit(n);
     var r = request();
     emit(r);

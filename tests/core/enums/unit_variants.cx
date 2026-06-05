@@ -8,8 +8,8 @@ enum Direction {
 var dir = Direction::South;
 
 match dir {
-    Direction::North => { print("north"); }
-    Direction::South => { print("south"); }
-    Direction::East  => { print("east");  }
-    Direction::West  => { print("west");  }
+    Direction::North => { print("north"); },
+    Direction::South => { print("south"); },
+    Direction::East  => { print("east");  },
+    Direction::West  => { print("west");  },
 }

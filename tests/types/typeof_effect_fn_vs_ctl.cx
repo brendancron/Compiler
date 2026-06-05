@@ -1,11 +1,11 @@
 // A function calling both fn and ctl ops — only the ctl effect appears in its type row.
 
-effect mixed {
-    fn log(msg: string): unit;
-    ctl yield(i: int): unit;
+effect Mixed {
+    fn log(msg: String): Unit;
+    ctl yield(i: Int): Unit;
 }
 
-fn produce(n: int) {
+fn produce(n: Int) {
     log("start");
     yield(n);
     log("end");

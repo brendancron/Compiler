@@ -1,10 +1,10 @@
 // Expected: effect row appears postfix on the return type.
 
-effect stream {
-    ctl yield(i: int): unit;
+effect Stream {
+    ctl yield(i: Int): Unit;
 }
 
-fn range(low: int, high: int) {
+fn range(low: Int, high: Int) {
     var i = low;
     while (i < high) {
         yield(i);

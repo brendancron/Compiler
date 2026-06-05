@@ -1,0 +1,16 @@
+class Person(
+    name: String,
+    age: Int,
+) {
+    fn introduce() {
+        print("Hi my name is: " + name);
+    }
+}
+
+var alice = Person("Alice", 24);
+var bob = Person("Bob", 24);
+var charlie = Person("Charlie", 24);
+
+alice.introduce();
+bob.introduce();
+charlie.introduce();

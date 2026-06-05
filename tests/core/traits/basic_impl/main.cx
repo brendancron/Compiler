@@ -1,30 +1,25 @@
 trait Describe {
-    fn describe(self) -> string;
+    fn describe(): String;
 }
 
-struct Circle {
-    radius: int
-}
+class Circle(radius: Int)
 
-struct Rectangle {
-    width: int;
-    height: int
-}
+class Rectangle(width: Int, height: Int)
 
 impl Describe for Circle {
-    fn describe(self) -> string {
-        return "circle with radius " + to_string(self.radius);
+    fn describe(): String {
+        return "circle with radius " + to_string(this.radius);
     }
 }
 
 impl Describe for Rectangle {
-    fn describe(self) -> string {
-        return "rectangle " + to_string(self.width) + "x" + to_string(self.height);
+    fn describe(): String {
+        return "rectangle " + to_string(this.width) + "x" + to_string(this.height);
     }
 }
 
-var c = Circle { radius: 5 };
-var r = Rectangle { width: 3, height: 4 };
+var c = Circle(5);
+var r = Rectangle(3, 4);
 
 print(c.describe());
 print(r.describe());

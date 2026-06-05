@@ -1,4 +1,4 @@
-fn foreach(xs: [int], f: fn(int): unit) {
+fn foreach(xs: [Int], f: fn(Int): Unit) {
     var i = 0;
     while (i < xs.len()) {
         f(xs[i]);

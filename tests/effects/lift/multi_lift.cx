@@ -1,0 +1,50 @@
+effect Counter {
+    ctl bump(): Unit;
+}
+
+effect Logger {
+    ctl log(msg: String): Unit;
+}
+
+class CountHandler<T> : Counter {
+    var n: Int = 0;
+
+    ctl bump() {
+        n += 1;
+        resume;
+    }
+
+    fn lift(v: T): (T, Int) {
+        return (v, n);
+    }
+}
+
+class LogHandler<T> : Logger {
+    var msgs: List<String> = [];
+
+    ctl log(msg) {
+        msgs += [msg];
+        resume;
+    }
+
+    fn lift(v: T): (T, List<String>) {
+        return (v, msgs);
+    }
+}
+
+fn compute(): Int {
+    log("starting");
+    bump();
+    bump();
+    log("ending");
+    bump();
+    return 42;
+}
+
+var result = run {
+    compute()
+} handle CountHandler(), LogHandler();
+
+print(result.0.0);
+print(result.0.1);
+print(result.1);

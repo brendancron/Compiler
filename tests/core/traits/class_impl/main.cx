@@ -1,0 +1,34 @@
+trait Greet {
+    fn greet(): String;
+}
+
+trait Describe {
+    fn describe(): String;
+}
+
+class Person(name: String, age: Int) : Greet, Describe {
+    fn greet(): String {
+        return "Hello, I'm " + name;
+    }
+
+    fn describe(): String {
+        return name + " (" + to_string(age) + ")";
+    }
+}
+
+class Robot(id: Int) : Greet {
+    fn greet(): String {
+        return "BEEP. Unit " + to_string(id);
+    }
+}
+
+fn announce(g) {
+    print(g.greet());
+}
+
+var p = Person("Alice", 30);
+var r = Robot(7);
+
+announce(p);
+announce(r);
+print(p.describe());

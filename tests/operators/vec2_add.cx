@@ -1,16 +1,13 @@
-struct Vec2 {
-    x: int;
-    y: int
-}
+class Vec2(x: Int, y: Int)
 
 impl Add for Vec2 {
-    fn add(a: Vec2, b: Vec2): Vec2 {
-        return Vec2 { x: a.x + b.x, y: a.y + b.y };
+    fn add(other: Vec2): Vec2 {
+        return Vec2(this.x + other.x, this.y + other.y);
     }
 }
 
-var v1 = Vec2 { x: 1, y: 2 };
-var v2 = Vec2 { x: 3, y: 4 };
+var v1 = Vec2(1, 2);
+var v2 = Vec2(3, 4);
 var v3 = v1 + v2;
 print(v3.x);
 print(v3.y);

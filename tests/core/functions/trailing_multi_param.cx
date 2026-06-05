@@ -1,4 +1,4 @@
-fn combine(a: int, b: int, f: fn(int, int): int): int {
+fn combine(a: Int, b: Int, f: fn(Int, Int): Int): Int {
     return f(a, b);
 }
 print(combine(3, 4) { x, y -> x + y });

@@ -1,9 +1,9 @@
 enum Option {
-  Some(int),
+  Some(Int),
   None
 }
 
-fn safe_div(a: int, b: int): Option {
+fn safe_div(a: Int, b: Int): Option {
   if (b == 0) {
     return Option::None;
   }
@@ -12,6 +12,6 @@ fn safe_div(a: int, b: int): Option {
 
 var r = safe_div(10, 2);
 match r {
-  Option::Some(x) => { print(to_string(x)); }
-  Option::None => { print(to_string(-1)); }
+  Option::Some(x) => { print(to_string(x)); },
+  Option::None => { print(to_string(-1)); },
 }

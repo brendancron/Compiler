@@ -1,0 +1,30 @@
+effect Tag {
+    ctl tag(s: String): Unit;
+}
+
+class Counted : Tag {
+    var count: Int = 0;
+
+    ctl tag(s) {
+        count += 1;
+        print(s);
+        resume;
+    }
+
+    fn lift(v: Int): (Int, Int) {
+        return (v, count);
+    }
+}
+
+fn compute(): Int {
+    tag("a");
+    tag("b");
+    tag("c");
+    return 42;
+}
+
+var result = run {
+    compute()
+} handle Counted();
+
+print(result);

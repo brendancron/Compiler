@@ -1,21 +1,21 @@
 trait Named {
-    fn type_name(self) -> string;
+    fn type_name(): String;
 
     meta fn derive(T) {
-        gen fn type_name(self) -> string {
+        gen fn type_name(): String {
             return T.name;
         }
     }
 }
 
-struct Dog { age: int }
-struct Cat { lives: int }
+class Dog(age: Int)
+class Cat(lives: Int)
 
 derive Named for Dog;
 derive Named for Cat;
 
-var d = Dog { age: 3 };
-var c = Cat { lives: 9 };
+var d = Dog(3);
+var c = Cat(9);
 
 print(d.type_name());
 print(c.type_name());
