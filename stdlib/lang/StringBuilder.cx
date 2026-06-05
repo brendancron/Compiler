@@ -1,7 +1,4 @@
-struct StringBuilder {
-    parts: [string];
-    length: int
-}
+class StringBuilder(parts: [string], length: int)
 
 fn new() {
     return StringBuilder { parts: [], length: 0 };

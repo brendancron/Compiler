@@ -1,10 +1,7 @@
 import "../automata/Nfa";
 import "RegexAst";
 
-struct Fragment {
-    start: int;
-    end: int;
-}
+class Fragment(start: int, end: int)
 
 // Build an NFA from a RegexAst via Thompson's construction.
 // Returns Nfa<int> where symbols are Unicode codepoints.

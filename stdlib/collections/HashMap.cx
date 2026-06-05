@@ -7,13 +7,7 @@ import "../ops/Hash";
 // `keys` and `vals` are compact append-only arrays; deletion rebuilds.
 // K must implement Hash (key.hash() -> int) and support == for equality.
 
-struct Map<K, V> {
-    slots: [int];
-    keys:  [K];
-    vals:  [V];
-    size:  int;
-    capacity: int
-}
+class Map<K, V>(slots: [int], keys:  [K], vals:  [V], size:  int, capacity: int)
 
 fn new() {
     var cap = 16;

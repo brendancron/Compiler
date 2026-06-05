@@ -1,18 +1,8 @@
 import "Nfa";
 
-struct Dfa {
-    states: [int];
-    alphabet: [int];
-    transitions: [DfaTransition];
-    start: int;
-    accept: [int];
-}
+class Dfa(states: [int], alphabet: [int], transitions: [DfaTransition], start: int, accept: [int])
 
-struct DfaTransition {
-    src: int;
-    on: int;
-    to: int;
-}
+class DfaTransition(src: int, on: int, to: int)
 
 fn dfa_new(start: int) {
     return Dfa {
@@ -83,10 +73,7 @@ fn simulate(dfa, input) {
 
 // ── Subset construction (NFA → DFA) ──────────────────────────────────────────
 
-struct SubsetState {
-    id: int;
-    nfa_states: [int];
-}
+class SubsetState(id: int, nfa_states: [int])
 
 fn subset_construction(nfa) {
     var start_closure = Nfa.epsilon_closure(nfa, [nfa.start]);

@@ -1,17 +1,7 @@
-struct Nfa {
-    states: [int];
-    alphabet: [int];
-    transitions: [Transition];
-    start: int;
-    accept: [int];
-}
+class Nfa(states: [int], alphabet: [int], transitions: [Transition], start: int, accept: [int])
 
 // on == -1 means epsilon transition
-struct Transition {
-    src: int;
-    on: int;
-    to: int;
-}
+class Transition(src: int, on: int, to: int)
 
 fn nfa_new(start: int) {
     return Nfa {

@@ -1,9 +1,6 @@
 import "RegexAst";
 
-struct ParseResult {
-    node: int;
-    pos: int;
-}
+class ParseResult(node: int, pos: int)
 
 fn parse(pattern: string) {
     var chars = pattern.chars();
@@ -118,17 +115,17 @@ fn parse_escape(ast, cps, pos) {
     if (c == 114) { return ParseResult { node: RegexAst.literal(ast, 13),  pos: pos + 1 }; } // \r
 
     if (c == 100) { // \d  [0-9]
-        return ParseResult { node: RegexAst.class(ast, int_range(48, 57), false), pos: pos + 1 };
+        return ParseResult { node: RegexAst.char_class(ast, int_range(48, 57), false), pos: pos + 1 };
     }
     if (c == 115) { // \s  [ \t\n\r]
-        return ParseResult { node: RegexAst.class(ast, [32, 9, 10, 13], false), pos: pos + 1 };
+        return ParseResult { node: RegexAst.char_class(ast, [32, 9, 10, 13], false), pos: pos + 1 };
     }
     if (c == 119) { // \w  [a-zA-Z0-9_]
         var wc = int_range(65, 90);
         append_range(wc, 97, 122);
         append_range(wc, 48, 57);
         wc.push(95);
-        return ParseResult { node: RegexAst.class(ast, wc, false), pos: pos + 1 };
+        return ParseResult { node: RegexAst.char_class(ast, wc, false), pos: pos + 1 };
     }
 
     return ParseResult { node: RegexAst.literal(ast, c), pos: pos + 1 };
@@ -165,7 +162,7 @@ fn parse_class(ast, cps, pos) {
 
     if (cur < cps.len()) { cur += 1; } // consume ']'
 
-    return ParseResult { node: RegexAst.class(ast, chars, negated), pos: cur };
+    return ParseResult { node: RegexAst.char_class(ast, chars, negated), pos: cur };
 }
 
 fn int_range(lo: int, to: int) {

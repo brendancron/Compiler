@@ -6,19 +6,8 @@ enum LexPattern {
     Regex(string),
 }
 
-struct LexRule {
-    name:       string;
-    pattern:    LexPattern;
-    skip:       bool;
-    next_state: Option<string>;
-    action:     Option<string>;
-}
+class LexRule(name:       string, pattern:    LexPattern, skip:       bool, next_state: Option<string>, action:     Option<string>)
 
-struct LexState {
-    name:  string;
-    rules: [LexRule];
-}
+class LexState(name:  string, rules: [LexRule])
 
-struct LexerDef {
-    states: Map<LexState>;
-}
+class LexerDef(states: Map<LexState>)

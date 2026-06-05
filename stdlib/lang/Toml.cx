@@ -7,49 +7,24 @@ import "Option";
 // 0=LBracket 1=RBracket 2=LBrace 3=RBrace 4=Equals 5=Comma
 // 6=Newline  7=Ident    8=String 9=Bool   10=Int   11=EOF
 
-struct Token {
-    kind: int;
-    s:    string;
-    b:    bool;
-    i:    int;
-}
+class Token(kind: int, s:    string, b:    bool, i:    int)
 
 // ── Value types ───────────────────────────────────────────────────────────────
 // TomlPrimitive.kind: 0=string, 1=int, 2=bool
 
-struct TomlPrimitive {
-    kind: int;
-    s:    string;
-    i:    int;
-    b:    bool;
-}
+class TomlPrimitive(kind: int, s:    string, i:    int, b:    bool)
 
 // Inline-table entry (one level deep — no nested tables)
-struct TomlInlineEntry {
-    key: string;
-    val: TomlPrimitive;
-}
+class TomlInlineEntry(key: string, val: TomlPrimitive)
 
 // TomlValue.kind: 0=primitive, 1=inline_table
-struct TomlValue {
-    kind:  int;
-    prim:  TomlPrimitive;
-    table: [TomlInlineEntry];
-}
+class TomlValue(kind:  int, prim:  TomlPrimitive, table: [TomlInlineEntry])
 
-struct TomlEntry {
-    key: string;
-    val: TomlValue;
-}
+class TomlEntry(key: string, val: TomlValue)
 
-struct TomlSection {
-    name:    string;
-    entries: [TomlEntry];
-}
+class TomlSection(name:    string, entries: [TomlEntry])
 
-struct TomlDoc {
-    sections: [TomlSection];
-}
+class TomlDoc(sections: [TomlSection])
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

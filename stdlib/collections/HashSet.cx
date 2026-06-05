@@ -5,12 +5,7 @@ import "../ops/Hash";
 // `slots`: -1=empty, -2=deleted(tombstone), else=index into `keys`.
 // K must implement Hash (key.hash() -> int) and support == for equality.
 
-struct HashSet<K> {
-    slots: [int];
-    keys:  [K];
-    size:  int;
-    capacity: int
-}
+class HashSet<K>(slots: [int], keys:  [K], size:  int, capacity: int)
 
 fn new() {
     var cap = 16;
