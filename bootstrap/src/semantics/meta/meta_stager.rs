@@ -49,6 +49,9 @@ pub fn process_expr(
     type_env: &TypeEnv,
 ) -> Result<StagedNodeId, MetaProcessError> {
     let staged_expr_id = id_provider.next_staged();
+    if let Some(&loc) = meta_ast.span_table.get(&meta_expr_id.0) {
+        staged_forest.spans.insert(staged_expr_id.0, loc);
+    }
     let meta_expr = meta_ast
         .get_expr(meta_expr_id)
         .ok_or(MetaProcessError::ExprNotFound(meta_expr_id))?;
@@ -313,6 +316,9 @@ pub fn process_stmt(
     type_env: &TypeEnv,
 ) -> Result<StagedNodeId, MetaProcessError> {
     let staged_stmt_id = id_provider.next_staged();
+    if let Some(&loc) = meta_ast.span_table.get(&meta_stmt_id.0) {
+        staged_forest.spans.insert(staged_stmt_id.0, loc);
+    }
     let meta_stmt = meta_ast
         .get_stmt(meta_stmt_id)
         .ok_or(MetaProcessError::StmtNotFound(meta_stmt_id))?;
@@ -720,6 +726,7 @@ pub fn stage_all_files(
     let mut dependency_set: HashSet<ProcessDependency> = HashSet::new();
     let mut sem_root_stmts: Vec<StagedNodeId> = Vec::new();
     let mut errors: Vec<MetaProcessError> = Vec::new();
+
 
     // Build a map from path stem → exports for every file (used for transitive bindings).
     let mut exports_by_stem: HashMap<String, Vec<String>> = HashMap::new();

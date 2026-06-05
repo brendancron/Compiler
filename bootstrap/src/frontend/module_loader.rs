@@ -76,6 +76,20 @@ pub fn load_compilation_unit(entry: &Path, stdlib_root: &Path) -> Result<Vec<Loa
             }
         }
     }
+    // Operator-trait impls (`stdlib/ops/*.cx`) auto-imported. Codegen skips
+    // stdlib fn bodies via `stdlib_fn_names`, so list/string trait impls
+    // available everywhere on the interpreter path without breaking compile.
+    const OPS_PRELUDE: &[&str] = &["Add"];
+    let ops_dir = stdlib_root.join("ops");
+    if ops_dir.is_dir() {
+        for &name in OPS_PRELUDE {
+            let file = ops_dir.join(format!("{name}.cx"));
+            if file.exists() {
+                let decl = ImportDecl::Qualified { path: format!("ops/{name}") };
+                queue.push_back((decl, file, true));
+            }
+        }
+    }
 
     for decl in explicit_imports {
         let path = resolve_import(&entry_dir, decl.path());

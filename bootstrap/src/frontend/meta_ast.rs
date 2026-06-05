@@ -61,6 +61,10 @@ pub struct MetaAst {
     pub sem_root_stmts: Vec<MetaNodeId>,
     exprs: HashMap<MetaNodeId, MetaExpr>,
     stmts: HashMap<MetaNodeId, MetaStmt>,
+    /// `node_id.0` → `(line, col)` for source-position lookups. Populated by
+    /// the parser as it builds the tree; carried through staging and conversion
+    /// so runtime errors can resolve to lines.
+    pub span_table: HashMap<usize, (usize, usize)>,
 }
 
 #[derive(Debug)]
@@ -75,6 +79,7 @@ impl MetaAst {
             sem_root_stmts: vec![],
             exprs: HashMap::new(),
             stmts: HashMap::new(),
+            span_table: HashMap::new(),
         }
     }
 

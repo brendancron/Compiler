@@ -2,12 +2,12 @@ trait Add {
     fn add(self, other);
 }
 
-impl Add for int {
-    fn add(self, other) {
-        return __add_int(self, other);
-    }
-}
+// Int+int and string+string are handled by the interpreter directly (a
+// shortcut before dispatch_binop runs), so no impl is needed here.
 
-impl Add for string {
-    fn add(self, other) { return __add_string(self, other); }
+impl Add for list {
+    fn add(self, other) {
+        self.push(other);
+        return self;
+    }
 }

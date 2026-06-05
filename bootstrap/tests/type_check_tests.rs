@@ -288,7 +288,7 @@ mod type_check_tests {
 
         let name_val = ast.insert_expr(&mut ids, MetaExpr::String("Alice".into()));
         let age_val  = ast.insert_expr(&mut ids, MetaExpr::Int(30));
-        let record   = ast.insert_expr(&mut ids, MetaExpr::StructLiteral {
+        let record   = ast.insert_expr(&mut ids, MetaExpr::ClassLiteral {
             type_name: String::new(),
             fields: vec![
                 ("name".into(), name_val),

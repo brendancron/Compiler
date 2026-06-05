@@ -132,6 +132,15 @@ fn run_pipeline(
     transform_ctl(&mut runtime_ast, &cps_info);
     sink.dump_cps(&cps_info, &runtime_ast);
 
+    // Merge runtime-id spans on top of the parser's meta-id span table so
+    // runtime errors carrying post-compaction RuntimeNodeIds resolve to source
+    // lines. Parser-side spans stay as a fallback for compile-time diagnostics.
+    if let Some((_, ref mut spans)) = entry_ctx {
+        for (&k, &v) in &runtime_ast.spans {
+            spans.insert(k, v);
+        }
+    }
+
     // RUNTIME TYPE CHECK — needed by codegen; also validates the post-CPS AST.
     let type_map = {
         let mut rt_env = TypeEnv::new();

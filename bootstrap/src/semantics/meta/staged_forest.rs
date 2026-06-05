@@ -56,6 +56,12 @@ pub struct StagedForest {
     /// Function names that originated from stdlib auto-imports.
     /// Carried through to RuntimeAst so codegen can skip them.
     pub stdlib_fn_names: std::collections::HashSet<String>,
+
+    /// Source spans for every node (meta + staged ids share keys here).
+    /// Populated from the parser's per-file span tables in `stage_all_files`,
+    /// then extended by `process_expr`/`process_stmt` whenever they allocate
+    /// a fresh staged id by copying the meta-id's span across.
+    pub spans: HashMap<usize, (usize, usize)>,
 }
 
 impl StagedForest {
@@ -71,6 +77,7 @@ impl StagedForest {
             impl_registry: Vec::new(),
             op_registry: Vec::new(),
             stdlib_fn_names: std::collections::HashSet::new(),
+            spans: HashMap::new(),
         }
     }
 

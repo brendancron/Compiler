@@ -873,8 +873,16 @@ pub fn compile(
     }
 
     // ── Pass 1: forward-declare all user functions ────────────────────────────
-    // Use the fn_decls collected early (fn_decls_early).
-    let fn_decls = fn_decls_early;
+    // Use the fn_decls collected early (fn_decls_early). Skip stdlib functions:
+    // their bodies may use features codegen doesn't yet support (untyped self
+    // receivers in trait impls, generic methods, etc.). The interpreter path
+    // handles them; codegen ignores them and any program that calls them on
+    // the compile path is currently expected to be one that doesn't reach
+    // codegen-incompatible paths.
+    let fn_decls: Vec<_> = fn_decls_early
+        .into_iter()
+        .filter(|(_, name, _, _)| !ast.stdlib_fn_names.contains(name.as_str()))
+        .collect();
 
     // Collect `with fn` handlers — each gets a unique LLVM name (__handler_<op>_<stmt_id>)
     // so multiple handlers for the same op can coexist. Active handler is tracked in Pass 3.

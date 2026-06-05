@@ -173,6 +173,11 @@ where
             ast.impl_registry = impl_registry;
             ast.op_dispatch = op_dispatch;
             ast.stdlib_fn_names = staged_forest.stdlib_fn_names.clone();
+            // Carry parser-collected spans (keyed by staged-id) onto the runtime AST.
+            // Conversion uses `rid(StagedNodeId(N)) = RuntimeNodeId(N)` so the
+            // keys are valid runtime IDs at this point. `compact()` then remaps
+            // them to post-compact runtime IDs.
+            ast.spans = staged_forest.spans.clone();
             monomorphize(&mut ast, &type_map);
             // After monomorphize, mangled copies like `fn__int` also exist — mark them stdlib.
             let orig_stdlib = ast.stdlib_fn_names.clone();

@@ -408,6 +408,7 @@ impl ParseCtx {
     pub fn record_span(&mut self, node_id: MetaNodeId, loc: Option<(usize, usize)>) {
         if let Some(l) = loc {
             self.span_table.insert(node_id.0, l);
+            self.ast.span_table.insert(node_id.0, l);
         }
     }
 
@@ -415,6 +416,7 @@ impl ParseCtx {
     pub fn copy_span(&mut self, src: MetaNodeId, dst: MetaNodeId) {
         if let Some(loc) = self.span_table.get(&src.0).cloned() {
             self.span_table.insert(dst.0, loc);
+            self.ast.span_table.insert(dst.0, loc);
         }
     }
 }
@@ -1991,8 +1993,11 @@ fn parse_stmt<'a>(
                 let rhs = parse_expr(tokens, pos, ctx)?;
                 consume(tokens, pos, TokenType::Semicolon)?;
                 let var_id = ctx.ast.insert_expr(&mut ctx.id_provider, MetaExpr::Variable(name.clone()));
+                ctx.record_span(var_id, start_loc);
                 let expr = ctx.ast.insert_expr(&mut ctx.id_provider, MetaExpr::Add(var_id, rhs));
+                ctx.record_span(expr, start_loc);
                 let id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::Assign { name, expr });
+                ctx.record_span(id, start_loc);
                 Ok(id)
             }
 

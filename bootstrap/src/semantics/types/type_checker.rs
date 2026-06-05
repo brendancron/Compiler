@@ -262,10 +262,16 @@ fn infer_expr_impl(
         MetaExpr::Add(a, b) => {
             let ta = infer_expr(ast, *a, env, subst, table)?;
             let tb = infer_expr(ast, *b, env, subst, table)?;
-            let tv = Type::Var(env.fresh());
-            unify(&ta, &tv, subst)?;
-            unify(&tb, &tv, subst)?;
-            tv.apply(subst)
+            // List/class operands dispatch to a user impl at runtime; don't
+            // force operand homogeneity here.
+            if matches!(ta.apply(subst), Type::Slice(_) | Type::Class { .. }) {
+                Type::Var(env.fresh())
+            } else {
+                let tv = Type::Var(env.fresh());
+                unify(&ta, &tv, subst)?;
+                unify(&tb, &tv, subst)?;
+                tv.apply(subst)
+            }
         }
 
         MetaExpr::Sub(a, b) | MetaExpr::Mult(a, b) | MetaExpr::Div(a, b) | MetaExpr::Mod(a, b) => {

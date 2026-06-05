@@ -15,8 +15,8 @@ run {
     }
 } handle Flip {
     ctl flip() {
-        resume true;
         resume false;
+        resume true;
     }
 }
 print("I'm quenched")

@@ -280,10 +280,16 @@ fn infer_expr(
         RuntimeExpr::Add(a, b) => {
             let ta = infer_expr(ast, a, env, subst, type_map)?;
             let tb = infer_expr(ast, b, env, subst, type_map)?;
-            let tv = Type::Var(env.fresh());
-            unify(&ta, &tv, subst)?;
-            unify(&tb, &tv, subst)?;
-            tv.apply(subst)
+            // List/class operands dispatch to a user impl at runtime; don't
+            // require operand homogeneity.
+            if matches!(ta.apply(subst), Type::Slice(_) | Type::Class { .. }) {
+                Type::Var(env.fresh())
+            } else {
+                let tv = Type::Var(env.fresh());
+                unify(&ta, &tv, subst)?;
+                unify(&tb, &tv, subst)?;
+                tv.apply(subst)
+            }
         }
 
         RuntimeExpr::Sub(a, b) | RuntimeExpr::Mult(a, b) | RuntimeExpr::Div(a, b) | RuntimeExpr::Mod(a, b) => {

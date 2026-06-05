@@ -160,6 +160,26 @@ pub fn convert_to_runtime(
         })
         .collect();
 
+    // Build a variable-name → class-name map by scanning VarDecls that
+    // initialize from a class constructor call (`var x = ClassName(...);`).
+    // Lets `handle x` resolve to the same HandlerDef that `handle ClassName(...)`
+    // would, when `x` holds an instance of a handler class.
+    let var_to_class: std::collections::HashMap<String, String> = staged.stmts.values()
+        .filter_map(|stmt| {
+            let StagedStmt::VarDecl { name, expr } = stmt else { return None; };
+            let init = staged.get_expr(*expr)?;
+            let StagedExpr::Call { callee, .. } = init else { return None; };
+            // Only treat as a handler binding if `callee` is itself a class
+            // that has a HandlerDef registered. Avoids false positives when
+            // a variable happens to be assigned from any function call.
+            if handler_defs.contains_key(callee) {
+                Some((name.clone(), callee.clone()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
     let max_staged = staged.stmts.keys().chain(staged.exprs.keys()).map(|id| id.0).max().unwrap_or(0);
     let max_meta = meta_generated.values()
         .flat_map(|o| o.supporting_stmts.keys().map(|id| id.0).chain(o.exprs.keys().map(|id| id.0)))
@@ -196,7 +216,17 @@ pub fn convert_to_runtime(
     // Two-pass expr conversion: RunHandle/RunWith exprs need collect_free_vars which requires
     // all stmts to be in runtime first. First pass: non-handle exprs. Second pass
     // (after stmt conversion): RunHandle/RunWith exprs with correct free-var analysis.
-    let mut deferred_handles: Vec<(RuntimeNodeId, RuntimeNodeId, Vec<RuntimeNodeId>, Option<(String, Vec<RuntimeNodeId>)>)> = Vec::new();
+    //
+    // The 4th tuple field describes what `this` binding to inject before the
+    // handler ops, if any:
+    //   - None: no `this`.
+    //   - Some((class_name, args, false)): construct `var this = class_name(args);`.
+    //   - Some((var_name,  _,    true )): bind `var this = var_name;` (handler
+    //     name was a variable holding a handler-class instance).
+    let mut deferred_handles: Vec<(
+        RuntimeNodeId, RuntimeNodeId, Vec<RuntimeNodeId>,
+        Option<(String, Vec<RuntimeNodeId>, bool)>,
+    )> = Vec::new();
 
     for (id, expr) in &staged.exprs {
         match expr {
@@ -208,7 +238,16 @@ pub fn convert_to_runtime(
                 continue;
             }
             StagedExpr::RunWith { body, handler_name, args } => {
-                let ops = handler_defs.get(handler_name).cloned().unwrap_or_default();
+                // Resolve handler_name → class HandlerDef. Direct match wins;
+                // otherwise fall back to a variable-bound handler instance.
+                let (resolved_class, from_var) = if handler_defs.contains_key(handler_name) {
+                    (handler_name.clone(), false)
+                } else if let Some(class) = var_to_class.get(handler_name) {
+                    (class.clone(), true)
+                } else {
+                    (handler_name.clone(), false)
+                };
+                let ops = handler_defs.get(&resolved_class).cloned().unwrap_or_default();
                 // Convert each arg expr now (the outer loop would otherwise skip it).
                 for &a in args {
                     if let Some(arg_expr) = staged.get_expr(a) {
@@ -216,12 +255,16 @@ pub fn convert_to_runtime(
                         runtime.insert_expr(rid(a), runtime_expr);
                     }
                 }
-                let ctor = if args.is_empty() {
-                    None
+                let this_binding = if from_var {
+                    // Bind `var this = <handler_name>;`. `args` ignored here —
+                    // the variable already holds the constructed instance.
+                    Some((handler_name.clone(), Vec::new(), true))
+                } else if !args.is_empty() {
+                    Some((handler_name.clone(), args.iter().map(|&a| rid(a)).collect(), false))
                 } else {
-                    Some((handler_name.clone(), args.iter().map(|&a| rid(a)).collect()))
+                    None
                 };
-                deferred_handles.push((rid(*id), rid(*body), ops, ctor));
+                deferred_handles.push((rid(*id), rid(*body), ops, this_binding));
                 continue;
             }
             _ => {}
@@ -324,7 +367,7 @@ pub fn convert_to_runtime(
     }
 
     // Second pass: process deferred RunHandle/RunWith exprs.
-    for (id, body, handler_stmts, ctor) in deferred_handles {
+    for (id, body, handler_stmts, this_binding) in deferred_handles {
         let fn_name = format!("__handle_{}", next_id);
         next_id += 1;
 
@@ -332,18 +375,24 @@ pub fn convert_to_runtime(
             Some(RuntimeStmt::Block(stmts)) => stmts.clone(),
             _ => vec![body],
         };
-        // For class-handler form: `var this = ClassName(args);` so op bodies'
-        // own `var p = this.p;` prelude resolves.
+        // For class-handler form: bind `this` so op bodies' own
+        // `var p = this.p;` prelude resolves. Either:
+        //   - `var this = ClassName(args);` (constructor call), or
+        //   - `var this = <var_name>;`      (variable holds a handler instance).
         let mut prelude: Vec<RuntimeNodeId> = Vec::new();
-        if let Some((class_name, arg_ids)) = ctor {
-            let call_id = RuntimeNodeId(next_id);
+        if let Some((name, arg_ids, from_var)) = this_binding {
+            let init_expr_id = RuntimeNodeId(next_id);
             next_id += 1;
-            runtime.insert_expr(call_id, RuntimeExpr::Call { callee: class_name, args: arg_ids });
+            if from_var {
+                runtime.insert_expr(init_expr_id, RuntimeExpr::Variable(name));
+            } else {
+                runtime.insert_expr(init_expr_id, RuntimeExpr::Call { callee: name, args: arg_ids });
+            }
             let bind_id = RuntimeNodeId(next_id);
             next_id += 1;
             runtime.insert_stmt(bind_id, RuntimeStmt::VarDecl {
                 name: "this".to_string(),
-                expr: call_id,
+                expr: init_expr_id,
             });
             prelude.push(bind_id);
         }

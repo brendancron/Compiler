@@ -16,7 +16,7 @@ class EventLoop {
     }
 
     fn run() {
-        var loop_handler = AsyncHandler();
+        var loop_handler = AsyncHandler(this);
         while (queue.len() > 0) {
             var task = queue.remove(0);
             run {

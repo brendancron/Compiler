@@ -29,6 +29,11 @@ pub struct RuntimeAst {
     /// Function names that originated from stdlib auto-imports (FileRole::StdLib).
     /// Codegen skips these since they may use constructs codegen doesn't yet support.
     pub stdlib_fn_names: std::collections::HashSet<String>,
+    /// Source spans for AST nodes — propagated from the parser's span table
+    /// through staging, conversion, and compaction so runtime errors can
+    /// resolve to source locations. Key is the node id (`.0`); value is
+    /// `(line, col)`.
+    pub spans: HashMap<usize, (usize, usize)>,
 }
 
 impl RuntimeAst {
@@ -44,6 +49,7 @@ impl RuntimeAst {
             lambda_param_hints: HashMap::new(),
             module_bindings: Vec::new(),
             stdlib_fn_names: std::collections::HashSet::new(),
+            spans: HashMap::new(),
         }
     }
 
@@ -283,6 +289,14 @@ impl RuntimeAst {
                     })
                     .collect();
                 (bind_name.clone(), remapped)
+            })
+            .collect();
+        out.spans = self.spans.iter()
+            .map(|(&old_key, &loc)| {
+                let new_key = stmt_remap.get(&RuntimeNodeId(old_key)).map(|r| r.0)
+                    .or_else(|| expr_remap.get(&RuntimeNodeId(old_key)).map(|r| r.0))
+                    .unwrap_or(old_key);
+                (new_key, loc)
             })
             .collect();
 

@@ -86,54 +86,47 @@ impl Diagnostic {
                 _ => path.display().to_string(),
             };
             if color {
-                writeln!(out, "  \x1b[36m┌─\x1b[0m {loc}").ok();
+                writeln!(out, "\x1b[36m┌─\x1b[0m {loc}").ok();
             } else {
-                writeln!(out, "  ┌─ {loc}").ok();
+                writeln!(out, "┌─ {loc}").ok();
             }
         }
 
-        // Source snippet:
-        //   │
-        // N │ <source line>
-        //   │      ~~~~~~~ label
-        //   │
-        if let (Some(src), Some(line_num), Some(ucol)) =
-            (&self.source_line, self.line, self.underline_col)
-        {
-            let line_prefix = format!("{line_num}");
-            let pad = line_prefix.len();
-            let spaces = " ".repeat(pad);
+        // Source snippet — the line number lives in the ┌─ path:N:C header
+        // already, so the snippet rows only show the bar + source/underline.
+        // │ <source line>
+        // │     ~~~~~~~ label
+        if let (Some(src), Some(ucol)) = (&self.source_line, self.underline_col) {
             let tildes = "~".repeat(self.underline_len);
-            // indent before underline: ucol is 1-indexed, so ucol-1 spaces
             let underline_indent = " ".repeat(ucol.saturating_sub(1));
 
             if color {
-                writeln!(out, "  \x1b[36m│\x1b[0m").ok();
-                writeln!(out, "{line_prefix} \x1b[36m│\x1b[0m {src}").ok();
+                writeln!(out, "\x1b[36m│\x1b[0m {src}").ok();
                 if let Some(lbl) = &self.label {
-                    writeln!(out, "{spaces} \x1b[36m│\x1b[0m {underline_indent}\x1b[35m{tildes}\x1b[0m {lbl}").ok();
+                    writeln!(out, "\x1b[36m│\x1b[0m {underline_indent}\x1b[35m{tildes}\x1b[0m {lbl}").ok();
                 } else {
-                    writeln!(out, "{spaces} \x1b[36m│\x1b[0m {underline_indent}\x1b[35m{tildes}\x1b[0m").ok();
+                    writeln!(out, "\x1b[36m│\x1b[0m {underline_indent}\x1b[35m{tildes}\x1b[0m").ok();
                 }
-                writeln!(out, "{spaces} \x1b[36m│\x1b[0m").ok();
             } else {
-                writeln!(out, "  │").ok();
-                writeln!(out, "{line_prefix} │ {src}").ok();
+                writeln!(out, "│ {src}").ok();
                 if let Some(lbl) = &self.label {
-                    writeln!(out, "{spaces} │ {underline_indent}{tildes} {lbl}").ok();
+                    writeln!(out, "│ {underline_indent}{tildes} {lbl}").ok();
                 } else {
-                    writeln!(out, "{spaces} │ {underline_indent}{tildes}").ok();
+                    writeln!(out, "│ {underline_indent}{tildes}").ok();
                 }
-                writeln!(out, "{spaces} │").ok();
             }
         }
 
-        // └─ help: text
-        if let Some(help) = &self.help {
-            if color {
-                writeln!(out, "  \x1b[36m└─ help:\x1b[0m {help}").ok();
-            } else {
-                writeln!(out, "  └─ help: {help}").ok();
+        // └─ help: text — always emitted to close the frame.
+        if color {
+            match &self.help {
+                Some(help) => { writeln!(out, "\x1b[36m└─ help:\x1b[0m {help}").ok(); }
+                None       => { writeln!(out, "\x1b[36m└─\x1b[0m").ok(); }
+            }
+        } else {
+            match &self.help {
+                Some(help) => { writeln!(out, "└─ help: {help}").ok(); }
+                None       => { writeln!(out, "└─").ok(); }
             }
         }
     }
@@ -281,6 +274,10 @@ fn eval_diagnostic(e: &EvalError) -> Diagnostic {
         }
         EvalError::ArgumentMismatch => {
             Diagnostic::new("wrong number of arguments in function call")
+        }
+        EvalError::NoImpl { op_trait, lhs_type } => {
+            Diagnostic::new(format!("no `{op_trait}` impl for `{lhs_type}`"))
+                .with_help(format!("define `impl {op_trait} for {lhs_type}` or use a different operand type"))
         }
         EvalError::TypeCheckFailed(inner) => type_diagnostic(inner),
         EvalError::TypeError(_) => {

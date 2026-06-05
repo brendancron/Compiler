@@ -25,6 +25,10 @@ pub enum EvalError {
     TypeCheckFailed(TypeError),
     NonFunctionCall,
     ArgumentMismatch,
+    /// A binary operator was applied to operand types with no matching `impl`.
+    /// `lhs_type` is "list"/"function"/etc. (or a class name) — whatever the
+    /// runtime sees on the left side.
+    NoImpl { op_trait: String, lhs_type: String },
     GenOutsideMetaContext,
     Unimplemented,
     /// A `ctl` handler ran to completion without calling `resume` — the remaining computation is discarded.
@@ -55,6 +59,10 @@ pub struct CtlHandlerEntry {
     /// For tuple-destructuring for-each: names to bind from tuple components.
     /// When set, params[0] is a synthetic placeholder; this overrides the binding.
     pub tuple_binding: Option<Vec<String>>,
+    /// Env captured at handler-install time. When set, the handler body runs
+    /// with this env as its base scope, so handler-class fields bound via
+    /// `var this = <handler_value>;` at the install site remain visible.
+    pub captured_env: Option<crate::runtime::environment::EnvRef>,
 }
 
 /// Entry in the fn handler stack installed by `with fn`.
@@ -469,6 +477,21 @@ fn eval_expr_inner<W: Write>(expr_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
                         let found = items.borrow().iter().any(|v| values_equal(v, needle));
                         return Ok(Value::Bool(found));
                     }
+                    "remove" => {
+                        let idx = match arg_vals.into_iter().next() {
+                            Some(Value::Int(n)) => n,
+                            _ => return Err(EvalError::ArgumentMismatch),
+                        };
+                        let mut borrowed = items.borrow_mut();
+                        let len = borrowed.len() as i64;
+                        let real_idx = if idx < 0 { idx + len } else { idx };
+                        if real_idx < 0 || real_idx >= len {
+                            return Err(EvalError::RuntimeError(format!(
+                                "remove: index {idx} out of bounds for list of length {len}"
+                            )));
+                        }
+                        return Ok(borrowed.remove(real_idx as usize));
+                    }
                     _ => {}
                 }
             }
@@ -704,9 +727,9 @@ fn eval_expr_inner<W: Write>(expr_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
             // Check ctl handler stack before env lookup (last installed wins).
             let ctl_info = ctx.ctl_handlers.iter().rev()
                 .find(|h| h.op_name == *callee)
-                .map(|h| (h.params.clone(), h.body, h.outer_k.clone(), h.auto_resume, h.tuple_binding.clone()));
+                .map(|h| (h.params.clone(), h.body, h.outer_k.clone(), h.auto_resume, h.tuple_binding.clone(), h.captured_env.clone()));
 
-            if let Some((params, body, entry_outer_k, auto_resume, tuple_binding)) = ctl_info {
+            if let Some((params, body, entry_outer_k, auto_resume, tuple_binding, captured_env)) = ctl_info {
                 let arg_vals: Vec<Value> = args.iter()
                     .map(|a| eval_expr(*a, ctx))
                     .collect::<Result<_, _>>()?;
@@ -717,6 +740,10 @@ fn eval_expr_inner<W: Write>(expr_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
                 if arg_vals.len() == params.len() + 1 {
                     let continuation = arg_vals.last().unwrap().clone();
                     let handler_args = &arg_vals[..params.len()];
+                    // Run the body in the env captured when the handler was
+                    // installed, so handler-class fields (`this.field` etc.)
+                    // resolve.
+                    let saved_env = captured_env.clone().map(|e| ctx.env.swap(e));
                     ctx.env.push_scope();
                     bind_handler_params(&params, handler_args, &tuple_binding, ctx);
                     ctx.cps_continuations.push(continuation.clone());
@@ -727,6 +754,7 @@ fn eval_expr_inner<W: Write>(expr_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
                     let resume_was_called = ctx.cps_resume_count > resume_count_before;
                     ctx.cps_continuations.pop();
                     ctx.env.pop_scope();
+                    if let Some(prev) = saved_env { ctx.env.swap(prev); }
                     // If the handler did not call resume:
                     if !resume_was_called {
                         // For for-in/iter(): auto-resume by calling the yield continuation
@@ -758,6 +786,7 @@ fn eval_expr_inner<W: Write>(expr_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
                 if params.len() != arg_vals.len() {
                     return Err(EvalError::ArgumentMismatch);
                 }
+                let saved_env = captured_env.clone().map(|e| ctx.env.swap(e));
                 ctx.env.push_scope();
                 bind_handler_params(&params, &arg_vals, &tuple_binding, ctx);
 
@@ -769,6 +798,7 @@ fn eval_expr_inner<W: Write>(expr_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
                 let resume_values = std::mem::replace(&mut ctx.collected_resumes, old_resumes);
                 ctx.collecting_resumes = old_collecting;
                 ctx.env.pop_scope();
+                if let Some(prev) = saved_env { ctx.env.swap(prev); }
 
                 if resume_values.is_empty() {
                     if auto_resume {
@@ -933,6 +963,7 @@ fn eval_stmt_inner<W: Write>(stmt_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
                                     outer_k: None,
                                     auto_resume: true,
                                     tuple_binding: None,
+                                    captured_env: None,
                                 });
                                 let result = call_value(method_func, vec![value], ctx);
                                 ctx.ctl_handlers.pop();
@@ -1138,6 +1169,7 @@ fn eval_stmt_inner<W: Write>(stmt_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
                 outer_k,
                 auto_resume: false,
                 tuple_binding: None,
+                captured_env: Some(ctx.env.env_ref()),
             });
             Ok(ExecResult::Continue)
         }
@@ -1253,6 +1285,23 @@ fn hoist_fndecls<W: Write>(stmts: &[RuntimeNodeId], ctx: &mut EvalCtx<W>) {
     }
 }
 
+/// One-word descriptor of a runtime Value's kind, used by error messages.
+fn value_kind_name(v: &Value) -> &'static str {
+    match v {
+        Value::Int(_) => "int",
+        Value::String(_) => "string",
+        Value::Bool(_) => "bool",
+        Value::Unit => "unit",
+        Value::Class { .. } => "class",
+        Value::Enum { .. } => "enum",
+        Value::List(_) => "list",
+        Value::Tuple(_) => "tuple",
+        Value::Function(_) => "function",
+        Value::NativeFunction(_) => "native function",
+        Value::Module(_) => "module",
+    }
+}
+
 /// Dispatch a binary operator to a user-defined impl.
 /// Looks up (op_trait, lhs_type_name) in the op_dispatch table and calls the function.
 /// Returns an error if no impl is found — callers should try primitive matching first.
@@ -1262,18 +1311,27 @@ fn dispatch_binop<W: Write>(
     rhs: Value,
     ctx: &mut EvalCtx<W>,
 ) -> Result<Value, EvalError> {
+    // Class values dispatch by their nominal class name; primitive values
+    // use a stable type-name string so the stdlib can write
+    // `impl Add for list` (etc.) and have it found here.
     let type_name = match &lhs {
         Value::Class { type_name, .. } => type_name.clone(),
-        _ => return Err(EvalError::UndefinedVariable(
-            format!("no impl `{}` for this type", op_trait)
-        )),
+        Value::List(_) => "list".to_string(),
+        Value::String(_) => "string".to_string(),
+        Value::Bool(_) => "bool".to_string(),
+        Value::Int(_) => "int".to_string(),
+        _ => return Err(EvalError::NoImpl {
+            op_trait: op_trait.to_string(),
+            lhs_type: value_kind_name(&lhs).to_string(),
+        }),
     };
     let fn_name = ctx.ast.op_dispatch
         .get(&(op_trait.to_string(), type_name.clone()))
         .cloned()
-        .ok_or_else(|| EvalError::UndefinedVariable(
-            format!("no impl `{}` for `{}`", op_trait, type_name)
-        ))?;
+        .ok_or_else(|| EvalError::NoImpl {
+            op_trait: op_trait.to_string(),
+            lhs_type: type_name.clone(),
+        })?;
     let func = ctx.env.get(&fn_name).map_err(EvalError::UndefinedVariable)?;
     call_value(func, vec![lhs, rhs], ctx)
 }
@@ -1359,7 +1417,7 @@ pub fn eval_stmts<W: Write>(
         if let Some((op_name, param_names, body)) = with_ctl_info {
             let continuation: Vec<RuntimeNodeId> = stmts[i + 1..].to_vec();
             let outer_k = ctx.handle_continuations.last().cloned();
-            ctx.ctl_handlers.push(CtlHandlerEntry { op_name, params: param_names, body, outer_k, auto_resume: false, tuple_binding: None });
+            ctx.ctl_handlers.push(CtlHandlerEntry { op_name, params: param_names, body, outer_k, auto_resume: false, tuple_binding: None, captured_env: Some(ctx.env.env_ref()) });
             let result = eval_stmts(&continuation, ctx);
             ctx.ctl_handlers.pop();
             return match result {
