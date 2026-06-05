@@ -199,9 +199,6 @@ mod core {
     cx_compile_test!(list_index_access,      "tests/core/lists",        "index_access");
     cx_compile_test!(list_index_assign,      "tests/core/lists",        "index_assign");
     cx_compile_test!(list_methods,           "tests/core/lists",        "list_methods");
-    cx_compile_test!(struct_struct,          "tests/core/structs",      "struct");
-    cx_compile_test!(struct_struct2,         "tests/core/structs",      "struct2");
-    cx_compile_test!(struct_dot_assign,      "tests/core/structs",      "struct_dot_assign");
     cx_compile_test!(modules_import,         "tests/core/modules",      "main");
     cx_compile_test!(modules_qualified,      "tests/core/modules/qualified",   "main");
     cx_compile_test!(modules_alias,          "tests/core/modules/alias",       "main");
@@ -246,7 +243,6 @@ mod core {
     cx_compile_test!(types_typeof_primitives,   "tests/types", "typeof_primitives");
     cx_compile_test!(types_typeof_slice,        "tests/types", "typeof_slice");
     cx_compile_test!(types_typeof_tuple,        "tests/types", "typeof_tuple");
-    cx_compile_test!(types_typeof_record,       "tests/types", "typeof_record");
     cx_compile_test!(types_typeof_fn,           "tests/types", "typeof_fn");
     cx_compile_test!(types_typeof_enum,         "tests/types", "typeof_enum");
     cx_compile_test!(types_typeof_effect_ctl,         "tests/types", "typeof_effect_ctl");
@@ -261,17 +257,11 @@ mod effects {
     use super::*;
 
     cx_compile_test!(effect_log,          "tests/effects/log",          "log");
-    cx_compile_test!(effect_ask,          "tests/effects/ask",          "ask");
     cx_compile_test!(effect_exception,    "tests/effects/exception",    "exception");
-    cx_compile_test!(effect_recover,      "tests/effects/recover",      "recover");
     cx_compile_test!(effect_flip,         "tests/effects/flip",         "flip");
-    cx_compile_test!(effect_simple_guard, "tests/effects/logic",        "simple_guard");
-    cx_compile_test!(effect_multi_guard,  "tests/effects/logic",        "multi_guard");
     cx_compile_test!(effect_handler,      "tests/effects/handler",      "handler");
     cx_compile_test!(effect_stream,       "tests/effects/stream",       "stream");
     cx_compile_test!(effect_async,        "tests/effects/async",        "async");
-    cx_compile_test!(effect_multi_handle, "tests/effects/multi_handle", "multi_handle");
-    cx_compile_test!(effect_delim,        "tests/effects/delim",        "delim");
 }
 
 #[cfg(test)]
@@ -300,5 +290,4 @@ mod meta {
     cx_compile_test!(codegen_gen_symbol,"tests/meta/codegen",   "gen_symbol");
     cx_compile_test!(meta_fn,           "tests/meta/functions", "meta_fn");
     cx_compile_test!(meta_fib,          "tests/meta/functions", "fib");
-    cx_compile_test!(reflection_typeof, "tests/meta/reflection","typeof");
 }

@@ -362,6 +362,7 @@ pub fn tokenize(s: &str) -> Result<Vec<Token>, ScanError> {
                 // Keywords
                 let tok_type = match name.as_str() {
                     "as" => TokenType::As,
+                    "class" => TokenType::Class,
                     "ctl" => TokenType::Ctl,
                     "defer" => TokenType::Defer,
                     "effect" => TokenType::Effect,
@@ -385,7 +386,6 @@ pub fn tokenize(s: &str) -> Result<Vec<Token>, ScanError> {
                     "resume" => TokenType::Resume,
                     "return" => TokenType::Return,
                     "run" => TokenType::Run,
-                    "struct" => TokenType::Struct,
                     "trait" => TokenType::Trait,
                     "true" => TokenType::True,
                     "typeof" => TokenType::Typeof,

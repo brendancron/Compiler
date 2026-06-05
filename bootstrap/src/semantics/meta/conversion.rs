@@ -117,7 +117,7 @@ fn scan_expr(ast: &RuntimeAst, expr_id: RuntimeNodeId, refs: &mut HashSet<String
             scan_expr(ast, object, refs, bound);
             for &a in &args { scan_expr(ast, a, refs, bound); }
         }
-        RuntimeExpr::StructLiteral { fields, .. } => {
+        RuntimeExpr::ClassLiteral { fields, .. } => {
             for (_, e) in &fields { scan_expr(ast, *e, refs, bound); }
         }
         RuntimeExpr::EnumConstructor { payload, .. } => {
@@ -196,7 +196,7 @@ pub fn convert_to_runtime(
     // Two-pass expr conversion: RunHandle/RunWith exprs need collect_free_vars which requires
     // all stmts to be in runtime first. First pass: non-handle exprs. Second pass
     // (after stmt conversion): RunHandle/RunWith exprs with correct free-var analysis.
-    let mut deferred_handles: Vec<(RuntimeNodeId, RuntimeNodeId, Vec<RuntimeNodeId>)> = Vec::new();
+    let mut deferred_handles: Vec<(RuntimeNodeId, RuntimeNodeId, Vec<RuntimeNodeId>, Option<(String, Vec<RuntimeNodeId>)>)> = Vec::new();
 
     for (id, expr) in &staged.exprs {
         match expr {
@@ -204,12 +204,24 @@ pub fn convert_to_runtime(
                 let all_ops: Vec<RuntimeNodeId> = effects.iter()
                     .flat_map(|(_, stmts)| stmts.iter().map(|&s| rid(s)))
                     .collect();
-                deferred_handles.push((rid(*id), rid(*body), all_ops));
+                deferred_handles.push((rid(*id), rid(*body), all_ops, None));
                 continue;
             }
-            StagedExpr::RunWith { body, handler_name } => {
+            StagedExpr::RunWith { body, handler_name, args } => {
                 let ops = handler_defs.get(handler_name).cloned().unwrap_or_default();
-                deferred_handles.push((rid(*id), rid(*body), ops));
+                // Convert each arg expr now (the outer loop would otherwise skip it).
+                for &a in args {
+                    if let Some(arg_expr) = staged.get_expr(a) {
+                        let runtime_expr = convert_expr(arg_expr, a)?;
+                        runtime.insert_expr(rid(a), runtime_expr);
+                    }
+                }
+                let ctor = if args.is_empty() {
+                    None
+                } else {
+                    Some((handler_name.clone(), args.iter().map(|&a| rid(a)).collect()))
+                };
+                deferred_handles.push((rid(*id), rid(*body), ops, ctor));
                 continue;
             }
             _ => {}
@@ -244,7 +256,14 @@ pub fn convert_to_runtime(
             StagedStmt::Import(s) => RuntimeStmt::Import(s),
             StagedStmt::Gen(g) => RuntimeStmt::Gen(expand_ids_runtime(&g, &expansion_map)),
             StagedStmt::Block(children) => {
-                RuntimeStmt::Block(expand_ids_runtime(&children, &expansion_map))
+                // Filter out HandlerDef children — they're skipped above and have no
+                // corresponding RuntimeStmt entry, so dangling references would crash
+                // Phase-2 type-checking. (Class-as-handler parser emits the HandlerDef
+                // inside the class block.)
+                let filtered: Vec<StagedNodeId> = children.into_iter()
+                    .filter(|c| !matches!(staged.get_stmt(*c), Some(StagedStmt::HandlerDef { .. })))
+                    .collect();
+                RuntimeStmt::Block(expand_ids_runtime(&filtered, &expansion_map))
             }
             StagedStmt::If { cond, body, else_branch } => RuntimeStmt::If {
                 cond: rid(cond),
@@ -260,12 +279,12 @@ pub fn convert_to_runtime(
                 iterable: rid(iterable),
                 body: rid(body),
             },
-            StagedStmt::StructDecl { name, fields } => {
+            StagedStmt::ClassDecl { name, fields } => {
                 let runtime_fields = fields
                     .into_iter()
                     .map(|f| RuntimeFieldDecl { field_name: f.field_name, type_name: f.type_name })
                     .collect();
-                RuntimeStmt::StructDecl { name, fields: runtime_fields }
+                RuntimeStmt::ClassDecl { name, fields: runtime_fields }
             }
             StagedStmt::EnumDecl { name, type_params, variants } => {
                 RuntimeStmt::EnumDecl { name, type_params, variants }
@@ -305,7 +324,7 @@ pub fn convert_to_runtime(
     }
 
     // Second pass: process deferred RunHandle/RunWith exprs.
-    for (id, body, handler_stmts) in deferred_handles {
+    for (id, body, handler_stmts, ctor) in deferred_handles {
         let fn_name = format!("__handle_{}", next_id);
         next_id += 1;
 
@@ -313,7 +332,26 @@ pub fn convert_to_runtime(
             Some(RuntimeStmt::Block(stmts)) => stmts.clone(),
             _ => vec![body],
         };
-        let full_stmts: Vec<RuntimeNodeId> = handler_stmts.iter().chain(body_inner.iter()).copied().collect();
+        // For class-handler form: `var this = ClassName(args);` so op bodies'
+        // own `var p = this.p;` prelude resolves.
+        let mut prelude: Vec<RuntimeNodeId> = Vec::new();
+        if let Some((class_name, arg_ids)) = ctor {
+            let call_id = RuntimeNodeId(next_id);
+            next_id += 1;
+            runtime.insert_expr(call_id, RuntimeExpr::Call { callee: class_name, args: arg_ids });
+            let bind_id = RuntimeNodeId(next_id);
+            next_id += 1;
+            runtime.insert_stmt(bind_id, RuntimeStmt::VarDecl {
+                name: "this".to_string(),
+                expr: call_id,
+            });
+            prelude.push(bind_id);
+        }
+        let full_stmts: Vec<RuntimeNodeId> = prelude.iter()
+            .chain(handler_stmts.iter())
+            .chain(body_inner.iter())
+            .copied()
+            .collect();
 
         let free_vars: Vec<String> = collect_free_vars(&runtime, &full_stmts)
             .into_iter()
@@ -373,7 +411,7 @@ fn convert_expr(expr: &StagedExpr, id: StagedNodeId) -> Result<RuntimeExpr, AstC
         StagedExpr::And(a, b) => RuntimeExpr::And(rid(a), rid(b)),
         StagedExpr::Or(a, b) => RuntimeExpr::Or(rid(a), rid(b)),
         StagedExpr::Not(a) => RuntimeExpr::Not(rid(a)),
-        StagedExpr::StructLiteral { type_name, fields } => RuntimeExpr::StructLiteral {
+        StagedExpr::ClassLiteral { type_name, fields } => RuntimeExpr::ClassLiteral {
             type_name,
             fields: fields.into_iter().map(|(k, v)| (k, rid(v))).collect(),
         },

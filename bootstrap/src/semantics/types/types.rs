@@ -48,8 +48,8 @@ pub enum Type {
     Func { params: Vec<Type>, ret: Box<Type>, effects: EffectRow },
     /// Anonymous record type (used internally by the type checker for unresolved struct fields).
     Record(BTreeMap<String, Type>),
-    /// Named struct type — preserves the struct name so codegen can emit `%StructName = type { ... }`.
-    Struct { name: String, fields: BTreeMap<String, Type> },
+    /// Named class type — preserves the class name so codegen can emit `%ClassName = type { ... }`.
+    Class { name: String, fields: BTreeMap<String, Type> },
     Tuple(Vec<Type>),
     Slice(Box<Type>),
     Enum(String),
@@ -122,7 +122,7 @@ impl fmt::Display for Type {
                 let fs: Vec<String> = fields.iter().map(|(k, v)| format!("{k}: {v}")).collect();
                 write!(f, "{{ {} }}", fs.join(", "))
             }
-            Type::Struct { name, fields } => {
+            Type::Class { name, fields } => {
                 let fs: Vec<String> = fields.iter().map(|(k, v)| format!("{k}: {v}")).collect();
                 write!(f, "{name} {{ {} }}", fs.join(", "))
             }

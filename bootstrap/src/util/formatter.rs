@@ -65,7 +65,7 @@ impl<'a> Formatter<'a> {
                 format!("{}fn {}({}) {}", self.pad(), name, params_str, body_str)
             }
 
-            RuntimeStmt::StructDecl { name, fields } => {
+            RuntimeStmt::ClassDecl { name, fields } => {
                 let indent = self.pad();
                 let fields_str = fields
                     .iter()
@@ -286,7 +286,7 @@ impl<'a> Formatter<'a> {
                 format!("[{}]", items_str)
             }
 
-            RuntimeExpr::StructLiteral { type_name, fields } => {
+            RuntimeExpr::ClassLiteral { type_name, fields } => {
                 let fields_str = fields
                     .iter()
                     .map(|(name, id)| format!("{}: {}", name, self.fmt_expr(*id)))

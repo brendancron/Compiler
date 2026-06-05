@@ -106,7 +106,7 @@ pub enum MetaExpr {
     String(String),
     Bool(bool),
 
-    StructLiteral {
+    ClassLiteral {
         type_name: String,
         fields: Vec<(String, MetaNodeId)>,
     },
@@ -189,10 +189,11 @@ pub enum MetaExpr {
         effects: Vec<(String, Vec<MetaNodeId>)>,
     },
 
-    /// `run { body } with handler_name`
+    /// `run { body } with handler_name` or `run { body } handle handler_name(args)`
     RunWith {
         body: MetaNodeId,
         handler_name: String,
+        args: Vec<MetaNodeId>,
     },
 }
 
@@ -247,7 +248,7 @@ pub enum MetaStmt {
         body: MetaNodeId,
     },
 
-    StructDecl {
+    ClassDecl {
         name: String,
         fields: Vec<MetaFieldDecl>,
     },
@@ -526,8 +527,8 @@ impl MetaAst {
                 ],
             ),
 
-            MetaStmt::StructDecl { name, fields } => (
-                "StructDecl".into(),
+            MetaStmt::ClassDecl { name, fields } => (
+                "ClassDecl".into(),
                 vec![
                     TreeNode::leaf(format!("Name({name})")),
                     TreeNode::node(
@@ -723,8 +724,8 @@ impl MetaAst {
 
             MetaExpr::Variable(name) => ("Var".into(), vec![TreeNode::leaf(name.clone())]),
 
-            MetaExpr::StructLiteral { type_name, fields } => (
-                format!("StructLiteral({type_name})"),
+            MetaExpr::ClassLiteral { type_name, fields } => (
+                format!("ClassLiteral({type_name})"),
                 fields
                     .iter()
                     .map(|(n, e)| TreeNode::node(n.clone(), vec![self.convert_expr(*e)]))
@@ -863,9 +864,11 @@ impl MetaAst {
                     .chain(effects.iter().flat_map(|(_, stmts)| stmts.iter().map(|&s| self.convert_stmt(s))))
                     .collect(),
             ),
-            MetaExpr::RunWith { body, handler_name } => (
+            MetaExpr::RunWith { body, handler_name, args } => (
                 format!("RunWith({})", handler_name),
-                vec![self.convert_stmt(*body)],
+                std::iter::once(self.convert_stmt(*body))
+                    .chain(args.iter().map(|&a| self.convert_expr(a)))
+                    .collect(),
             ),
         };
 

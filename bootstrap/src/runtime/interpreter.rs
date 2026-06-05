@@ -17,7 +17,7 @@ use std::rc::Rc;
 pub enum EvalError {
     ExprNotFound(RuntimeNodeId),
     StmtNotFound(RuntimeNodeId),
-    UnknownStructType(String),
+    UnknownClassType(String),
     UndefinedVariable(String),
     DivisionByZero,
     Internal(String),
@@ -140,7 +140,7 @@ fn eval_expr_inner<W: Write>(expr_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
         RuntimeExpr::String(s) => Ok(Value::String(s.clone())),
         RuntimeExpr::Bool(b) => Ok(Value::Bool(*b)),
 
-        RuntimeExpr::StructLiteral { type_name, fields } => {
+        RuntimeExpr::ClassLiteral { type_name, fields } => {
             let mut fs = vec![];
 
             for (field_name, expr) in fields {
@@ -148,7 +148,7 @@ fn eval_expr_inner<W: Write>(expr_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
                 fs.push((field_name.clone(), value));
             }
 
-            Ok(Value::Struct {
+            Ok(Value::Class {
                 type_name: type_name.clone(),
                 fields: Rc::new(RefCell::new(fs)),
             })
@@ -383,7 +383,7 @@ fn eval_expr_inner<W: Write>(expr_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
         RuntimeExpr::DotAccess { object, field } => {
             let obj = eval_expr(*object, ctx)?;
             match obj {
-                Value::Struct { fields, .. } => {
+                Value::Class { fields, .. } => {
                     let borrowed = fields.borrow();
                     borrowed.iter()
                         .find(|(name, _)| name == field)
@@ -505,7 +505,7 @@ fn eval_expr_inner<W: Write>(expr_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
             }
 
             // Trait method dispatch: struct value + impl_registry lookup
-            if let Value::Struct { ref type_name, .. } = obj {
+            if let Value::Class { ref type_name, .. } = obj {
                 if let Some(fn_name) = ctx.ast.impl_registry.get(&(type_name.clone(), method.clone())).cloned() {
                     let func = match ctx.env.get(&fn_name).map_err(EvalError::UndefinedVariable)? {
                         Value::Function(f) => f,
@@ -534,17 +534,28 @@ fn eval_expr_inner<W: Write>(expr_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
                 Value::Module(map) => map.get(method)
                     .cloned()
                     .ok_or_else(|| EvalError::UndefinedVariable(method.clone()))?,
-                _ => return Err(EvalError::NonFunctionCall),
+                // UFCS: `x.f(args)` desugars to `f(x, args)` if no impl method
+                // matched above and a free function `f` exists in the env.
+                _ => match ctx.env.get(method) {
+                    Ok(v) => v,
+                    Err(_) => return Err(EvalError::NonFunctionCall),
+                },
             };
             let func = match func {
                 Value::Function(f) => f,
                 _ => return Err(EvalError::NonFunctionCall),
             };
-            if func.params.len() != arg_vals.len() {
+            let is_module_call = matches!(&obj, Value::Module(_));
+            let call_args: Vec<Value> = if is_module_call {
+                arg_vals
+            } else {
+                std::iter::once(obj.clone()).chain(arg_vals).collect()
+            };
+            if func.params.len() != call_args.len() {
                 return Err(EvalError::ArgumentMismatch);
             }
             ctx.env.push_scope();
-            for (param, value) in func.params.iter().zip(arg_vals) {
+            for (param, value) in func.params.iter().zip(call_args) {
                 ctx.env.define(param.clone(), value);
             }
             let result = match eval_stmt(func.body, ctx)? {
@@ -903,7 +914,7 @@ fn eval_stmt_inner<W: Write>(stmt_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
             // Struct iteration: dispatch to the appropriate method.
             // ForVar::Name → use iter() with yield-based iteration.
             // ForVar::Tuple → use entries() which returns a list; fall through to enumerate.
-            if let Value::Struct { ref type_name, .. } = value {
+            if let Value::Class { ref type_name, .. } = value {
                 let method = match var {
                     ForVar::Name(_) => "iter",
                     ForVar::Tuple(_) => "entries",
@@ -989,7 +1000,7 @@ fn eval_stmt_inner<W: Write>(stmt_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
             let new_val = eval_expr(*expr, ctx)?;
             let obj = ctx.env.get(object).map_err(EvalError::UndefinedVariable)?;
             match obj {
-                Value::Struct { fields, .. } => {
+                Value::Class { fields, .. } => {
                     let mut borrow = fields.borrow_mut();
                     if let Some(entry) = borrow.iter_mut().find(|(n, _)| n == field) {
                         entry.1 = new_val;
@@ -1047,6 +1058,13 @@ fn eval_stmt_inner<W: Write>(stmt_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
         }
 
         RuntimeStmt::FnDecl { name, params, body, .. } => {
+            // Don't overwrite a Module binding (created by setup_modules from
+            // module_bindings) with a same-named FnDecl — protects e.g. the
+            // synthesized class constructor `fn Name(...)` from clobbering the
+            // imported `Name` namespace.
+            if matches!(ctx.env.get(name), Ok(Value::Module(_))) {
+                return Ok(ExecResult::Continue);
+            }
             let func = Rc::new(Function {
                 params: params.clone(),
                 body: *body,
@@ -1089,7 +1107,7 @@ fn eval_stmt_inner<W: Write>(stmt_id: RuntimeNodeId, ctx: &mut EvalCtx<W>) -> Re
         // Import stmts are handled before eval by setup_modules; nothing to do at runtime.
         RuntimeStmt::Import(_) => Ok(ExecResult::Continue),
 
-        RuntimeStmt::StructDecl { .. } => Ok(ExecResult::Continue),
+        RuntimeStmt::ClassDecl { .. } => Ok(ExecResult::Continue),
 
         RuntimeStmt::EnumDecl { .. } => Ok(ExecResult::Continue),
 
@@ -1218,6 +1236,12 @@ fn match_pattern<W: Write>(
 fn hoist_fndecls<W: Write>(stmts: &[RuntimeNodeId], ctx: &mut EvalCtx<W>) {
     for &stmt_id in stmts {
         if let Some(RuntimeStmt::FnDecl { name, params, body, .. }) = ctx.ast.get_stmt(stmt_id) {
+            // Don't overwrite a Module binding (created by setup_modules from
+            // module_bindings) — protects the synthesized class constructor
+            // `fn Name(...)` from clobbering an imported `Name` namespace.
+            if matches!(ctx.env.get(name), Ok(Value::Module(_))) {
+                continue;
+            }
             let func = Rc::new(Function {
                 params: params.clone(),
                 body: *body,
@@ -1239,7 +1263,7 @@ fn dispatch_binop<W: Write>(
     ctx: &mut EvalCtx<W>,
 ) -> Result<Value, EvalError> {
     let type_name = match &lhs {
-        Value::Struct { type_name, .. } => type_name.clone(),
+        Value::Class { type_name, .. } => type_name.clone(),
         _ => return Err(EvalError::UndefinedVariable(
             format!("no impl `{}` for this type", op_trait)
         )),

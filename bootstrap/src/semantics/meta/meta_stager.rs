@@ -63,7 +63,7 @@ pub fn process_expr(
             staged_ast.insert_expr(staged_expr_id, StagedExpr::Bool(*b));
         }
 
-        MetaExpr::StructLiteral { type_name, fields } => {
+        MetaExpr::ClassLiteral { type_name, fields } => {
             let mut out_fields = Vec::with_capacity(fields.len());
             for (name, field_expr_id) in fields {
                 let staged_field_id = process_expr(
@@ -71,7 +71,7 @@ pub fn process_expr(
                 )?;
                 out_fields.push((name.clone(), staged_field_id));
             }
-            staged_ast.insert_expr(staged_expr_id, StagedExpr::StructLiteral {
+            staged_ast.insert_expr(staged_expr_id, StagedExpr::ClassLiteral {
                 type_name: type_name.clone(),
                 fields: out_fields,
             });
@@ -288,11 +288,15 @@ pub fn process_expr(
             });
         }
 
-        MetaExpr::RunWith { body, handler_name } => {
+        MetaExpr::RunWith { body, handler_name, args } => {
             let body_id = process_stmt(meta_ast, *body, staged_ast, id_provider, dependency_set, staged_forest, type_env)?;
+            let arg_ids: Result<Vec<StagedNodeId>, _> = args.iter()
+                .map(|&a| process_expr(meta_ast, a, staged_ast, id_provider, dependency_set, staged_forest, type_env))
+                .collect();
             staged_ast.insert_expr(staged_expr_id, StagedExpr::RunWith {
                 body: body_id,
                 handler_name: handler_name.clone(),
+                args: arg_ids?,
             });
         }
     };
@@ -436,8 +440,8 @@ pub fn process_stmt(
             });
         }
 
-        MetaStmt::StructDecl { name, fields } => {
-            staged_ast.insert_stmt(staged_stmt_id, StagedStmt::StructDecl {
+        MetaStmt::ClassDecl { name, fields } => {
+            staged_ast.insert_stmt(staged_stmt_id, StagedStmt::ClassDecl {
                 name: name.clone(),
                 fields: fields.iter().map(|f| StagedFieldDecl {
                     field_name: f.field_name.clone(),
@@ -696,7 +700,7 @@ fn inject_before_returns(
 /// Stage all files from a multi-file compilation unit into a single StagedForest.
 ///
 /// - Entry file: all statements staged normally.
-/// - AutoScope / Explicit files: only FnDecl, StructDecl, and MetaBlock statements staged;
+/// - AutoScope / Explicit files: only FnDecl, ClassDecl, and MetaBlock statements staged;
 ///   their functions are merged into the root tree so they are available at runtime.
 ///
 /// Module bindings (namespace records for explicit imports) are stored in
@@ -728,7 +732,7 @@ pub fn stage_all_files(
             .filter_map(|&id| match file.ast.get_stmt(id) {
                 Some(MetaStmt::FnDecl { name, .. }) => Some(name.clone()),
                 Some(MetaStmt::MetaFnDecl { name, .. }) => Some(name.clone()),
-                Some(MetaStmt::StructDecl { name, .. }) => Some(name.clone()),
+                Some(MetaStmt::ClassDecl { name, .. }) => Some(name.clone()),
                 _ => None,
             })
             .collect();
@@ -755,7 +759,8 @@ pub fn stage_all_files(
             ) {
                 Ok(staged_id) => {
                     sem_root_stmts.push(staged_id);
-                    // Only FnDecls go into namespace exports (structs/effects have no Value).
+                    // Recurse into Block (class decls expand to a Block of stmts) to find
+                    // FnDecls and ImplDecls so stdlib classes register their mangled methods.
                     match file.ast.get_stmt(stmt_id) {
                         Some(MetaStmt::FnDecl { name, .. })
                         | Some(MetaStmt::MetaFnDecl { name, .. }) => {
@@ -875,12 +880,14 @@ fn is_exportable_stmt(ast: &MetaAst, stmt_id: MetaNodeId) -> bool {
         ast.get_stmt(stmt_id),
         Some(MetaStmt::FnDecl { .. })
             | Some(MetaStmt::MetaFnDecl { .. })
-            | Some(MetaStmt::StructDecl { .. })
+            | Some(MetaStmt::ClassDecl { .. })
             | Some(MetaStmt::MetaBlock(_))
             | Some(MetaStmt::TraitDecl { .. })
             | Some(MetaStmt::ImplDecl { .. })
             | Some(MetaStmt::EffectDecl { .. })
+            | Some(MetaStmt::HandlerDef { .. })
             | Some(MetaStmt::EnumDecl { .. })
+            | Some(MetaStmt::Block(_))
     )
 }
 

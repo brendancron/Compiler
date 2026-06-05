@@ -44,6 +44,7 @@ pub enum TokenType {
     // Keywords
     And,
     As,
+    Class,
     Ctl,
     Defer,
     Effect,
@@ -68,7 +69,6 @@ pub enum TokenType {
     Resume,
     Return,
     Run,
-    Struct,
     Trait,
     True,
     Typeof,

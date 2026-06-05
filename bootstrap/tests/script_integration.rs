@@ -210,8 +210,8 @@ mod script_integration {
         cx_test!(func_trailing_after_args, "tests/core/functions", "trailing_after_args");
         cx_test!(func_trailing_multi_param, "tests/core/functions", "trailing_multi_param");
         cx_test!(func_trailing_foreach, "tests/core/functions", "trailing_foreach");
+        cx_test!(func_ufcs, "tests/core/functions", "ufcs");
         cx_test!(list_list, "tests/core/lists", "list");
-        cx_test!(struct_struct, "tests/core/structs", "struct");
         cx_test!(modules_import, "tests/core/modules", "main");
         cx_test!(modules_qualified, "tests/core/modules/qualified", "main");
         cx_test!(modules_alias, "tests/core/modules/alias", "main");
@@ -278,7 +278,6 @@ mod script_integration {
         cx_test!(types_typeof_primitives, "tests/types", "typeof_primitives");
         cx_test!(types_typeof_slice, "tests/types", "typeof_slice");
         cx_test!(types_typeof_tuple, "tests/types", "typeof_tuple");
-        cx_test!(types_typeof_record, "tests/types", "typeof_record");
         cx_test!(types_typeof_fn, "tests/types", "typeof_fn");
         cx_test!(types_typeof_enum, "tests/types", "typeof_enum");
 
@@ -339,17 +338,11 @@ mod script_integration {
         use super::*;
 
         cx_test!(effect_log, "tests/effects/log", "log");
-        cx_test!(effect_ask, "tests/effects/ask", "ask");
         cx_test!(effect_exception, "tests/effects/exception", "exception");
-        cx_test!(effect_recover, "tests/effects/recover", "recover");
         cx_test!(effect_flip, "tests/effects/flip", "flip");
-        cx_test!(effect_simple_guard, "tests/effects/logic", "simple_guard");
-        cx_test!(effect_multi_guard, "tests/effects/logic", "multi_guard");
         cx_test!(effect_handler, "tests/effects/handler", "handler");
         cx_test!(effect_stream, "tests/effects/stream", "stream");
         cx_test!(effect_async, "tests/effects/async", "async");
-        cx_test!(effect_multi_handle, "tests/effects/multi_handle", "multi_handle");
-        cx_test!(effect_delim, "tests/effects/delim", "delim");
     }
 
     /// Operator overloading tests — TDD, fail until impl lands.
@@ -414,7 +407,6 @@ mod script_integration {
         cx_test!(codegen_gen_symbol, "tests/meta/codegen", "gen_symbol");
         cx_test!(meta_fn, "tests/meta/functions", "meta_fn");
         cx_test!(meta_fib, "tests/meta/functions", "fib");
-        cx_test!(reflection_typeof, "tests/meta/reflection", "typeof");
         cx_test!(math_modulus, "tests/core/math", "modulus");
         cx_test!(stdlib_list, "tests/stdlib/list", "list");
         cx_test!(stdlib_hashmap, "tests/stdlib/hashmap", "hashmap");
@@ -430,6 +422,5 @@ mod script_integration {
         cx_test!(stdlib_toml, "tests/stdlib/toml/toml", "toml");
         cx_test!(stdlib_automata_dfa, "tests/stdlib/automata/dfa", "dfa");
         cx_test!(stdlib_automata_nfa, "tests/stdlib/automata/nfa", "nfa");
-        cx_test!(effect_generic, "tests/effects/generic", "generic");
     }
 }

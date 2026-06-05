@@ -15,10 +15,10 @@ fn path_stem(path: &str) -> String {
 
 fn hint_to_type(name: &str) -> Type {
     match name {
-        "int" | "i64" => Type::Primitive(PrimitiveType::Int),
-        "string" | "str" => Type::Primitive(PrimitiveType::String),
-        "bool" => Type::Primitive(PrimitiveType::Bool),
-        "unit" => Type::Primitive(PrimitiveType::Unit),
+        "int" | "Int" | "i64" => Type::Primitive(PrimitiveType::Int),
+        "string" | "String" | "str" => Type::Primitive(PrimitiveType::String),
+        "bool" | "Bool" => Type::Primitive(PrimitiveType::Bool),
+        "unit" | "Unit" => Type::Primitive(PrimitiveType::Unit),
         _ => Type::Enum(name.to_string()),
     }
 }
@@ -30,10 +30,10 @@ fn meta_type_expr_to_type(te: &MetaTypeExpr, local_map: &HashMap<String, Type>, 
                 return ty.clone();
             }
             match n.as_str() {
-                "int" => Type::Primitive(crate::semantics::types::types::PrimitiveType::Int),
-                "string" => Type::Primitive(crate::semantics::types::types::PrimitiveType::String),
-                "bool" => Type::Primitive(crate::semantics::types::types::PrimitiveType::Bool),
-                "unit" => Type::Primitive(crate::semantics::types::types::PrimitiveType::Unit),
+                "int" | "Int" => Type::Primitive(crate::semantics::types::types::PrimitiveType::Int),
+                "string" | "String" => Type::Primitive(crate::semantics::types::types::PrimitiveType::String),
+                "bool" | "Bool" => Type::Primitive(crate::semantics::types::types::PrimitiveType::Bool),
+                "unit" | "Unit" => Type::Primitive(crate::semantics::types::types::PrimitiveType::Unit),
                 _ => Type::Enum(n.clone()),
             }
         }
@@ -242,6 +242,10 @@ fn hoist_fn_types(
                     env.bind(&op.name, generalize(env, fn_type));
                 }
             }
+            Some(RuntimeStmt::Block(children)) => {
+                let children = children.clone();
+                hoist_fn_types(ast, &children, env, subst);
+            }
             _ => {}
         }
     }
@@ -261,7 +265,16 @@ fn infer_expr(
         RuntimeExpr::String(_) => string_type(),
 
         RuntimeExpr::Variable(ref name) => {
-            env.lookup(name).ok_or_else(|| TypeError::unbound_var(name.clone()))?
+            // `this` may appear in method bodies before its binding site is
+            // visible to Phase-2 (the conversion pass injects `var this = ...`
+            // into handler-spliced blocks but impl-method bodies bind it as a
+            // parameter; both arrive here at runtime). Treat unbound `this` as
+            // a polymorphic var rather than an error.
+            if name == "this" {
+                Type::Var(env.fresh())
+            } else {
+                env.lookup(name).ok_or_else(|| TypeError::unbound_var(name.clone()))?
+            }
         }
 
         RuntimeExpr::Add(a, b) => {
@@ -277,7 +290,7 @@ fn infer_expr(
             let ta = infer_expr(ast, a, env, subst, type_map)?;
             let tb = infer_expr(ast, b, env, subst, type_map)?;
             match (ta.apply(subst), tb.apply(subst)) {
-                (Type::Struct { .. }, _) | (_, Type::Struct { .. }) => {
+                (Type::Class { .. }, _) | (_, Type::Class { .. }) => {
                     // Struct operand → operator dispatch (e.g. `impl Mul for Vec2`).
                     // The dispatch function is resolved by the interpreter/codegen at
                     // call time; leave the result as a fresh type var.
@@ -385,19 +398,19 @@ fn infer_expr(
             ret_tv.apply(subst)
         }
 
-        RuntimeExpr::StructLiteral { ref type_name, ref fields } => {
+        RuntimeExpr::ClassLiteral { ref type_name, ref fields } => {
             let mut field_types = std::collections::BTreeMap::new();
             for (name, field_expr_id) in fields {
                 let ty = infer_expr(ast, *field_expr_id, env, subst, type_map)?;
                 field_types.insert(name.clone(), ty);
             }
-            Type::Struct { name: type_name.clone(), fields: field_types }
+            Type::Class { name: type_name.clone(), fields: field_types }
         }
 
         RuntimeExpr::DotAccess { object, field } => {
             let obj_ty = infer_expr(ast, object, env, subst, type_map)?;
             match obj_ty.apply(subst) {
-                Type::Struct { fields, .. } => {
+                Type::Class { fields, .. } => {
                     // Object type is known — return the field's concrete type.
                     fields.get(field.as_str()).cloned().unwrap_or_else(|| Type::Var(env.fresh()))
                 }
@@ -699,8 +712,8 @@ fn infer_stmt(
             }
         }
 
-        // StructDecl doesn't have checkable expressions.
-        RuntimeStmt::StructDecl { .. } => {}
+        // ClassDecl doesn't have checkable expressions.
+        RuntimeStmt::ClassDecl { .. } => {}
 
         RuntimeStmt::EnumDecl { name, variants, .. } => {
             env.register_enum(&name, variants.clone());

@@ -10,10 +10,10 @@ use std::collections::{BTreeSet, HashMap};
 
 fn resolve_annotation(s: &str) -> Option<Type> {
     match s {
-        "int" => Some(int_type()),
-        "bool" => Some(bool_type()),
-        "string" => Some(string_type()),
-        "unit" => Some(unit_type()),
+        "int" | "Int" => Some(int_type()),
+        "bool" | "Bool" => Some(bool_type()),
+        "string" | "String" => Some(string_type()),
+        "unit" | "Unit" => Some(unit_type()),
         _ => None,
     }
 }
@@ -25,10 +25,10 @@ fn meta_type_expr_to_type(te: &MetaTypeExpr, local_map: &HashMap<String, Type>, 
                 return ty.clone();
             }
             match n.as_str() {
-                "int" => int_type(),
-                "string" => string_type(),
-                "bool" => bool_type(),
-                "unit" => unit_type(),
+                "int" | "Int" => int_type(),
+                "string" | "String" => string_type(),
+                "bool" | "Bool" => bool_type(),
+                "unit" | "Unit" => unit_type(),
                 _ => Type::Enum(n.clone()),
             }
         }
@@ -173,7 +173,7 @@ fn collect_expr_effects(
             collect_expr_effects(ast, *object, ctl_ops, env, out);
             for &a in args { collect_expr_effects(ast, a, ctl_ops, env, out); }
         }
-        MetaExpr::StructLiteral { fields, .. } => {
+        MetaExpr::ClassLiteral { fields, .. } => {
             for (_, e) in fields { collect_expr_effects(ast, *e, ctl_ops, env, out); }
         }
         MetaExpr::EnumConstructor { payload, .. } => {
@@ -274,7 +274,7 @@ fn infer_expr_impl(
             // If LHS is a struct, the op may be dispatched to a user impl — don't
             // constrain operands to int; return a fresh var for the result.
             // Otherwise require both to be int for standard arithmetic.
-            if matches!(ta.apply(subst), Type::Struct { .. }) {
+            if matches!(ta.apply(subst), Type::Class { .. }) {
                 Type::Var(env.fresh())
             } else {
                 unify(&ta, &int_type(), subst)?;
@@ -362,13 +362,17 @@ fn infer_expr_impl(
             ret_tv.apply(subst)
         }
 
-        MetaExpr::StructLiteral { fields, .. } => {
+        MetaExpr::ClassLiteral { type_name, fields } => {
             let mut field_types = std::collections::BTreeMap::new();
             for (field_name, expr_id) in fields {
                 let t = infer_expr(ast, *expr_id, env, subst, table)?;
                 field_types.insert(field_name.clone(), t);
             }
-            Type::Record(field_types)
+            if type_name.is_empty() {
+                Type::Record(field_types)
+            } else {
+                Type::Class { name: type_name.clone(), fields: field_types }
+            }
         }
 
         MetaExpr::EnumConstructor { enum_name, variant, payload } => {
@@ -466,7 +470,7 @@ fn infer_expr_impl(
             ret_tv
         }
 
-        MetaExpr::RunWith { body, handler_name } => {
+        MetaExpr::RunWith { body, handler_name, args: _ } => {
             let ret_tv = Type::Var(env.fresh());
             let mut body_ctx = TypeCheckCtx::new();
             body_ctx.return_type = Some(ret_tv.clone());
@@ -821,7 +825,7 @@ fn infer_stmt_impl(
             unit_type()
         }
 
-        MetaStmt::StructDecl { .. }
+        MetaStmt::ClassDecl { .. }
         | MetaStmt::Import(_)
         | MetaStmt::MetaBlock(_)
         | MetaStmt::Gen(_)

@@ -130,8 +130,8 @@ impl RuntimeAst {
                 },
                 RuntimeExpr::Unit => RuntimeExpr::Unit,
                 RuntimeExpr::ResumeExpr(opt) => RuntimeExpr::ResumeExpr(opt.map(|id| remap_expr(id))),
-                RuntimeExpr::StructLiteral { type_name, fields } => {
-                    RuntimeExpr::StructLiteral {
+                RuntimeExpr::ClassLiteral { type_name, fields } => {
+                    RuntimeExpr::ClassLiteral {
                         type_name: type_name.clone(),
                         fields: fields
                             .iter()
@@ -207,7 +207,7 @@ impl RuntimeAst {
                     type_params: type_params.clone(),
                     body: remap_stmt(*body),
                 },
-                RuntimeStmt::StructDecl { name, fields } => RuntimeStmt::StructDecl {
+                RuntimeStmt::ClassDecl { name, fields } => RuntimeStmt::ClassDecl {
                     name: name.clone(),
                     fields: fields.clone(),
                 },
@@ -321,7 +321,7 @@ pub enum RuntimeExpr {
     String(String),
     Bool(bool),
 
-    StructLiteral {
+    ClassLiteral {
         type_name: String,
         fields: Vec<(String, RuntimeNodeId)>,
     },
@@ -425,7 +425,7 @@ pub enum RuntimeStmt {
         body: RuntimeNodeId,
     },
 
-    StructDecl {
+    ClassDecl {
         name: String,
         fields: Vec<RuntimeFieldDecl>,
     },
@@ -559,8 +559,8 @@ impl RuntimeAst {
                 ],
             ),
 
-            RuntimeStmt::StructDecl { name, fields } => (
-                "StructDecl".into(),
+            RuntimeStmt::ClassDecl { name, fields } => (
+                "ClassDecl".into(),
                 vec![
                     TreeNode::leaf(format!("Name({name})")),
                     TreeNode::node(
@@ -675,8 +675,8 @@ impl RuntimeAst {
             RuntimeExpr::Bool(b) => ("Bool".into(), vec![TreeNode::leaf(b.to_string())]),
             RuntimeExpr::Variable(name) => ("Var".into(), vec![TreeNode::leaf(name.clone())]),
 
-            RuntimeExpr::StructLiteral { type_name, fields } => (
-                format!("StructLiteral({type_name})"),
+            RuntimeExpr::ClassLiteral { type_name, fields } => (
+                format!("ClassLiteral({type_name})"),
                 fields
                     .iter()
                     .map(|(n, e)| TreeNode::node(n.clone(), vec![self.convert_expr(*e)]))

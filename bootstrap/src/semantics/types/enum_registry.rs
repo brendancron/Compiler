@@ -90,10 +90,10 @@ fn resolve_payload(payload: &VariantPayload) -> ResolvedPayload {
 /// Primitives map to their concrete types; everything else becomes `Type::Enum`.
 fn resolve_type_name(name: &str) -> Type {
     match name {
-        "int"    => int_type(),
-        "string" => string_type(),
-        "bool"   => bool_type(),
-        "unit"   => unit_type(),
+        "int"  | "Int"    => int_type(),
+        "string" | "String" => string_type(),
+        "bool" | "Bool"   => bool_type(),
+        "unit" | "Unit"   => unit_type(),
         other if other.starts_with('[') && other.ends_with(']') => {
             let inner = &other[1..other.len() - 1];
             Type::Slice(Box::new(resolve_type_name(inner)))

@@ -34,7 +34,7 @@ impl ApplySubst for Type {
             Type::Record(fields) => Type::Record(
                 fields.iter().map(|(k, v)| (k.clone(), v.apply(subst))).collect()
             ),
-            Type::Struct { name, fields } => Type::Struct {
+            Type::Class { name, fields } => Type::Class {
                 name: name.clone(),
                 fields: fields.iter().map(|(k, v)| (k.clone(), v.apply(subst))).collect(),
             },
@@ -107,7 +107,7 @@ pub fn unify(a: &Type, b: &Type, subst: &mut TypeSubst) -> Result<(), TypeError>
             Ok(())
         }
 
-        (Type::Struct { name: na, fields: fa }, Type::Struct { name: nb, fields: fb }) => {
+        (Type::Class { name: na, fields: fa }, Type::Class { name: nb, fields: fb }) => {
             if na != nb {
                 return Err(TypeError::type_mismatch(a, b));
             }
@@ -120,6 +120,24 @@ pub fn unify(a: &Type, b: &Type, subst: &mut TypeSubst) -> Result<(), TypeError>
             }
             Ok(())
         }
+
+        // Phase-1 returns Type::Record for class literals (no name in scope).
+        // Phase-2 returns Type::Class. Accept structural match in either direction
+        // so a class instance unifies with the anonymous record shape.
+        (Type::Class { fields: fc, .. }, Type::Record(fr))
+        | (Type::Record(fr), Type::Class { fields: fc, .. }) => {
+            for (k, tr) in fr.iter() {
+                let tc = fc.get(k).ok_or_else(|| TypeError::type_mismatch(a.clone(), b.clone()))?;
+                unify(tr, tc, subst)?;
+            }
+            Ok(())
+        }
+
+        // Class names also unify with bare nominal Enum-shaped type expressions
+        // (which is how class names in annotations like `loop: EventLoop` decay
+        // when no class registry is consulted).
+        (Type::Class { name: na, .. }, Type::Enum(nb))
+        | (Type::Enum(nb), Type::Class { name: na, .. }) if na == nb => Ok(()),
 
         (Type::Slice(ea), Type::Slice(eb)) => unify(ea, eb, subst),
 

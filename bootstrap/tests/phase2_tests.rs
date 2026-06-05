@@ -4,7 +4,7 @@
 /// Phases:
 ///   2a — verify_no_type_vars: assert no Type::Var survives Phase 2 type checking
 ///   2b — EnumRegistry: tag integers + resolved payload types for codegen
-///   2c — Type::Struct: named struct type preserving the struct name in the TypeTable
+///   2c — Type::Class: named struct type preserving the struct name in the TypeTable
 ///   2e — ForEach variable type: loop variable type recorded in the TypeTable
 ///
 /// Phase 2d (string slice range) is tested as a script integration test.
@@ -227,7 +227,7 @@ mod phase2b {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 2c — Named struct types (Type::Struct)
+// Phase 2c — Named struct types (Type::Class)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -247,7 +247,7 @@ mod phase2c {
         }
 
         let lit_id = alloc();
-        ast.insert_expr(lit_id, RuntimeExpr::StructLiteral {
+        ast.insert_expr(lit_id, RuntimeExpr::ClassLiteral {
             type_name: struct_name.into(),
             fields: field_ids,
         });
@@ -268,14 +268,14 @@ mod phase2c {
         let mut env = TypeEnv::new();
         let type_map = type_check_runtime(&ast, &mut env, &mut Vec::new()).unwrap();
         let ty = type_map.get(&lit_id).expect("no type for struct literal");
-        // Must be Type::Struct, not Type::Record or Type::Var
+        // Must be Type::Class, not Type::Record or Type::Var
         match ty {
-            Type::Struct { name, fields } => {
+            Type::Class { name, fields } => {
                 assert_eq!(name, "Point");
                 assert_eq!(fields.get("x"), Some(&int_type()));
                 assert_eq!(fields.get("y"), Some(&int_type()));
             }
-            other => panic!("expected Type::Struct, got {:?}", other),
+            other => panic!("expected Type::Class, got {:?}", other),
         }
     }
 
@@ -287,11 +287,11 @@ mod phase2c {
         ]);
         let mut env = TypeEnv::new();
         type_check_runtime(&ast, &mut env, &mut Vec::new()).unwrap();
-        // The variable "p" should have type Type::Struct { name: "Vec2", ... }
+        // The variable "p" should have type Type::Class { name: "Vec2", ... }
         let ty = env.lookup("p").expect("p not in env");
         match ty {
-            Type::Struct { name, .. } => assert_eq!(name, "Vec2"),
-            other => panic!("expected Type::Struct, got {:?}", other),
+            Type::Class { name, .. } => assert_eq!(name, "Vec2"),
+            other => panic!("expected Type::Class, got {:?}", other),
         }
     }
 
@@ -301,8 +301,8 @@ mod phase2c {
         use std::collections::BTreeMap;
         let mut fields = BTreeMap::new();
         fields.insert("x".into(), int_type());
-        let a = Type::Struct { name: "Point".into(), fields: fields.clone() };
-        let b = Type::Struct { name: "Point".into(), fields };
+        let a = Type::Class { name: "Point".into(), fields: fields.clone() };
+        let b = Type::Class { name: "Point".into(), fields };
         let mut subst = TypeSubst::new();
         assert!(unify(&a, &b, &mut subst).is_ok());
     }
@@ -313,8 +313,8 @@ mod phase2c {
         use std::collections::BTreeMap;
         let mut fields = BTreeMap::new();
         fields.insert("x".into(), int_type());
-        let a = Type::Struct { name: "Point".into(), fields: fields.clone() };
-        let b = Type::Struct { name: "Vec2".into(),  fields };
+        let a = Type::Class { name: "Point".into(), fields: fields.clone() };
+        let b = Type::Class { name: "Vec2".into(),  fields };
         let mut subst = TypeSubst::new();
         assert!(unify(&a, &b, &mut subst).is_err());
     }

@@ -185,7 +185,7 @@ fn collect_fn_op_calls_expr(ast: &RuntimeAst, expr_id: RuntimeNodeId, fn_ops: &H
             v.extend(args.iter().copied());
             v
         }
-        Some(RuntimeExpr::StructLiteral { fields, .. }) => fields.iter().map(|(_, id)| *id).collect(),
+        Some(RuntimeExpr::ClassLiteral { fields, .. }) => fields.iter().map(|(_, id)| *id).collect(),
         _ => return,
     };
     for c in children { collect_fn_op_calls_expr(ast, c, fn_ops, out); }
@@ -340,7 +340,7 @@ fn collect_callees_expr(ast: &RuntimeAst, expr_id: RuntimeNodeId, out: &mut Hash
             v.extend(args.iter().copied());
             v
         }
-        Some(RuntimeExpr::StructLiteral { fields, .. }) => fields.iter().map(|(_, id)| *id).collect(),
+        Some(RuntimeExpr::ClassLiteral { fields, .. }) => fields.iter().map(|(_, id)| *id).collect(),
         _ => return,
     };
     for c in children { collect_callees_expr(ast, c, out); }

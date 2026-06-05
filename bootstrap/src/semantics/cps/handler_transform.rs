@@ -303,11 +303,11 @@ fn rewrite_expr(
             let new_elems = elems.iter().map(|&e| rewrite_expr(ast, e, info, scope)).collect();
             fresh_expr(ast, RuntimeExpr::Tuple(new_elems))
         }
-        Some(RuntimeExpr::StructLiteral { type_name, fields }) => {
+        Some(RuntimeExpr::ClassLiteral { type_name, fields }) => {
             let new_fields = fields.iter()
                 .map(|(k, v)| (k.clone(), rewrite_expr(ast, *v, info, scope)))
                 .collect();
-            fresh_expr(ast, RuntimeExpr::StructLiteral { type_name, fields: new_fields })
+            fresh_expr(ast, RuntimeExpr::ClassLiteral { type_name, fields: new_fields })
         }
         Some(RuntimeExpr::DotCall { object, method, args }) => {
             let new_obj = rewrite_expr(ast, object, info, scope);

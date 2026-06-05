@@ -31,7 +31,7 @@ fn collect_top_level_decl(ast: &StagedAst, stmt_id: StagedNodeId, out: &mut Hash
     match stmt {
         StagedStmt::VarDecl { name, .. } => { out.insert(name.clone()); }
         StagedStmt::FnDecl { name, .. } => { out.insert(name.clone()); }
-        StagedStmt::StructDecl { name, .. } => { out.insert(name.clone()); }
+        StagedStmt::ClassDecl { name, .. } => { out.insert(name.clone()); }
         // Gen blocks export the declarations they contain
         StagedStmt::Gen(stmts) => {
             for &child_id in stmts {
@@ -78,7 +78,7 @@ fn collect_stmt_symbols(
             for p in params { declares.insert(p.clone()); }
             collect_stmt_symbols(ast, *body, declares, uses, in_gen);
         }
-        StagedStmt::StructDecl { name, .. } => { declares.insert(name.clone()); }
+        StagedStmt::ClassDecl { name, .. } => { declares.insert(name.clone()); }
         StagedStmt::ForEach { var, iterable, body } => {
             match var {
                 ForVar::Name(n) => { declares.insert(n.clone()); }
@@ -167,7 +167,7 @@ fn collect_expr_symbols(
                 collect_expr_symbols(ast, item, declares, uses, in_gen);
             }
         }
-        StagedExpr::StructLiteral { fields, .. } => {
+        StagedExpr::ClassLiteral { fields, .. } => {
             for (_, field_expr) in fields {
                 collect_expr_symbols(ast, *field_expr, declares, uses, in_gen);
             }

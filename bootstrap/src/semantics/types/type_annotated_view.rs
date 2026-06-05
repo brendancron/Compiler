@@ -77,8 +77,8 @@ impl<'a> TypeAnnotatedView<'a> {
                 ],
             ),
 
-            MetaStmt::StructDecl { name, fields } => (
-                "StructDecl".into(),
+            MetaStmt::ClassDecl { name, fields } => (
+                "ClassDecl".into(),
                 vec![
                     TreeNode::leaf(format!("Name({name})")),
                     TreeNode::node(
@@ -222,8 +222,8 @@ impl<'a> TypeAnnotatedView<'a> {
 
             MetaExpr::Variable(name) => ("Var".into(), vec![TreeNode::leaf(name.clone())]),
 
-            MetaExpr::StructLiteral { type_name, fields } => (
-                format!("StructLiteral({type_name})"),
+            MetaExpr::ClassLiteral { type_name, fields } => (
+                format!("ClassLiteral({type_name})"),
                 fields
                     .iter()
                     .map(|(n, e)| TreeNode::node(n.clone(), vec![self.convert_expr(*e)]))
@@ -358,7 +358,7 @@ impl<'a> TypeAnnotatedView<'a> {
                     .chain(effects.iter().flat_map(|(_, stmts)| stmts.iter().map(|&s| self.convert_stmt(s))))
                     .collect(),
             ),
-            MetaExpr::RunWith { body, handler_name } => (
+            MetaExpr::RunWith { body, handler_name, args: _ } => (
                 format!("RunWith({})", handler_name),
                 vec![self.convert_stmt(*body)],
             ),

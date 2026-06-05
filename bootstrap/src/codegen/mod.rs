@@ -6,8 +6,8 @@
 //!   - `[T]` params passed by pointer (same as struct params)
 //!
 //! Adds over M1 (M2):
-//!   - `StructDecl` → named LLVM struct types (`%Name = type { i64, ... }`)
-//!   - `StructLiteral` → `malloc` + field `store`s
+//!   - `ClassDecl` → named LLVM struct types (`%Name = type { i64, ... }`)
+//!   - `ClassLiteral` → `malloc` + field `store`s
 //!   - `DotAccess` → `getelementptr` + `load`
 //!   - `free(x)` → `call void @free(ptr x)`
 //!   - Struct params passed by pointer; type-aware locals (Int vs StructPtr)
@@ -76,10 +76,10 @@ impl std::fmt::Display for CodegenError {
 
 // ── Struct registry ───────────────────────────────────────────────────────────
 
-struct StructMeta<'ctx> {
+struct ClassMeta<'ctx> {
     llvm_ty: StructType<'ctx>,
     field_names: Vec<String>,
-    /// Type annotation strings from the StructDecl (e.g. "string", "int", "Circle").
+    /// Type annotation strings from the ClassDecl (e.g. "string", "int", "Circle").
     /// Used to determine whether a loaded field value is a ptr (string/struct/slice) or int.
     field_type_names: Vec<String>,
 }
@@ -173,7 +173,7 @@ pub fn compile(
                         |RuntimeExpr::Lte(a,b)|RuntimeExpr::Gte(a,b)|RuntimeExpr::And(a,b)
                         |RuntimeExpr::Or(a,b))                     => { stk.push(*a); stk.push(*b); }
                     Some(RuntimeExpr::Not(a)|RuntimeExpr::ResumeExpr(Some(a))) => stk.push(*a),
-                    Some(RuntimeExpr::StructLiteral { fields, .. })=> stk.extend(fields.iter().map(|(_, id)| *id)),
+                    Some(RuntimeExpr::ClassLiteral { fields, .. })=> stk.extend(fields.iter().map(|(_, id)| *id)),
                     Some(RuntimeExpr::SliceRange { object, start, end }) => {
                         stk.push(*object);
                         if let Some(s) = start { stk.push(*s); }
@@ -306,8 +306,8 @@ pub fn compile(
     // Scan only user-reachable nodes to avoid triggering on stdlib-only constructs.
     let user_exprs_iter = || ast.exprs.iter().filter(|(id, _)| user_expr_ids.contains(id)).map(|(_, e)| e);
     let user_stmts_iter = || ast.stmts.iter().filter(|(id, _)| user_stmt_ids.contains(id)).map(|(_, s)| s);
-    // StructDecl alone doesn't require malloc — only StructLiteral (heap allocation) does.
-    let has_structs   = user_exprs_iter().any(|e| matches!(e, RuntimeExpr::StructLiteral { .. }));
+    // ClassDecl alone doesn't require malloc — only ClassLiteral (heap allocation) does.
+    let has_structs   = user_exprs_iter().any(|e| matches!(e, RuntimeExpr::ClassLiteral { .. }));
     let has_slices    = user_exprs_iter().any(|e| matches!(e, RuntimeExpr::List(_)))
         || user_exprs_iter().any(|e| matches!(e, RuntimeExpr::DotCall { method, .. }
             if matches!(method.as_str(), "split" | "chars")));
@@ -361,7 +361,7 @@ pub fn compile(
     // Detect print(struct_var) — needs bare format strings for multi-field formatting.
     let has_struct_print = user_stmts_iter().any(|s| {
         if let RuntimeStmt::Print(inner) = s {
-            matches!(type_map.get(inner), Some(Type::Struct { .. }))
+            matches!(type_map.get(inner), Some(Type::Class { .. }))
         } else { false }
     });
     let needs_heap    = has_structs || has_slices || has_closures || has_enums || has_string_ops || has_tuples;
@@ -605,7 +605,7 @@ pub fn compile(
     for (name, expr_id) in top_level_var_decls.iter().filter(|_| needs_global_vars) {
         let kind = match type_map.get(expr_id) {
             Some(Type::Primitive(PrimitiveType::String)) => LocalKind::Str,
-            Some(Type::Struct { name: sname, .. }) => LocalKind::StructPtr(sname.clone()),
+            Some(Type::Class { name: sname, .. }) => LocalKind::StructPtr(sname.clone()),
             Some(Type::Slice(_)) => LocalKind::Slice,
             Some(Type::Func { .. }) => LocalKind::Closure,
             Some(Type::Enum(_)) | Some(Type::App(..)) => LocalKind::EnumPtr,
@@ -712,30 +712,30 @@ pub fn compile(
     let enum_registry = EnumRegistry::build(ast);
 
     // ── Pass 0b: build struct type registry ───────────────────────────────────
-    // Collect from StructDecl stmts first.
-    let mut struct_decl_map: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    // Collect from ClassDecl stmts first.
+    let mut class_decl_map: HashMap<String, Vec<(String, String)>> = HashMap::new();
     for stmt in ast.stmts.values() {
-        if let RuntimeStmt::StructDecl { name, fields } = stmt {
-            struct_decl_map.entry(name.clone()).or_insert_with(|| {
+        if let RuntimeStmt::ClassDecl { name, fields } = stmt {
+            class_decl_map.entry(name.clone()).or_insert_with(|| {
                 fields.iter().map(|f| (f.field_name.clone(), f.type_name.clone())).collect()
             });
         }
     }
-    // Also synthesize registry entries from StructLiteral exprs (structs without explicit decl).
+    // Also synthesize registry entries from ClassLiteral exprs (structs without explicit decl).
     // Anonymous structs (type_name="") get unique per-expr-id keys to avoid layout collisions.
     for (&expr_id, expr) in &ast.exprs {
-        if let RuntimeExpr::StructLiteral { type_name, fields } = expr {
+        if let RuntimeExpr::ClassLiteral { type_name, fields } = expr {
             let key = if type_name.is_empty() {
                 format!("__anon_{expr_id}")
             } else {
                 type_name.clone()
             };
-            struct_decl_map.entry(key).or_insert_with(|| {
+            class_decl_map.entry(key).or_insert_with(|| {
                 fields.iter().map(|(fname, fexpr_id)| {
                     let type_name = match type_map.get(fexpr_id) {
                         Some(Type::Primitive(PrimitiveType::String)) => "str".to_string(),
                         Some(Type::Primitive(PrimitiveType::Bool))   => "bool".to_string(),
-                        Some(Type::Struct { name, .. })              => name.clone(),
+                        Some(Type::Class { name, .. })              => name.clone(),
                         _                                            => "int".to_string(),
                     };
                     (fname.clone(), type_name)
@@ -744,20 +744,20 @@ pub fn compile(
         }
     }
 
-    let mut structs: HashMap<String, StructMeta<'_>> = HashMap::new();
-    for (sname, fields) in &struct_decl_map {
+    let mut structs: HashMap<String, ClassMeta<'_>> = HashMap::new();
+    for (sname, fields) in &class_decl_map {
         let llvm_ty = context.opaque_struct_type(sname);
         let field_types: Vec<BasicTypeEnum<'_>> = fields.iter()
             .map(|(_, type_name)| llvm_field_type(type_name, i64_ty, ptr_ty))
             .collect();
         llvm_ty.set_body(&field_types, /*packed=*/false);
-        structs.insert(sname.clone(), StructMeta {
+        structs.insert(sname.clone(), ClassMeta {
             llvm_ty,
             field_names: fields.iter().map(|(n, _)| n.clone()).collect(),
             field_type_names: fields.iter().map(|(_, t)| t.clone()).collect(),
         });
     }
-    let struct_decls: Vec<(String, Vec<(String, String)>)> = struct_decl_map.into_iter().collect();
+    let struct_decls: Vec<(String, Vec<(String, String)>)> = class_decl_map.into_iter().collect();
 
     // ── Pass 0c: create LLVM globals for all string literals ─────────────────
     // Collect unique strings and sort for deterministic @.str.N numbering.
@@ -855,7 +855,7 @@ pub fn compile(
         ];
         for opt_ty in &resolved_lam_params {
             lam_meta.push(match opt_ty {
-                Some(Type::Struct { .. })
+                Some(Type::Class { .. })
                 | Some(Type::Primitive(PrimitiveType::String))
                 | Some(Type::Slice(_))
                 | Some(Type::Func { .. })
@@ -980,7 +980,7 @@ pub fn compile(
             _ => continue,
         };
         let _ = eid;
-        if let Some(Type::Struct { name: type_name, .. }) = type_map.get(&a) {
+        if let Some(Type::Class { name: type_name, .. }) = type_map.get(&a) {
             if let Some(fn_name) = ast.op_dispatch.get(&(trait_name.to_string(), type_name.clone())) {
                 if op_fn_types.contains_key(fn_name) { continue; }
                 let ta = type_map.get(&a).cloned();
@@ -1017,7 +1017,7 @@ pub fn compile(
                             // Then impl registry self-type for the first param
                             if i == 0 {
                                 if let Some(sname) = struct_name {
-                                    return Some(Type::Struct { name: sname.clone(), fields: std::collections::BTreeMap::new() });
+                                    return Some(Type::Class { name: sname.clone(), fields: std::collections::BTreeMap::new() });
                                 }
                             }
                         }
@@ -1058,7 +1058,7 @@ pub fn compile(
                     !returns_bool
                 } else {
                     matches!(effective_ret,
-                        Type::Enum(_) | Type::App(..) | Type::Struct { .. }
+                        Type::Enum(_) | Type::App(..) | Type::Class { .. }
                         | Type::Primitive(PrimitiveType::String)
                         | Type::Slice(_)
                         | Type::Tuple(_))
@@ -1074,7 +1074,7 @@ pub fn compile(
                     let mut types: Vec<Option<Type>> = vec![None; params.len()];
                     if let Some(sname) = impl_fn_self_type.get(fname.as_str()) {
                         if !params.is_empty() {
-                            types[0] = Some(Type::Struct { name: sname.clone(), fields: std::collections::BTreeMap::new() });
+                            types[0] = Some(Type::Class { name: sname.clone(), fields: std::collections::BTreeMap::new() });
                         }
                     }
                     (types, false)
@@ -1102,7 +1102,7 @@ pub fn compile(
         }
         let param_meta: Vec<BasicMetadataTypeEnum<'_>> = resolved_param_types.iter()
             .map(|opt_ty| match opt_ty {
-                Some(Type::Struct { .. })
+                Some(Type::Class { .. })
                 | Some(Type::Primitive(PrimitiveType::String))
                 | Some(Type::Slice(_))
                 | Some(Type::Func { .. })
@@ -1209,7 +1209,7 @@ pub fn compile(
             .map(|(i, p)| {
                 match resolve_param_type(i, p) {
                     Some(Type::Slice(_)) | Some(Type::Primitive(PrimitiveType::String))
-                    | Some(Type::Struct { .. }) | Some(Type::Enum(_)) | Some(Type::App(..))
+                    | Some(Type::Class { .. }) | Some(Type::Enum(_)) | Some(Type::App(..))
                     | Some(Type::Tuple(_)) | Some(Type::Func { .. })
                         => BasicMetadataTypeEnum::PointerType(ptr_ty),
                     Some(_) => BasicMetadataTypeEnum::IntType(i64_ty),
@@ -1378,6 +1378,9 @@ pub fn compile(
             let ret_i64 = match ret {
                 BasicValueEnum::IntValue(iv) if iv.get_type().get_bit_width() == 1 =>
                     builder.build_int_z_extend(iv, i64_ty, "hof_ret_zext")?
+                        .as_basic_value_enum(),
+                BasicValueEnum::PointerValue(pv) =>
+                    builder.build_ptr_to_int(pv, i64_ty, "hof_ret_p2i")?
                         .as_basic_value_enum(),
                 other => other,
             };
@@ -2102,7 +2105,7 @@ pub fn compile(
     let mut main_locals: Locals<'_> = HashMap::new();
     for &stmt_id in &ast.sem_root_stmts {
         match ast.get_stmt(stmt_id) {
-            Some(RuntimeStmt::FnDecl { .. } | RuntimeStmt::StructDecl { .. }) => continue,
+            Some(RuntimeStmt::FnDecl { .. } | RuntimeStmt::ClassDecl { .. }) => continue,
             Some(RuntimeStmt::WithFn { op_name, .. }) => {
                 // Update active handler: the unique-named function for this stmt
                 let unique = format!("__handler_{op_name}_{stmt_id}");
@@ -2182,7 +2185,7 @@ struct Cg<'ctx> {
     i64_ty:         IntType<'ctx>,
     ptr_ty:         PointerType<'ctx>,
     user_fns:       HashMap<String, FunctionValue<'ctx>>,
-    structs:        HashMap<String, StructMeta<'ctx>>,
+    structs:        HashMap<String, ClassMeta<'ctx>>,
     string_globals: HashMap<String, GlobalValue<'ctx>>,
     /// Maps lambda expr_id → emitted LLVM function (for closure creation)
     lambda_fns:     HashMap<RuntimeNodeId, FunctionValue<'ctx>>,
@@ -2342,7 +2345,7 @@ impl<'ctx> Cg<'ctx> {
                 }
                 BasicValueEnum::PointerValue(pv) => {
                     let kind = match arg_types.get(i) {
-                        Some(Some(Type::Struct { name: sname, .. })) =>
+                        Some(Some(Type::Class { name: sname, .. })) =>
                             LocalKind::StructPtr(sname.clone()),
                         Some(Some(Type::Primitive(PrimitiveType::String))) =>
                             LocalKind::Str,
@@ -2499,7 +2502,7 @@ impl<'ctx> Cg<'ctx> {
                 }
                 BasicValueEnum::PointerValue(pv) => {
                     let kind = match arg_types.get(i) {
-                        Some(Some(Type::Struct { name: sname, .. })) => LocalKind::StructPtr(sname.clone()),
+                        Some(Some(Type::Class { name: sname, .. })) => LocalKind::StructPtr(sname.clone()),
                         Some(Some(Type::Primitive(PrimitiveType::String))) => LocalKind::Str,
                         Some(Some(Type::Slice(_))) => LocalKind::Slice,
                         Some(Some(Type::Func { .. })) => LocalKind::Closure,
@@ -2627,7 +2630,7 @@ impl<'ctx> Cg<'ctx> {
                 let inner_id = unwrap_to_string(self.ast, *expr_id)?;
 
                 // ── Struct printing: emit "TypeName {f1: v1, f2: v2, ...}\n" ──
-                if let Some(Type::Struct { name: sname, fields: field_types }) =
+                if let Some(Type::Class { name: sname, fields: field_types }) =
                     self.type_map.get(&inner_id).cloned()
                 {
                     if let Some(meta) = self.structs.get(&sname) {
@@ -2673,7 +2676,7 @@ impl<'ctx> Cg<'ctx> {
                             let fty = field_types.get(fname.as_str());
                             let is_str_field = matches!(fty,
                                 Some(Type::Primitive(PrimitiveType::String))
-                                | Some(Type::Struct { .. }) | Some(Type::Slice(_)) | Some(Type::Tuple(_)));
+                                | Some(Type::Class { .. }) | Some(Type::Slice(_)) | Some(Type::Tuple(_)));
                             let is_bool_field = matches!(fty, Some(Type::Primitive(PrimitiveType::Bool)));
 
                             if is_str_field {
@@ -2816,7 +2819,7 @@ impl<'ctx> Cg<'ctx> {
                     }
                     BasicValueEnum::PointerValue(pv) => {
                         let kind = match self.ast.get_expr(*expr) {
-                            Some(RuntimeExpr::StructLiteral { type_name, .. }) =>
+                            Some(RuntimeExpr::ClassLiteral { type_name, .. }) =>
                                 LocalKind::StructPtr(type_name.clone()),
                             Some(RuntimeExpr::String(_)) =>
                                 LocalKind::Str,
@@ -2834,7 +2837,7 @@ impl<'ctx> Cg<'ctx> {
                                 LocalKind::Slice
                             }
                             _ => match self.type_map.get(expr) {
-                                Some(Type::Struct { name: sname, .. }) =>
+                                Some(Type::Class { name: sname, .. }) =>
                                     LocalKind::StructPtr(sname.clone()),
                                 Some(Type::Primitive(PrimitiveType::String)) =>
                                     LocalKind::Str,
@@ -2854,7 +2857,7 @@ impl<'ctx> Cg<'ctx> {
                                         | Some(RuntimeExpr::Sub(a, _))
                                         | Some(RuntimeExpr::Mult(a, _))
                                         | Some(RuntimeExpr::Div(a, _)) => {
-                                            if let Some(Type::Struct { name: tn, .. }) = self.type_map.get(a) {
+                                            if let Some(Type::Class { name: tn, .. }) = self.type_map.get(a) {
                                                 Some(LocalKind::StructPtr(tn.clone()))
                                             } else { None }
                                         }
@@ -3058,7 +3061,7 @@ impl<'ctx> Cg<'ctx> {
                 let elem_is_ptr = match self.type_map.get(iterable) {
                     Some(Type::Slice(inner)) => matches!(inner.as_ref(),
                         Type::Primitive(PrimitiveType::String)
-                        | Type::Slice(_) | Type::Struct { .. }
+                        | Type::Slice(_) | Type::Class { .. }
                         | Type::Enum(_) | Type::App(..) | Type::Tuple(_) | Type::Func { .. }),
                     _ => false,
                 };
@@ -3067,7 +3070,7 @@ impl<'ctx> Cg<'ctx> {
                         Some(Type::Slice(inner)) => match inner.as_ref() {
                             Type::Primitive(PrimitiveType::String) => LocalKind::Str,
                             Type::Slice(_) => LocalKind::Slice,
-                            Type::Struct { name: sname, .. } => LocalKind::StructPtr(sname.clone()),
+                            Type::Class { name: sname, .. } => LocalKind::StructPtr(sname.clone()),
                             Type::Enum(_) | Type::App(..) => LocalKind::EnumPtr,
                             Type::Tuple(_) => LocalKind::Tuple,
                             _ => LocalKind::Closure,
@@ -3218,7 +3221,7 @@ impl<'ctx> Cg<'ctx> {
                         // Note: Type::Enum(name) where name is NOT in the registry means it's
                         // a generic type parameter (e.g. T, U) — treat as non-pointer (Int).
                         let is_ptr_ty = |ty: &Type| match ty {
-                            Type::App(..) | Type::Struct { .. } | Type::Slice(_)
+                            Type::App(..) | Type::Class { .. } | Type::Slice(_)
                             | Type::Tuple(_) | Type::Func { .. }
                             | Type::Primitive(PrimitiveType::String) => true,
                             // Only treat as ptr if it's a real registered enum, not a type param.
@@ -3447,7 +3450,7 @@ impl<'ctx> Cg<'ctx> {
             }
 
             // ── Declarations (handled in other passes) ────────────────────────
-            RuntimeStmt::StructDecl { .. }
+            RuntimeStmt::ClassDecl { .. }
             | RuntimeStmt::EnumDecl { .. }
             | RuntimeStmt::WithFn { .. }
             | RuntimeStmt::EffectDecl { .. }
@@ -3752,7 +3755,7 @@ impl<'ctx> Cg<'ctx> {
             // ── Arithmetic ────────────────────────────────────────────────────
             RuntimeExpr::Add(a, b) => {
                 // Struct Add dispatch
-                if let Some(Type::Struct { name: type_name, .. }) = self.type_map.get(a) {
+                if let Some(Type::Class { name: type_name, .. }) = self.type_map.get(a) {
                     if let Some(fn_name) = self.ast.op_dispatch.get(&("Add".to_string(), type_name.clone())) {
                         if let Some(&fn_val) = self.user_fns.get(fn_name.as_str()) {
                             let lhs = self.emit_expr(*a, locals)?;
@@ -3839,7 +3842,7 @@ impl<'ctx> Cg<'ctx> {
                 }
             }
             RuntimeExpr::Sub(a, b) => {
-                if let Some(Type::Struct { name: type_name, .. }) = self.type_map.get(a) {
+                if let Some(Type::Class { name: type_name, .. }) = self.type_map.get(a) {
                     if let Some(fn_name) = self.ast.op_dispatch.get(&("Sub".to_string(), type_name.clone())) {
                         if let Some(&fn_val) = self.user_fns.get(fn_name.as_str()) {
                             let lhs = self.emit_expr(*a, locals)?;
@@ -3853,7 +3856,7 @@ impl<'ctx> Cg<'ctx> {
                 Ok(self.builder.build_int_sub(lhs, rhs, "sub")?.as_basic_value_enum())
             }
             RuntimeExpr::Mult(a, b) => {
-                if let Some(Type::Struct { name: type_name, .. }) = self.type_map.get(a) {
+                if let Some(Type::Class { name: type_name, .. }) = self.type_map.get(a) {
                     if let Some(fn_name) = self.ast.op_dispatch.get(&("Mul".to_string(), type_name.clone())) {
                         if let Some(&fn_val) = self.user_fns.get(fn_name.as_str()) {
                             let lhs = self.emit_expr(*a, locals)?;
@@ -3867,7 +3870,7 @@ impl<'ctx> Cg<'ctx> {
                 Ok(self.builder.build_int_mul(lhs, rhs, "mul")?.as_basic_value_enum())
             }
             RuntimeExpr::Div(a, b) => {
-                if let Some(Type::Struct { name: type_name, .. }) = self.type_map.get(a) {
+                if let Some(Type::Class { name: type_name, .. }) = self.type_map.get(a) {
                     if let Some(fn_name) = self.ast.op_dispatch.get(&("Div".to_string(), type_name.clone())) {
                         if let Some(&fn_val) = self.user_fns.get(fn_name.as_str()) {
                             let lhs = self.emit_expr(*a, locals)?;
@@ -3893,7 +3896,7 @@ impl<'ctx> Cg<'ctx> {
             RuntimeExpr::Equals(a, b) => {
                 if matches!(self.type_map.get(a), Some(Type::Primitive(PrimitiveType::String))) {
                     self.emit_strcmp_eq(*a, *b, true, expr_id, locals)
-                } else if let Some(Type::Struct { name: type_name, .. }) = self.type_map.get(a) {
+                } else if let Some(Type::Class { name: type_name, .. }) = self.type_map.get(a) {
                     // Dispatch through op_dispatch table for struct equality.
                     if let Some(fn_name) = self.ast.op_dispatch.get(&("Eq".to_string(), type_name.clone())) {
                         if let Some(&fn_val) = self.user_fns.get(fn_name.as_str()) {
@@ -3912,7 +3915,7 @@ impl<'ctx> Cg<'ctx> {
             RuntimeExpr::NotEquals(a, b) => {
                 if matches!(self.type_map.get(a), Some(Type::Primitive(PrimitiveType::String))) {
                     self.emit_strcmp_eq(*a, *b, false, expr_id, locals)
-                } else if let Some(Type::Struct { name: type_name, .. }) = self.type_map.get(a) {
+                } else if let Some(Type::Class { name: type_name, .. }) = self.type_map.get(a) {
                     // Dispatch through op_dispatch table for struct equality.
                     if let Some(fn_name) = self.ast.op_dispatch.get(&("Eq".to_string(), type_name.clone())) {
                         if let Some(&fn_val) = self.user_fns.get(fn_name.as_str()) {
@@ -3954,7 +3957,7 @@ impl<'ctx> Cg<'ctx> {
             }
 
             // ── Struct literal → malloc + field stores ────────────────────────
-            RuntimeExpr::StructLiteral { type_name, fields } => {
+            RuntimeExpr::ClassLiteral { type_name, fields } => {
                 let malloc_fn = self.malloc_fn.ok_or(CodegenError::UnsupportedExpr(expr_id))?;
                 let lookup_key = if type_name.is_empty() {
                     format!("__anon_{expr_id}")
@@ -4001,7 +4004,7 @@ impl<'ctx> Cg<'ctx> {
                 // search all registered structs by field name (handles i64-typed stdlib params).
                 let mut obj_is_int_ptr = false;
                 let struct_name = match self.type_map.get(object) {
-                    Some(Type::Struct { name, .. }) => name.clone(),
+                    Some(Type::Class { name, .. }) => name.clone(),
                     _ => {
                         if let Some(RuntimeExpr::Variable(vname)) = self.ast.get_expr(*object) {
                             match locals.get(vname.as_str()) {
@@ -4031,7 +4034,7 @@ impl<'ctx> Cg<'ctx> {
                 // incorrect inttoptr — the field_type_names fallback is more reliable here.
                 let field_is_ptr = match self.type_map.get(&expr_id) {
                     Some(ty) if !matches!(ty, Type::Var(_)) => matches!(ty,
-                        Type::Enum(_) | Type::App(..) | Type::Struct { .. }
+                        Type::Enum(_) | Type::App(..) | Type::Class { .. }
                         | Type::Primitive(PrimitiveType::String)
                         | Type::Slice(_) | Type::Tuple(_) | Type::Func { .. }),
                     _ => {
@@ -4368,7 +4371,7 @@ impl<'ctx> Cg<'ctx> {
                     Some(Type::Primitive(PrimitiveType::String))
                     | Some(Type::Slice(_))
                     | Some(Type::Func { .. })
-                    | Some(Type::Struct { .. })
+                    | Some(Type::Class { .. })
                     | Some(Type::Enum(_))
                     | Some(Type::App(..))
                     | Some(Type::Tuple(_))
@@ -4426,7 +4429,7 @@ impl<'ctx> Cg<'ctx> {
 
                 // Resolve struct type name: prefer type_map, fall back to locals kind.
                 let struct_type_name: Option<String> = match self.type_map.get(object) {
-                    Some(Type::Struct { name, .. }) => Some(name.clone()),
+                    Some(Type::Class { name, .. }) => Some(name.clone()),
                     _ => {
                         if let Some(RuntimeExpr::Variable(vname)) = self.ast.get_expr(*object) {
                             match locals.get(vname.as_str()) {
@@ -4601,7 +4604,7 @@ impl<'ctx> Cg<'ctx> {
                                 self.ast.get_expr(*object)
                             {
                                 let parent_struct = match self.type_map.get(inner_obj) {
-                                    Some(Type::Struct { name, .. }) => Some(name.clone()),
+                                    Some(Type::Class { name, .. }) => Some(name.clone()),
                                     _ => if let Some(RuntimeExpr::Variable(vn)) = self.ast.get_expr(*inner_obj) {
                                         match locals.get(vn.as_str()) {
                                             Some(Local { kind: LocalKind::StructPtr(sn), .. }) => Some(sn.clone()),
@@ -4715,7 +4718,7 @@ impl<'ctx> Cg<'ctx> {
                                 let is_ptr_elem = matches!(
                                     self.type_map.get(&expr_id),
                                     Some(Type::Primitive(PrimitiveType::String))
-                                    | Some(Type::Slice(_)) | Some(Type::Struct { .. })
+                                    | Some(Type::Slice(_)) | Some(Type::Class { .. })
                                     | Some(Type::Enum(_)) | Some(Type::App(..)) | Some(Type::Tuple(_))
                                 );
                                 if is_ptr_elem {
@@ -4773,7 +4776,7 @@ impl<'ctx> Cg<'ctx> {
                             let is_ptr = matches!(
                                 self.type_map.get(&expr_id),
                                 Some(Type::Primitive(PrimitiveType::String))
-                                | Some(Type::Struct { .. }) | Some(Type::Slice(_))
+                                | Some(Type::Class { .. }) | Some(Type::Slice(_))
                                 | Some(Type::Tuple(_)) | Some(Type::Enum(_)) | Some(Type::App(..))
                                 | Some(Type::Func { .. })
                             );
@@ -4872,7 +4875,7 @@ impl<'ctx> Cg<'ctx> {
                             self.type_map.get(&expr_id),
                             Some(Type::Primitive(PrimitiveType::String))
                             | Some(Type::Slice(_))
-                            | Some(Type::Struct { .. })
+                            | Some(Type::Class { .. })
                             | Some(Type::Enum(_))
                             | Some(Type::App(..))
                             | Some(Type::Tuple(_))
@@ -5302,7 +5305,7 @@ fn collect_refs_expr(
             let items = items.clone();
             for item in items { collect_refs_expr(ast, item, bound, refs); }
         }
-        Some(RuntimeExpr::StructLiteral { fields, .. }) => {
+        Some(RuntimeExpr::ClassLiteral { fields, .. }) => {
             let fields = fields.clone();
             for (_, val) in fields { collect_refs_expr(ast, val, bound, refs); }
         }

@@ -69,7 +69,7 @@ pub enum StagedExpr {
     String(String),
     Bool(bool),
 
-    StructLiteral {
+    ClassLiteral {
         type_name: String,
         fields: Vec<(String, StagedNodeId)>,
     },
@@ -147,10 +147,11 @@ pub enum StagedExpr {
         effects: Vec<(String, Vec<StagedNodeId>)>,
     },
 
-    /// `run { body } with handler_name`
+    /// `run { body } with handler_name` (optional ctor args for class-handler form)
     RunWith {
         body: StagedNodeId,
         handler_name: String,
+        args: Vec<StagedNodeId>,
     },
 
     MetaExpr(MetaRef),
@@ -191,7 +192,7 @@ pub enum StagedStmt {
         body: StagedNodeId,
     },
 
-    StructDecl {
+    ClassDecl {
         name: String,
         fields: Vec<StagedFieldDecl>,
     },
@@ -335,8 +336,8 @@ impl StagedAst {
                 ],
             ),
 
-            StagedStmt::StructDecl { name, fields } => (
-                "StructDecl".into(),
+            StagedStmt::ClassDecl { name, fields } => (
+                "ClassDecl".into(),
                 vec![
                     TreeNode::leaf(format!("Name({name})")),
                     TreeNode::node(
@@ -472,8 +473,8 @@ impl StagedAst {
 
             StagedExpr::Variable(name) => ("Var".into(), vec![TreeNode::leaf(name.clone())]),
 
-            StagedExpr::StructLiteral { type_name, fields } => (
-                format!("StructLiteral({type_name})"),
+            StagedExpr::ClassLiteral { type_name, fields } => (
+                format!("ClassLiteral({type_name})"),
                 fields
                     .iter()
                     .map(|(n, e)| TreeNode::node(n.clone(), vec![self.convert_expr(*e)]))
@@ -607,9 +608,11 @@ impl StagedAst {
                     .chain(effects.iter().flat_map(|(_, stmts)| stmts.iter().map(|&s| self.convert_stmt(s))))
                     .collect(),
             ),
-            StagedExpr::RunWith { body, handler_name } => (
+            StagedExpr::RunWith { body, handler_name, args } => (
                 format!("RunWith({})", handler_name),
-                vec![self.convert_stmt(*body)],
+                std::iter::once(self.convert_stmt(*body))
+                    .chain(args.iter().map(|&a| self.convert_expr(a)))
+                    .collect(),
             ),
         };
 

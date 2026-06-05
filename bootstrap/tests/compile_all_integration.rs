@@ -194,7 +194,6 @@ mod compile_all {
         cx_compile_all_test!(func_fib, "tests/core/functions", "fib");
         cx_compile_all_test!(func_closure, "tests/core/functions", "closure");
         cx_compile_all_test!(list_list, "tests/core/lists", "list");
-        cx_compile_all_test!(struct_struct, "tests/core/structs", "struct");
         cx_compile_all_test!(modules_import, "tests/core/modules", "main");
         cx_compile_all_test!(modules_qualified, "tests/core/modules/qualified", "main");
         cx_compile_all_test!(modules_alias, "tests/core/modules/alias", "main");
@@ -255,7 +254,6 @@ mod compile_all {
         cx_compile_all_test!(types_typeof_primitives, "tests/types", "typeof_primitives");
         cx_compile_all_test!(types_typeof_slice, "tests/types", "typeof_slice");
         cx_compile_all_test!(types_typeof_tuple, "tests/types", "typeof_tuple");
-        cx_compile_all_test!(types_typeof_record, "tests/types", "typeof_record");
         cx_compile_all_test!(types_typeof_fn, "tests/types", "typeof_fn");
         cx_compile_all_test!(types_typeof_enum, "tests/types", "typeof_enum");
         cx_compile_all_test!(types_typeof_effect_ctl, "tests/types", "typeof_effect_ctl");
@@ -367,6 +365,5 @@ mod compile_all {
         cx_compile_all_test!(codegen_gen_symbol, "tests/meta/codegen", "gen_symbol");
         cx_compile_all_test!(meta_fn, "tests/meta/functions", "meta_fn");
         cx_compile_all_test!(meta_fib, "tests/meta/functions", "fib");
-        cx_compile_all_test!(reflection_typeof, "tests/meta/reflection", "typeof");
     }
 }

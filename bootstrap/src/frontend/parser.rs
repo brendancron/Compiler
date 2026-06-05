@@ -105,6 +105,263 @@ fn parse_single_handler(
 }
 
 
+/// Parse `class Name<T>?(params)? (: Trait1, Trait2)? ({ methods })?`.
+/// Desugars to a Block containing a ClassDecl, a constructor FnDecl, and one
+/// ImplDecl per trait. Methods get an implicit `this` first param and a prelude
+/// `var p = this.p;` for each constructor param so bare-name field refs resolve.
+fn parse_class_decl(
+    tokens: &[Token],
+    pos: &mut usize,
+    ctx: &mut ParseCtx,
+) -> Result<MetaNodeId, ParseError> {
+    let start_loc = tok_loc(tokens, *pos);
+    consume(tokens, pos, TokenType::Class)?;
+    let class_name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+    let _type_params = parse_type_params(tokens, pos);
+
+    let ctor_params: Vec<Param> = if check(tokens, *pos, TokenType::LeftParen) {
+        consume(tokens, pos, TokenType::LeftParen)?;
+        let p = parse_separated(
+            tokens, pos, ctx, TokenType::Comma, TokenType::RightParen,
+            |tokens, pos, _ctx| {
+                let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+                let ty = parse_type_annot(tokens, pos);
+                Ok(Param { name, ty })
+            },
+        )?;
+        consume(tokens, pos, TokenType::RightParen)?;
+        p
+    } else {
+        Vec::new()
+    };
+
+    let mut traits: Vec<String> = Vec::new();
+    if check(tokens, *pos, TokenType::Colon) {
+        consume(tokens, pos, TokenType::Colon)?;
+        loop {
+            let t = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+            traits.push(t);
+            if check(tokens, *pos, TokenType::Comma) { *pos += 1; } else { break; }
+        }
+    }
+
+    let mut methods: Vec<ImplMethodDecl> = Vec::new();
+    let mut handler_ops: Vec<MetaNodeId> = Vec::new();
+    let mut has_ctl = false;
+    let mut field_inits: Vec<(String, Option<MetaTypeExpr>, MetaNodeId)> = Vec::new();
+    if check(tokens, *pos, TokenType::LeftBrace) {
+        consume(tokens, pos, TokenType::LeftBrace)?;
+        while !check(tokens, *pos, TokenType::RightBrace) {
+            if check(tokens, *pos, TokenType::Var) {
+                *pos += 1;
+                let field_name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+                let field_ty = parse_type_annot(tokens, pos);
+                consume(tokens, pos, TokenType::Equal)?;
+                let init_expr = parse_expr(tokens, pos, ctx)?;
+                if check(tokens, *pos, TokenType::Semicolon) { *pos += 1; }
+                field_inits.push((field_name, field_ty, init_expr));
+                continue;
+            }
+            let is_ctl = check(tokens, *pos, TokenType::Ctl);
+            if is_ctl {
+                *pos += 1;
+                has_ctl = true;
+            } else {
+                consume(tokens, pos, TokenType::Func)?;
+            }
+            let m_name = consume_field_name(tokens, pos)?;
+            parse_type_params(tokens, pos);
+            consume(tokens, pos, TokenType::LeftParen)?;
+            let m_params = parse_separated(
+                tokens, pos, ctx, TokenType::Comma, TokenType::RightParen,
+                |tokens, pos, _ctx| {
+                    let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+                    let ty = parse_type_annot(tokens, pos);
+                    Ok(Param { name, ty })
+                },
+            )?;
+            consume(tokens, pos, TokenType::RightParen)?;
+            let ret_ty_str = if check(tokens, *pos, TokenType::Colon) {
+                *pos += 1;
+                parse_type_expr(tokens, pos).ok().map(|t| t.to_string())
+            } else {
+                None
+            };
+            consume(tokens, pos, TokenType::LeftBrace)?;
+            let raw_body_id = parse_block(tokens, pos, ctx)?;
+            consume(tokens, pos, TokenType::RightBrace)?;
+
+            let mut alias_names: Vec<String> = ctor_params.iter().map(|p| p.name.clone()).collect();
+            alias_names.extend(field_inits.iter().map(|(n, _, _)| n.clone()));
+            let body_id = inject_this_prelude_names(ctx, &alias_names, raw_body_id);
+
+            if is_ctl {
+                let op_id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::WithCtl {
+                    op_name: m_name.clone(),
+                    params: m_params.clone(),
+                    ret_ty: ret_ty_str.clone(),
+                    body: body_id,
+                });
+                handler_ops.push(op_id);
+            } else {
+                // `fn` methods on a class are both potential effect handler ops
+                // (for fn-shaped effects like `fn log(msg)`) AND impl methods
+                // callable as `obj.method(...)`. Emit both lowerings — the stager
+                // wires the WithFn one only when the name matches an effect op.
+                let op_id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::WithFn {
+                    op_name: m_name.clone(),
+                    params: m_params.clone(),
+                    ret_ty: ret_ty_str.clone(),
+                    body: body_id,
+                });
+                handler_ops.push(op_id);
+
+                let mut params_with_this = vec![Param { name: "this".to_string(), ty: None }];
+                params_with_this.extend(m_params);
+                methods.push(ImplMethodDecl { name: m_name, params: params_with_this, body: body_id });
+            }
+        }
+        consume(tokens, pos, TokenType::RightBrace)?;
+    }
+
+    let mut block_stmts: Vec<MetaNodeId> = Vec::new();
+
+    let mut fields: Vec<MetaFieldDecl> = ctor_params.iter().map(|p| MetaFieldDecl {
+        field_name: p.name.clone(),
+        type_name: p.ty.as_ref().map(|t| t.to_string()).unwrap_or_else(|| "any".to_string()),
+    }).collect();
+    for (n, ty, _) in &field_inits {
+        fields.push(MetaFieldDecl {
+            field_name: n.clone(),
+            type_name: ty.as_ref().map(|t| t.to_string()).unwrap_or_else(|| "any".to_string()),
+        });
+    }
+    let struct_id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::ClassDecl {
+        name: class_name.clone(),
+        fields,
+    });
+    block_stmts.push(struct_id);
+
+    if !ctor_params.is_empty() || !field_inits.is_empty() {
+        let mut field_exprs: Vec<(String, MetaNodeId)> = ctor_params.iter().map(|p| {
+            let var_id = ctx.ast.insert_expr(&mut ctx.id_provider, MetaExpr::Variable(p.name.clone()));
+            (p.name.clone(), var_id)
+        }).collect();
+        for (n, _, init) in &field_inits {
+            field_exprs.push((n.clone(), *init));
+        }
+        let struct_lit_id = ctx.ast.insert_expr(&mut ctx.id_provider, MetaExpr::ClassLiteral {
+            type_name: class_name.clone(),
+            fields: field_exprs,
+        });
+        let return_stmt_id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::Return(Some(struct_lit_id)));
+        let body_block_id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::Block(vec![return_stmt_id]));
+        let ctor_fn_id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::FnDecl {
+            name: class_name.clone(),
+            params: ctor_params.clone(),
+            type_params: vec![],
+            ret_ty: Some(MetaTypeExpr::Named(class_name.clone())),
+            body: body_block_id,
+        });
+        block_stmts.push(ctor_fn_id);
+    }
+
+    let _ = has_ctl;
+    if !methods.is_empty() || !traits.is_empty() {
+        if traits.is_empty() {
+            let impl_id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::ImplDecl {
+                trait_name: String::new(),
+                type_name: class_name.clone(),
+                methods: methods.clone(),
+            });
+            block_stmts.push(impl_id);
+        } else {
+            for t in &traits {
+                let impl_id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::ImplDecl {
+                    trait_name: t.clone(),
+                    type_name: class_name.clone(),
+                    methods: methods.clone(),
+                });
+                block_stmts.push(impl_id);
+            }
+        }
+    }
+
+    if !handler_ops.is_empty() && !traits.is_empty() {
+        for t in &traits {
+            let handler_id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::HandlerDef {
+                name: class_name.clone(),
+                effect_name: Some(t.clone()),
+                ops: handler_ops.clone(),
+            });
+            block_stmts.push(handler_id);
+        }
+    }
+
+    if check(tokens, *pos, TokenType::Semicolon) { *pos += 1; }
+
+    let id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::Block(block_stmts));
+    ctx.record_span(id, start_loc);
+    Ok(id)
+}
+
+fn inject_this_prelude_names(
+    ctx: &mut ParseCtx,
+    names: &[String],
+    body_block_id: MetaNodeId,
+) -> MetaNodeId {
+    if names.is_empty() { return body_block_id; }
+    let inner: Vec<MetaNodeId> = match ctx.ast.get_stmt(body_block_id) {
+        Some(MetaStmt::Block(s)) => s.clone(),
+        _ => vec![body_block_id],
+    };
+    let mut prelude: Vec<MetaNodeId> = Vec::new();
+    for n in names {
+        let this_var = ctx.ast.insert_expr(&mut ctx.id_provider, MetaExpr::Variable("this".to_string()));
+        let dot = ctx.ast.insert_expr(&mut ctx.id_provider, MetaExpr::DotAccess {
+            object: this_var,
+            field: n.clone(),
+        });
+        let var_decl = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::VarDecl {
+            name: n.clone(),
+            type_annotation: None,
+            expr: dot,
+        });
+        prelude.push(var_decl);
+    }
+    prelude.extend(inner);
+    ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::Block(prelude))
+}
+
+#[allow(dead_code)]
+fn inject_this_prelude(
+    ctx: &mut ParseCtx,
+    ctor_params: &[Param],
+    body_block_id: MetaNodeId,
+) -> MetaNodeId {
+    if ctor_params.is_empty() { return body_block_id; }
+    let inner: Vec<MetaNodeId> = match ctx.ast.get_stmt(body_block_id) {
+        Some(MetaStmt::Block(s)) => s.clone(),
+        _ => vec![body_block_id],
+    };
+    let mut prelude: Vec<MetaNodeId> = Vec::new();
+    for p in ctor_params {
+        let this_var = ctx.ast.insert_expr(&mut ctx.id_provider, MetaExpr::Variable("this".to_string()));
+        let dot = ctx.ast.insert_expr(&mut ctx.id_provider, MetaExpr::DotAccess {
+            object: this_var,
+            field: p.name.clone(),
+        });
+        let var_decl = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::VarDecl {
+            name: p.name.clone(),
+            type_annotation: None,
+            expr: dot,
+        });
+        prelude.push(var_decl);
+    }
+    prelude.extend(inner);
+    ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::Block(prelude))
+}
+
 /// Parse `resume` or `resume expr`
 fn parse_resume(
     tokens: &[Token],
@@ -232,7 +489,7 @@ fn parse_lambda_body<'a>(
             Some(
                 TokenType::Var  | TokenType::If    | TokenType::While  | TokenType::Return |
                 TokenType::Func | TokenType::For   | TokenType::Defer  | TokenType::Effect |
-                TokenType::Impl | TokenType::Trait | TokenType::Enum   | TokenType::Struct |
+                TokenType::Impl | TokenType::Trait | TokenType::Enum   | TokenType::Class |
                 TokenType::Print| TokenType::Match | TokenType::Handle |
                 TokenType::Run  | TokenType::Handler
             )
@@ -749,7 +1006,7 @@ fn parse_factor<'a>(
 
                     consume(tokens, pos, TokenType::RightBrace)?;
 
-                    let struct_literal = MetaExpr::StructLiteral {
+                    let struct_literal = MetaExpr::ClassLiteral {
                         type_name: name,
                         fields,
                     };
@@ -816,7 +1073,7 @@ fn parse_factor<'a>(
 
                 let id = ctx.ast.insert_expr(
                     &mut ctx.id_provider,
-                    MetaExpr::StructLiteral { type_name: String::new(), fields },
+                    MetaExpr::ClassLiteral { type_name: String::new(), fields },
                 );
                 Ok(id)
             }
@@ -849,16 +1106,41 @@ fn parse_factor<'a>(
                 let body_block = parse_block(tokens, pos, ctx)?;
                 consume(tokens, pos, TokenType::RightBrace)?;
                 let mut effects: Vec<(String, Vec<MetaNodeId>)> = Vec::new();
+                let mut named_handler: Option<(String, Vec<MetaNodeId>)> = None;
                 while check(tokens, *pos, TokenType::Handle) {
                     *pos += 1; // consume `handle`
                     let eff_name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
-                    consume(tokens, pos, TokenType::LeftBrace)?;
-                    let mut ops = Vec::new();
-                    while !check(tokens, *pos, TokenType::RightBrace) && !check(tokens, *pos, TokenType::EOF) {
-                        ops.push(parse_single_handler(tokens, pos, ctx)?);
+                    if check(tokens, *pos, TokenType::LeftBrace) {
+                        consume(tokens, pos, TokenType::LeftBrace)?;
+                        let mut ops = Vec::new();
+                        while !check(tokens, *pos, TokenType::RightBrace) && !check(tokens, *pos, TokenType::EOF) {
+                            ops.push(parse_single_handler(tokens, pos, ctx)?);
+                        }
+                        consume(tokens, pos, TokenType::RightBrace)?;
+                        effects.push((eff_name, ops));
+                    } else {
+                        // `handle Ident` or `handle Ident(args)` — named handler reference.
+                        let mut args: Vec<MetaNodeId> = Vec::new();
+                        if check(tokens, *pos, TokenType::LeftParen) {
+                            consume(tokens, pos, TokenType::LeftParen)?;
+                            args = parse_separated(
+                                tokens, pos, ctx, TokenType::Comma, TokenType::RightParen,
+                                parse_expr,
+                            )?;
+                            consume(tokens, pos, TokenType::RightParen)?;
+                        }
+                        named_handler = Some((eff_name, args));
+                        break;
                     }
-                    consume(tokens, pos, TokenType::RightBrace)?;
-                    effects.push((eff_name, ops));
+                }
+                if let Some((name, args)) = named_handler {
+                    let id = ctx.ast.insert_expr(&mut ctx.id_provider, MetaExpr::RunWith {
+                        body: body_block,
+                        handler_name: name,
+                        args,
+                    });
+                    ctx.record_span(id, start_loc);
+                    return Ok(id);
                 }
                 // `run { body } with handler_name` — named handler
                 if check(tokens, *pos, TokenType::With)
@@ -869,6 +1151,7 @@ fn parse_factor<'a>(
                     let id = ctx.ast.insert_expr(&mut ctx.id_provider, MetaExpr::RunWith {
                         body: body_block,
                         handler_name,
+                        args: Vec::new(),
                     });
                     ctx.record_span(id, start_loc);
                     return Ok(id);
@@ -1277,7 +1560,7 @@ fn parse_stmt<'a>(
                 consume(tokens, pos, TokenType::LeftParen)?;
                 let expr = parse_expr(tokens, pos, ctx)?;
                 consume(tokens, pos, TokenType::RightParen)?;
-                consume(tokens, pos, TokenType::Semicolon)?;
+                if check(tokens, *pos, TokenType::Semicolon) { *pos += 1; }
                 let id = ctx
                     .ast
                     .insert_stmt(&mut ctx.id_provider, MetaStmt::Print(expr));
@@ -1444,33 +1727,7 @@ fn parse_stmt<'a>(
                 Ok(id)
             }
             //parse_fn_decl(tokens, pos, ctx, BlueprintFuncType::Normal),
-            TokenType::Struct => {
-                consume(tokens, pos, TokenType::Struct)?;
-                let name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
-                parse_type_params(tokens, pos); // type params on structs are parsed but discarded for now
-                consume(tokens, pos, TokenType::LeftBrace)?;
-                let fields = parse_separated(
-                    tokens,
-                    pos,
-                    ctx,
-                    TokenType::Semicolon,
-                    TokenType::RightBrace,
-                    |tokens, pos, _ctx| {
-                        let field_name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
-                        consume(tokens, pos, TokenType::Colon)?;
-                        let type_expr = parse_type_expr(tokens, pos)?;
-                        Ok(MetaFieldDecl {
-                            field_name,
-                            type_name: type_expr.to_string(),
-                        })
-                    },
-                )?;
-
-                consume(tokens, pos, TokenType::RightBrace)?;
-                let struct_decl = MetaStmt::StructDecl { name, fields };
-                let id = ctx.ast.insert_stmt(&mut ctx.id_provider, struct_decl);
-                Ok(id)
-            }
+            TokenType::Class => parse_class_decl(tokens, pos, ctx),
 
             TokenType::Return => {
                 consume(tokens, pos, TokenType::Return)?;
@@ -1533,7 +1790,15 @@ fn parse_stmt<'a>(
                         let types = parse_separated(
                             tokens, pos, ctx,
                             TokenType::Comma, TokenType::RightParen,
-                            |tokens, pos, _ctx| parse_type_expr(tokens, pos),
+                            |tokens, pos, _ctx| {
+                                // Optional `name:` prefix — discarded; tuple positional.
+                                if check(tokens, *pos, TokenType::Identifier)
+                                    && check(tokens, *pos + 1, TokenType::Colon)
+                                {
+                                    *pos += 2;
+                                }
+                                parse_type_expr(tokens, pos)
+                            },
                         )?;
                         consume(tokens, pos, TokenType::RightParen)?;
                         VariantPayload::Tuple(types)
@@ -1583,10 +1848,11 @@ fn parse_stmt<'a>(
                     let pattern = parse_pattern(tokens, pos)?;
                     consume(tokens, pos, TokenType::FatArrow)?;
                     let body = if check(tokens, *pos, TokenType::LeftBrace) {
-                        // Block-body arm: `Pattern => { stmts }`
+                        // Block-body arm: `Pattern => { stmts }` with optional trailing `,`
                         consume(tokens, pos, TokenType::LeftBrace)?;
                         let b = parse_block(tokens, pos, ctx)?;
                         consume(tokens, pos, TokenType::RightBrace)?;
+                        if check(tokens, *pos, TokenType::Comma) { *pos += 1; }
                         b
                     } else {
                         // Expression-body arm: `Pattern => expr,`
@@ -1827,7 +2093,7 @@ fn parse_stmt<'a>(
                     let method_name = consume(tokens, pos, TokenType::Identifier)?.expect_str();
                     parse_type_params(tokens, pos);
                     consume(tokens, pos, TokenType::LeftParen)?;
-                    let params = parse_separated(
+                    let user_params = parse_separated(
                         tokens, pos, ctx,
                         TokenType::Comma, TokenType::RightParen,
                         |tokens, pos, _ctx| {
@@ -1841,6 +2107,13 @@ fn parse_stmt<'a>(
                     consume(tokens, pos, TokenType::LeftBrace)?;
                     let body = parse_block(tokens, pos, ctx)?;
                     consume(tokens, pos, TokenType::RightBrace)?;
+                    let params = if user_params.first().map(|p| p.name.as_str() == "self" || p.name.as_str() == "this").unwrap_or(false) {
+                        user_params
+                    } else {
+                        let mut p = vec![Param { name: "this".to_string(), ty: None }];
+                        p.extend(user_params);
+                        p
+                    };
                     methods.push(ImplMethodDecl { name: method_name, params, body });
                 }
                 consume(tokens, pos, TokenType::RightBrace)?;

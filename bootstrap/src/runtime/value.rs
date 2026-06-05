@@ -29,7 +29,7 @@ pub enum Value {
     String(String),
     Bool(bool),
 
-    Struct {
+    Class {
         type_name: String,
         fields: Rc<RefCell<Vec<(String, Value)>>>,
     },
@@ -105,7 +105,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, ")")
             }
-            Value::Struct { type_name, fields } => {
+            Value::Class { type_name, fields } => {
                 let map = fields.borrow();
                 write!(f, "{} {{", type_name)?;
                 for (i, (k, v)) in map.iter().enumerate() {

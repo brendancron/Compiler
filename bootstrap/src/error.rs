@@ -286,7 +286,7 @@ fn eval_diagnostic(e: &EvalError) -> Diagnostic {
         EvalError::TypeError(_) => {
             Diagnostic::new("runtime type error")
         }
-        EvalError::UnknownStructType(name) => {
+        EvalError::UnknownClassType(name) => {
             Diagnostic::new(format!("unknown struct type '{name}'"))
         }
         EvalError::GenOutsideMetaContext => {

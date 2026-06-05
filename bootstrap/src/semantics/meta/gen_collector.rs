@@ -179,7 +179,7 @@ impl<'a> SubstCtx<'a> {
                 iterable: self.remap_expr(*iterable),
                 body: self.remap_stmt(*body),
             },
-            RuntimeStmt::StructDecl { .. }
+            RuntimeStmt::ClassDecl { .. }
             | RuntimeStmt::Import(_)
             | RuntimeStmt::EnumDecl { .. }
             | RuntimeStmt::EffectDecl { .. } => stmt.clone(),
@@ -221,7 +221,7 @@ impl<'a> SubstCtx<'a> {
                 callee: self.subst_name(callee),
                 args: args.iter().map(|id| self.remap_expr(*id)).collect(),
             },
-            RuntimeExpr::StructLiteral { type_name, fields } => RuntimeExpr::StructLiteral {
+            RuntimeExpr::ClassLiteral { type_name, fields } => RuntimeExpr::ClassLiteral {
                 type_name: self.subst_name(type_name),
                 fields: fields.iter().map(|(n, id)| (n.clone(), self.remap_expr(*id))).collect(),
             },
