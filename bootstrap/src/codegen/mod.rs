@@ -4047,7 +4047,8 @@ impl<'ctx> Cg<'ctx> {
                         | Type::Slice(_) | Type::Tuple(_) | Type::Func { .. }),
                     _ => {
                         let field_type_name = meta.field_type_names.get(fidx).map(|s| s.as_str()).unwrap_or("int");
-                        field_type_name != "int" && field_type_name != "bool" && field_type_name != "i64"
+                        !matches!(field_type_name,
+                            "int" | "Int" | "bool" | "Bool" | "i64")
                     }
                 };
 
@@ -5328,7 +5329,7 @@ fn param_llvm_type<'ctx>(
     ptr_ty: PointerType<'ctx>,
 ) -> BasicMetadataTypeEnum<'ctx> {
     match ty_str {
-        Some("string") | Some("fn") => BasicMetadataTypeEnum::PointerType(ptr_ty),
+        Some("string") | Some("String") | Some("fn") => BasicMetadataTypeEnum::PointerType(ptr_ty),
         Some(s) if s.starts_with('[') => BasicMetadataTypeEnum::PointerType(ptr_ty),
         Some(s) if s.contains('<') => BasicMetadataTypeEnum::PointerType(ptr_ty), // App type
         _ => BasicMetadataTypeEnum::IntType(i64_ty),
@@ -5338,8 +5339,8 @@ fn param_llvm_type<'ctx>(
 /// Map a `with fn` param type annotation string to a `Type` for LocalKind resolution.
 fn param_type_from_annot(ty_str: Option<&str>) -> Option<Type> {
     match ty_str {
-        Some("string") => Some(Type::Primitive(PrimitiveType::String)),
-        Some("int") | Some("bool") => Some(Type::Primitive(PrimitiveType::Int)),
+        Some("string") | Some("String") => Some(Type::Primitive(PrimitiveType::String)),
+        Some("int") | Some("Int") | Some("bool") | Some("Bool") => Some(Type::Primitive(PrimitiveType::Int)),
         Some(s) if s.starts_with('[') =>
             Some(Type::Slice(Box::new(Type::Primitive(PrimitiveType::Int)))),
         Some("fn") => Some(Type::Func {
