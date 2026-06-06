@@ -1,0 +1,20 @@
+effect Tick {
+    fn tick(label: String): Unit;
+}
+
+handler PrintTick : Tick {
+    fn tick(label) {
+        print(label);
+    }
+}
+
+fn count_down(label: String, n: Int) {
+    if (n > 0) {
+        tick(label);
+        count_down(label, n - 1);
+    }
+}
+
+run {
+    count_down("a", 3);
+} handle PrintTick;

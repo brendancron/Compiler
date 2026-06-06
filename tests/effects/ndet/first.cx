@@ -1,0 +1,33 @@
+effect Ndet {
+    ctl choose(opts: [Int]): Int;
+    ctl guard(cond: Bool): Unit;
+}
+
+handler First : Ndet {
+    ctl choose(opts) {
+        for (x in opts) {
+            var r = resume(x);
+            match r {
+                Option::Some(_) => { return r; },
+                Option::None    => {},
+            }
+        }
+        return Option::None;
+    }
+    ctl guard(c) {
+        if (c) { return resume; }
+        return Option::None;
+    }
+    return(v) { Option::Some(v) }
+}
+
+var r = run {
+    var x = choose([1, 2, 3, 4]);
+    guard(x % 2 == 0);
+    x
+} handle First;
+
+match r {
+    Option::Some(v) => { print(v); },
+    Option::None    => { print("none"); },
+}

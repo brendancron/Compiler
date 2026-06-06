@@ -573,16 +573,24 @@ pub fn process_stmt(
             });
         }
 
-        MetaStmt::HandlerDef { name, effect_name, params, ops } => {
+        MetaStmt::HandlerDef { name, effect_name, params, ops, return_clause } => {
             let op_ids: Result<Vec<StagedNodeId>, _> = ops
                 .iter()
                 .map(|&s| process_stmt(meta_ast, s, staged_ast, id_provider, dependency_set, staged_forest, type_env))
                 .collect();
+            let return_clause = match return_clause {
+                Some((param, body)) => {
+                    let body_id = process_stmt(meta_ast, *body, staged_ast, id_provider, dependency_set, staged_forest, type_env)?;
+                    Some((param.clone(), body_id))
+                }
+                None => None,
+            };
             staged_ast.insert_stmt(staged_stmt_id, StagedStmt::HandlerDef {
                 name: name.clone(),
                 effect_name: effect_name.clone(),
                 params: params.clone(),
                 ops: op_ids?,
+                return_clause,
             });
         }
 

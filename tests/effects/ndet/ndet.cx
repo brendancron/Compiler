@@ -1,59 +1,23 @@
-effect Ndet<T> {
-    ctl choose(opts: List<T>): T;
-    ctl guard(cond: Bool): Unit;
+effect ndet {
+    ctl choose(opt: [Int]): Int
+    ctl guard(cond: Bool): Bool
 }
 
-class All<T> : Ndet<T> {
-    ctl choose(opts): List<T> {
-        var acc = [];
-        for (x in opts) {
-            acc += resume x;
-        }
-        return acc;
-    }
-
-    ctl guard(c): List<T> {
-        if (c) return resume;
-        return [];
-    }
-
-    fn lift(v: T): List<T> {
-        return [v];
-    }
-}
-
-class First<T> : Ndet<T> {
-    ctl choose(opts): Option<T> {
-        for (x in opts) {
-            var r = resume x;
-            if (r.is_some()) return r;
-        }
-        return None;
-    }
-
-    ctl guard(c): Option<T> {
-        if (c) return resume;
-        return None;
-    }
-
-    fn lift(v: T): Option<T> {
-        return Some(v);
-    }
-}
-
-fn matching(xs, ys): Int {
-    var x = choose(xs);
-    var y = choose(ys);
+run {
+    var x = choose([1,2,3,4,5]);
+    var y = choose([3,5,7]);
     guard(x == y);
-    return x;
+    print(x);
+} handle ndet {
+    ctl choose(items) {
+        for(item in items) {
+            resume item;
+        }
+    }
+
+    ctl guard(cond) {
+        if (cond) {
+            resume;
+        }
+    }
 }
-
-var all = run {
-    matching([1,2,3,4,5], [3,5,7])
-} handle All();
-print("All: " + to_string(all));
-
-var first = run {
-    matching([1,2,3,4,5], [3,5,7])
-} handle First();
-print("First: " + to_string(first));

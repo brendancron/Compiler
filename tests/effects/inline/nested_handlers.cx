@@ -1,0 +1,28 @@
+effect Inner {
+    fn inner_op(msg: String): Unit;
+}
+
+effect Outer {
+    fn outer_op(msg: String): Unit;
+}
+
+handler InnerH : Inner {
+    fn inner_op(msg) {
+        print("[inner] " + msg);
+    }
+}
+
+handler OuterH : Outer {
+    fn outer_op(msg) {
+        print("[outer] " + msg);
+    }
+}
+
+run {
+    outer_op("before");
+    run {
+        inner_op("middle");
+        outer_op("during");
+    } handle InnerH;
+    outer_op("after");
+} handle OuterH;

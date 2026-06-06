@@ -14,18 +14,58 @@
 use std::collections::{HashMap, HashSet};
 
 
-use crate::semantics::cps::effect_marker::{CpsInfo, FnEffectInfo};
+use crate::semantics::cps::effect_marker::{CpsInfo, FnEffectInfo, collect_provided_fn_ops};
 use crate::semantics::meta::runtime_ast::{RuntimeAst, RuntimeExpr, RuntimeStmt};
 use crate::util::node_id::RuntimeNodeId;
 
-pub fn transform(ast: &mut RuntimeAst, info: &FnEffectInfo) {
-    if info.fn_effect_fns.is_empty() {
+pub fn transform(ast: &mut RuntimeAst, info_in: &FnEffectInfo) {
+    if info_in.fn_effect_fns.is_empty() {
         return;
     }
 
+    // Strip ops from `fn_effect_fns` entries that the function provides
+    // itself via WithFn. Those ops are supplied locally; the caller should
+    // not append `__h_op` args for them.
+    let mut info_owned: FnEffectInfo = (*info_in).clone();
+    let fn_names: Vec<(String, RuntimeNodeId)> = ast.stmts.values()
+        .filter_map(|s| if let RuntimeStmt::FnDecl { name, body, .. } = s {
+            Some((name.clone(), *body))
+        } else { None })
+        .collect();
+    for (name, body) in fn_names {
+        let provides = collect_provided_fn_ops(ast, body);
+        if provides.is_empty() { continue; }
+        if let Some(ops) = info_owned.fn_effect_fns.get_mut(&name) {
+            ops.retain(|op| !provides.contains(op));
+        }
+        if info_owned.fn_effect_fns.get(&name).map(|v| v.is_empty()).unwrap_or(false) {
+            info_owned.fn_effect_fns.remove(&name);
+        }
+    }
+    let info = &info_owned;
+
+    if info.fn_effect_fns.is_empty() && info.fn_ops.is_empty() {
+        return;
+    }
+
+    // Compute, per function, which fn-ops it PROVIDES via WithFn inside its
+    // own body. Functions that provide an op themselves do not need to
+    // receive `__h_{op}` from their caller — the local `var __h_{op} = ...`
+    // emitted in Pass 2 already supplies it.
+    let mut self_provided: HashMap<String, HashSet<String>> = HashMap::new();
+    for stmt in ast.stmts.values() {
+        if let RuntimeStmt::FnDecl { name, body, .. } = stmt {
+            let p = collect_provided_fn_ops(ast, *body);
+            if !p.is_empty() {
+                self_provided.insert(name.clone(), p);
+            }
+        }
+    }
+
     // Pass 1: rewrite FnDecl for functions that use fn-effect ops.
-    //   - append __h_{op} params
-    //   - inject `var {op} = __h_{op};` bindings at top of body
+    //   - append __h_{op} params (only for ops the function does NOT
+    //     provide itself)
+    //   - inject `var {op} = __h_{op};` bindings at top of body for those
     let fn_ids: Vec<RuntimeNodeId> = ast.stmts.keys().copied().collect();
     for id in fn_ids {
         let (name, mut params, type_params, body_id) = match ast.get_stmt(id) {
@@ -40,8 +80,19 @@ pub fn transform(ast: &mut RuntimeAst, info: &FnEffectInfo) {
             None => continue,
         };
 
+        // Filter out ops this function provides itself.
+        let provides = self_provided.get(&name).cloned().unwrap_or_default();
+        let needed_ops: Vec<String> = ops.iter()
+            .filter(|op| !provides.contains(op.as_str()))
+            .cloned()
+            .collect();
+
+        if needed_ops.is_empty() {
+            continue;
+        }
+
         // Add one handler param per fn-op, in sorted order.
-        for op in &ops {
+        for op in &needed_ops {
             params.push(handler_param_name(op));
         }
 
@@ -52,7 +103,7 @@ pub fn transform(ast: &mut RuntimeAst, info: &FnEffectInfo) {
         };
 
         let mut injected: Vec<RuntimeNodeId> = Vec::new();
-        for op in &ops {
+        for op in &needed_ops {
             let param_name = handler_param_name(op);
             let var_expr_id = fresh_expr(ast, RuntimeExpr::Variable(param_name));
             let bind_id = fresh_stmt(ast, RuntimeStmt::VarDecl {
@@ -291,9 +342,19 @@ fn rewrite_expr(
                 }
             }
 
+            // If the callee names a fn-op that the enclosing scope has bound
+            // to a `__h_*` local (via a sibling WithFn), redirect the call to
+            // that local. Otherwise the call falls through to the env, where
+            // the bare op name is unbound after handler_transform finishes.
+            let resolved_callee = if info.fn_ops.contains(&callee) {
+                scope.get(&callee).cloned().unwrap_or(callee)
+            } else {
+                callee
+            };
+
             // Update the original expr in-place so stale zero-arg versions
             // don't remain in ast.exprs and corrupt the polymorphic-call check.
-            ast.insert_expr(expr_id, RuntimeExpr::Call { callee, args });
+            ast.insert_expr(expr_id, RuntimeExpr::Call { callee: resolved_callee, args });
             expr_id
         }
         Some(RuntimeExpr::Lambda { params, body }) => {

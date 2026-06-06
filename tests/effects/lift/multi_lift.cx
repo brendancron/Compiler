@@ -1,50 +1,30 @@
 effect Counter {
-    ctl bump(): Unit;
+    ctl bump(): Int;
 }
 
-effect Logger {
-    ctl log(msg: String): Unit;
+effect Reader {
+    ctl ask(): Int;
 }
 
-class CountHandler<T> : Counter {
-    var n: Int = 0;
-
-    ctl bump() {
-        n += 1;
-        resume;
-    }
-
-    fn lift(v: T): (T, Int) {
-        return (v, n);
-    }
+handler ConstCounter : Counter {
+    ctl bump() { resume 1; }
+    return(v) { v }
 }
 
-class LogHandler<T> : Logger {
-    var msgs: List<String> = [];
-
-    ctl log(msg) {
-        msgs += [msg];
-        resume;
-    }
-
-    fn lift(v: T): (T, List<String>) {
-        return (v, msgs);
-    }
+handler Ten : Reader {
+    ctl ask() { resume 10; }
+    return(v) { "ten=" + to_string(v) }
 }
 
-fn compute(): Int {
-    log("starting");
-    bump();
-    bump();
-    log("ending");
-    bump();
-    return 42;
-}
+var n = run {
+    bump() + bump() + bump()
+} handle ConstCounter;
 
-var result = run {
-    compute()
-} handle CountHandler(), LogHandler();
+var s = run {
+    var a = ask();
+    var b = ask();
+    a * b
+} handle Ten;
 
-print(result.0.0);
-print(result.0.1);
-print(result.1);
+print(n);
+print(s);

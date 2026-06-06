@@ -1,0 +1,18 @@
+effect Log {
+    fn log(msg: String): Unit;
+}
+
+handler Print : Log {
+    fn log(msg) {
+        print(msg);
+    }
+}
+
+fn greet(name: String) {
+    log("Hello, " + name);
+}
+
+run {
+    greet("Alice");
+    greet("Bob");
+} handle Print;

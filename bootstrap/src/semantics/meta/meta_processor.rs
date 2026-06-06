@@ -1,4 +1,5 @@
 use super::conversion::*;
+use super::handler_specializer;
 use super::monomorphize::monomorphize;
 use super::runtime_ast::*;
 use super::staged_forest::{ModuleBinding, StagedForest};
@@ -179,6 +180,7 @@ where
             // them to post-compact runtime IDs.
             ast.spans = staged_forest.spans.clone();
             monomorphize(&mut ast, &type_map);
+            handler_specializer::specialize(&mut ast);
             // After monomorphize, mangled copies like `fn__int` also exist — mark them stdlib.
             let orig_stdlib = ast.stdlib_fn_names.clone();
             for stmt in ast.stmts.values() {

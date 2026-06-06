@@ -326,6 +326,9 @@ pub enum MetaStmt {
         effect_name: Option<String>,
         params: Vec<Param>,
         ops: Vec<MetaNodeId>,
+        /// Optional `return(v) { ... }` clause — the lift functor.
+        /// `(param_name, body_block_id)`. `None` means identity lift.
+        return_clause: Option<(String, MetaNodeId)>,
     },
 
     WithFn {
@@ -708,7 +711,7 @@ impl MetaAst {
                 ],
             ),
 
-            MetaStmt::HandlerDef { name, effect_name, params, ops } => {
+            MetaStmt::HandlerDef { name, effect_name, params, ops, return_clause: _ } => {
                 let label = if params.is_empty() {
                     format!("HandlerDef({}{})", name, effect_name.as_deref().map(|e| format!(":{e}")).unwrap_or_default())
                 } else {

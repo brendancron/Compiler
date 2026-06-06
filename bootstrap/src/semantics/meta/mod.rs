@@ -11,3 +11,4 @@ pub mod staged_forest;
 pub mod symbol_collector;
 //pub mod substitution;
 pub mod gen_collector;
+pub mod handler_specializer;

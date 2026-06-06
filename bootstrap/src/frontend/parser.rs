@@ -56,6 +56,26 @@ fn parse_effect_decl(
 }
 
 /// Parse `ctl op(params): ret { body }` or `fn op(params): ret { body }` (no leading `with`).
+/// Parse a `return(v) { body }` clause inside a `handler` or `handle` block.
+/// Returns the param name and the body block's id. The leading `return`
+/// keyword is consumed by this function.
+fn parse_return_clause(
+    tokens: &[Token],
+    pos: &mut usize,
+    ctx: &mut ParseCtx,
+) -> Result<(String, MetaNodeId), ParseError> {
+    consume(tokens, pos, TokenType::Return)?;
+    consume(tokens, pos, TokenType::LeftParen)?;
+    let param = consume(tokens, pos, TokenType::Identifier)?.expect_str();
+    // Type annotation on the lift param is allowed but ignored at parse time.
+    let _ = parse_type_annot(tokens, pos);
+    consume(tokens, pos, TokenType::RightParen)?;
+    consume(tokens, pos, TokenType::LeftBrace)?;
+    let body = parse_block(tokens, pos, ctx)?;
+    consume(tokens, pos, TokenType::RightBrace)?;
+    Ok((param, body))
+}
+
 fn parse_single_handler(
     tokens: &[Token],
     pos: &mut usize,
@@ -1894,8 +1914,13 @@ fn parse_stmt<'a>(
                 // already closes over them. So no rewriting needed here —
                 // the names are captured naturally by op body lambdas.
                 let mut ops = Vec::new();
+                let mut return_clause: Option<(String, MetaNodeId)> = None;
                 while !check(tokens, *pos, TokenType::RightBrace) && !check(tokens, *pos, TokenType::EOF) {
-                    ops.push(parse_single_handler(tokens, pos, ctx)?);
+                    if check(tokens, *pos, TokenType::Return) {
+                        return_clause = Some(parse_return_clause(tokens, pos, ctx)?);
+                    } else {
+                        ops.push(parse_single_handler(tokens, pos, ctx)?);
+                    }
                 }
                 consume(tokens, pos, TokenType::RightBrace)?;
                 let id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::HandlerDef {
@@ -1903,6 +1928,7 @@ fn parse_stmt<'a>(
                     effect_name: Some(effect_name),
                     params,
                     ops,
+                    return_clause,
                 });
                 ctx.record_span(id, start_loc);
                 Ok(id)
@@ -1914,8 +1940,13 @@ fn parse_stmt<'a>(
                 let name = consume_field_name(tokens, pos)?;
                 consume(tokens, pos, TokenType::LeftBrace)?;
                 let mut ops = Vec::new();
+                let mut return_clause: Option<(String, MetaNodeId)> = None;
                 while !check(tokens, *pos, TokenType::RightBrace) && !check(tokens, *pos, TokenType::EOF) {
-                    ops.push(parse_single_handler(tokens, pos, ctx)?);
+                    if check(tokens, *pos, TokenType::Return) {
+                        return_clause = Some(parse_return_clause(tokens, pos, ctx)?);
+                    } else {
+                        ops.push(parse_single_handler(tokens, pos, ctx)?);
+                    }
                 }
                 consume(tokens, pos, TokenType::RightBrace)?;
                 let id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::HandlerDef {
@@ -1923,6 +1954,7 @@ fn parse_stmt<'a>(
                     effect_name: None,
                     params: Vec::new(),
                     ops,
+                    return_clause,
                 });
                 ctx.record_span(id, start_loc);
                 Ok(id)

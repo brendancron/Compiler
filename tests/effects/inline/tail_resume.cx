@@ -1,0 +1,12 @@
+effect Read {
+    ctl read(): Int;
+}
+
+handler Const : Read {
+    ctl read() { resume 42; }
+}
+
+run {
+    var x = read();
+    print(x);
+} handle Const;

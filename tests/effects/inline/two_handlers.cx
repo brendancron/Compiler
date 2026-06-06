@@ -1,0 +1,27 @@
+effect Log {
+    fn log(msg: String): Unit;
+}
+
+handler Plain : Log {
+    fn log(msg) {
+        print(msg);
+    }
+}
+
+handler Prefixed(prefix: String) : Log {
+    fn log(msg) {
+        print(prefix + msg);
+    }
+}
+
+fn greet() {
+    log("hello");
+}
+
+run {
+    greet();
+} handle Plain;
+
+run {
+    greet();
+} handle Prefixed("> ");

@@ -19,10 +19,19 @@ pub struct CpsInfo {
 /// Tracks which `fn` (non-resumable) effect operations each function uses, so the
 /// handler-transform pass can add explicit handler parameters and rewrite call sites.
 #[derive(Debug, Default)]
+#[derive(Clone)]
 pub struct FnEffectInfo {
     /// All `fn` op names declared across all effects in the program.
     pub fn_ops: HashSet<String>,
-    /// function name → sorted list of fn-op names it uses (directly or transitively).
+    /// function name → sorted list of fn-op names invoked directly in the fn's own
+    /// statements (NOT inside nested lambda bodies). These are the call sites that
+    /// can be inlined when the handler is known statically.
+    pub fn_direct_ops: HashMap<String, Vec<String>>,
+    /// lambda body id → sorted list of fn-op names invoked directly inside that
+    /// lambda's body (not in further-nested lambdas). Used for per-lambda specialization.
+    pub lambda_direct_ops: HashMap<RuntimeNodeId, Vec<String>>,
+    /// function name → sorted list of fn-op names it needs in scope (directly,
+    /// transitively, or via nested lambda capture). Drives __h_* parameter threading.
     /// Sorted for deterministic parameter ordering.
     pub fn_effect_fns: HashMap<String, Vec<String>>,
 }
@@ -46,17 +55,49 @@ pub fn mark_fn_effects(ast: &RuntimeAst) -> FnEffectInfo {
         return info;
     }
 
-    // Phase 2 — find functions with direct fn-op calls in their body.
+    // Phase 2 — for each fn, collect:
+    //   * fn_effect_fns: ops anywhere in body (descends lambdas) → drives param threading
+    //   * fn_direct_ops: ops in fn's own statements only (skips lambda bodies)
+    //   * lambda_direct_ops: per-lambda direct ops (skips further-nested lambdas)
     let mut fn_bodies: HashMap<String, RuntimeNodeId> = HashMap::new();
     for stmt in ast.stmts.values() {
         if let RuntimeStmt::FnDecl { name, body, .. } = stmt {
             fn_bodies.insert(name.clone(), *body);
-            let used: HashSet<String> = collect_fn_op_calls(ast, *body, &info.fn_ops);
-            if !used.is_empty() {
-                let mut ops: Vec<String> = used.into_iter().collect();
+
+            let used_all = collect_fn_op_calls(ast, *body, &info.fn_ops);
+            if !used_all.is_empty() {
+                let mut ops: Vec<String> = used_all.into_iter().collect();
                 ops.sort();
                 info.fn_effect_fns.insert(name.clone(), ops);
             }
+
+            let used_direct = collect_fn_op_calls_self_only(ast, *body, &info.fn_ops);
+            if !used_direct.is_empty() {
+                let mut ops: Vec<String> = used_direct.into_iter().collect();
+                ops.sort();
+                info.fn_direct_ops.insert(name.clone(), ops);
+            }
+        }
+    }
+
+    // Per-lambda direct ops — collect every lambda reachable from any fn body or top-level.
+    let mut lambda_bodies: Vec<RuntimeNodeId> = Vec::new();
+    for stmt in ast.stmts.values() {
+        if let RuntimeStmt::FnDecl { body, .. } = stmt {
+            collect_lambda_bodies_stmt(ast, *body, &mut lambda_bodies);
+        }
+    }
+    for stmt_id in ast.stmts.keys() {
+        collect_lambda_bodies_stmt(ast, *stmt_id, &mut lambda_bodies);
+    }
+    lambda_bodies.sort();
+    lambda_bodies.dedup();
+    for lambda_body in lambda_bodies {
+        let used = collect_fn_op_calls_self_only(ast, lambda_body, &info.fn_ops);
+        if !used.is_empty() {
+            let mut ops: Vec<String> = used.into_iter().collect();
+            ops.sort();
+            info.lambda_direct_ops.insert(lambda_body, ops);
         }
     }
 
@@ -82,7 +123,13 @@ pub fn mark_fn_effects(ast: &RuntimeAst) -> FnEffectInfo {
 
     let mut queue: VecDeque<String> = info.fn_effect_fns.keys().cloned().collect();
     while let Some(fn_name) = queue.pop_front() {
-        let ops = info.fn_effect_fns[&fn_name].clone();
+        // Filter ops: the callee's own WithFn-provided ops do not need to be
+        // requested from its callers — it supplies them locally.
+        let callee_provides = provided.get(&fn_name);
+        let ops: Vec<String> = info.fn_effect_fns[&fn_name].iter()
+            .filter(|op| !callee_provides.map_or(false, |p| p.contains(op.as_str())))
+            .cloned()
+            .collect();
         if let Some(caller_list) = callers.get(&fn_name) {
             for caller in caller_list.clone() {
                 let caller_provides = provided.get(&caller);
@@ -111,7 +158,7 @@ pub fn mark_fn_effects(ast: &RuntimeAst) -> FnEffectInfo {
 }
 
 /// Collect all fn-op names that a function body installs via `WithFn`.
-fn collect_provided_fn_ops(ast: &RuntimeAst, body_id: RuntimeNodeId) -> HashSet<String> {
+pub fn collect_provided_fn_ops(ast: &RuntimeAst, body_id: RuntimeNodeId) -> HashSet<String> {
     let mut out = HashSet::new();
     collect_provided_fn_ops_stmt(ast, body_id, &mut out);
     out
@@ -189,6 +236,125 @@ fn collect_fn_op_calls_expr(ast: &RuntimeAst, expr_id: RuntimeNodeId, fn_ops: &H
         _ => return,
     };
     for c in children { collect_fn_op_calls_expr(ast, c, fn_ops, out); }
+}
+
+/// Like `collect_fn_op_calls` but does NOT descend into nested lambda bodies.
+/// Used to attribute ops to the lexical owner (a fn or a specific lambda) rather
+/// than aggregating across all enclosed lambdas.
+fn collect_fn_op_calls_self_only(ast: &RuntimeAst, body_id: RuntimeNodeId, fn_ops: &HashSet<String>) -> HashSet<String> {
+    let mut out = HashSet::new();
+    collect_fn_op_calls_self_only_stmt(ast, body_id, fn_ops, &mut out);
+    out
+}
+
+fn collect_fn_op_calls_self_only_stmt(ast: &RuntimeAst, stmt_id: RuntimeNodeId, fn_ops: &HashSet<String>, out: &mut HashSet<String>) {
+    match ast.get_stmt(stmt_id) {
+        Some(RuntimeStmt::Block(stmts)) => {
+            let stmts = stmts.clone();
+            for &id in &stmts { collect_fn_op_calls_self_only_stmt(ast, id, fn_ops, out); }
+        }
+        Some(RuntimeStmt::VarDecl { expr, .. }) | Some(RuntimeStmt::ExprStmt(expr)) => {
+            collect_fn_op_calls_self_only_expr(ast, *expr, fn_ops, out);
+        }
+        Some(RuntimeStmt::If { cond, body, else_branch }) => {
+            collect_fn_op_calls_self_only_expr(ast, *cond, fn_ops, out);
+            collect_fn_op_calls_self_only_stmt(ast, *body, fn_ops, out);
+            if let Some(e) = else_branch { collect_fn_op_calls_self_only_stmt(ast, *e, fn_ops, out); }
+        }
+        Some(RuntimeStmt::WhileLoop { cond, body }) => {
+            collect_fn_op_calls_self_only_expr(ast, *cond, fn_ops, out);
+            collect_fn_op_calls_self_only_stmt(ast, *body, fn_ops, out);
+        }
+        Some(RuntimeStmt::ForEach { body, .. }) => collect_fn_op_calls_self_only_stmt(ast, *body, fn_ops, out),
+        Some(RuntimeStmt::Return(Some(expr))) => collect_fn_op_calls_self_only_expr(ast, *expr, fn_ops, out),
+        Some(RuntimeStmt::Print(expr)) => collect_fn_op_calls_self_only_expr(ast, *expr, fn_ops, out),
+        Some(RuntimeStmt::Assign { expr, .. }) => collect_fn_op_calls_self_only_expr(ast, *expr, fn_ops, out),
+        _ => {}
+    }
+}
+
+fn collect_fn_op_calls_self_only_expr(ast: &RuntimeAst, expr_id: RuntimeNodeId, fn_ops: &HashSet<String>, out: &mut HashSet<String>) {
+    let children: Vec<RuntimeNodeId> = match ast.get_expr(expr_id) {
+        Some(RuntimeExpr::Call { callee, args }) => {
+            if fn_ops.contains(callee.as_str()) {
+                out.insert(callee.clone());
+            }
+            args.clone()
+        }
+        Some(RuntimeExpr::Add(a, b) | RuntimeExpr::Sub(a, b) | RuntimeExpr::Mult(a, b)
+            | RuntimeExpr::Div(a, b) | RuntimeExpr::Equals(a, b) | RuntimeExpr::NotEquals(a, b)
+            | RuntimeExpr::Lt(a, b) | RuntimeExpr::Gt(a, b) | RuntimeExpr::Lte(a, b)
+            | RuntimeExpr::Gte(a, b) | RuntimeExpr::And(a, b) | RuntimeExpr::Or(a, b)) => {
+            vec![*a, *b]
+        }
+        Some(RuntimeExpr::Not(a)) => vec![*a],
+        Some(RuntimeExpr::List(elems) | RuntimeExpr::Tuple(elems)) => elems.clone(),
+        Some(RuntimeExpr::Lambda { .. }) => return,
+        Some(RuntimeExpr::DotCall { object, args, .. }) => {
+            let mut v = vec![*object];
+            v.extend(args.iter().copied());
+            v
+        }
+        Some(RuntimeExpr::ClassLiteral { fields, .. }) => fields.iter().map(|(_, id)| *id).collect(),
+        _ => return,
+    };
+    for c in children { collect_fn_op_calls_self_only_expr(ast, c, fn_ops, out); }
+}
+
+/// Walk a stmt subtree and collect every `Lambda` body id (descending freely
+/// so nested lambdas are all reported). Caller can then run a self-only op
+/// collection on each, attributing ops to their lexical lambda.
+fn collect_lambda_bodies_stmt(ast: &RuntimeAst, stmt_id: RuntimeNodeId, out: &mut Vec<RuntimeNodeId>) {
+    match ast.get_stmt(stmt_id) {
+        Some(RuntimeStmt::Block(stmts)) => {
+            let stmts = stmts.clone();
+            for &id in &stmts { collect_lambda_bodies_stmt(ast, id, out); }
+        }
+        Some(RuntimeStmt::VarDecl { expr, .. }) | Some(RuntimeStmt::ExprStmt(expr)) => {
+            collect_lambda_bodies_expr(ast, *expr, out);
+        }
+        Some(RuntimeStmt::If { cond, body, else_branch }) => {
+            collect_lambda_bodies_expr(ast, *cond, out);
+            collect_lambda_bodies_stmt(ast, *body, out);
+            if let Some(e) = else_branch { collect_lambda_bodies_stmt(ast, *e, out); }
+        }
+        Some(RuntimeStmt::WhileLoop { cond, body }) => {
+            collect_lambda_bodies_expr(ast, *cond, out);
+            collect_lambda_bodies_stmt(ast, *body, out);
+        }
+        Some(RuntimeStmt::ForEach { body, .. }) => collect_lambda_bodies_stmt(ast, *body, out),
+        Some(RuntimeStmt::Return(Some(expr))) => collect_lambda_bodies_expr(ast, *expr, out),
+        Some(RuntimeStmt::Print(expr)) => collect_lambda_bodies_expr(ast, *expr, out),
+        Some(RuntimeStmt::Assign { expr, .. }) => collect_lambda_bodies_expr(ast, *expr, out),
+        _ => {}
+    }
+}
+
+fn collect_lambda_bodies_expr(ast: &RuntimeAst, expr_id: RuntimeNodeId, out: &mut Vec<RuntimeNodeId>) {
+    let children: Vec<RuntimeNodeId> = match ast.get_expr(expr_id) {
+        Some(RuntimeExpr::Call { args, .. }) => args.clone(),
+        Some(RuntimeExpr::Add(a, b) | RuntimeExpr::Sub(a, b) | RuntimeExpr::Mult(a, b)
+            | RuntimeExpr::Div(a, b) | RuntimeExpr::Equals(a, b) | RuntimeExpr::NotEquals(a, b)
+            | RuntimeExpr::Lt(a, b) | RuntimeExpr::Gt(a, b) | RuntimeExpr::Lte(a, b)
+            | RuntimeExpr::Gte(a, b) | RuntimeExpr::And(a, b) | RuntimeExpr::Or(a, b)) => {
+            vec![*a, *b]
+        }
+        Some(RuntimeExpr::Not(a)) => vec![*a],
+        Some(RuntimeExpr::List(elems) | RuntimeExpr::Tuple(elems)) => elems.clone(),
+        Some(RuntimeExpr::Lambda { body, .. }) => {
+            out.push(*body);
+            collect_lambda_bodies_stmt(ast, *body, out);
+            return;
+        }
+        Some(RuntimeExpr::DotCall { object, args, .. }) => {
+            let mut v = vec![*object];
+            v.extend(args.iter().copied());
+            v
+        }
+        Some(RuntimeExpr::ClassLiteral { fields, .. }) => fields.iter().map(|(_, id)| *id).collect(),
+        _ => return,
+    };
+    for c in children { collect_lambda_bodies_expr(ast, c, out); }
 }
 
 /// Walk `ast` and populate a `CpsInfo` describing which ops are `ctl` and which

@@ -249,6 +249,8 @@ pub enum StagedStmt {
         effect_name: Option<String>,
         params: Vec<crate::frontend::meta_ast::Param>,
         ops: Vec<StagedNodeId>,
+        /// Optional `return(v) { ... }` clause — the lift functor.
+        return_clause: Option<(String, StagedNodeId)>,
     },
 
     WithFn {

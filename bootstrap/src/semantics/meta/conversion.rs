@@ -12,7 +12,7 @@ fn rid(id: StagedNodeId) -> RuntimeNodeId { RuntimeNodeId(id.0) }
 /// minus names that are locally bound within those stmts.
 /// Used for lambda-lifting `__handle_N` so that free variables from the
 /// enclosing function scope are passed as explicit parameters.
-fn collect_free_vars(ast: &RuntimeAst, stmts: &[RuntimeNodeId]) -> Vec<String> {
+pub fn collect_free_vars(ast: &RuntimeAst, stmts: &[RuntimeNodeId]) -> Vec<String> {
     let mut referenced: HashSet<String> = HashSet::new();
     let mut locally_bound: HashSet<String> = HashSet::new();
     for &s in stmts {
@@ -168,6 +168,17 @@ pub fn convert_to_runtime(
             }
         })
         .collect();
+    // Handler name → (lift param name, lift body block runtime id) — the
+    // optional `return(v) { ... }` clause.
+    let handler_returns: std::collections::HashMap<String, (String, RuntimeNodeId)> = staged.stmts.values()
+        .filter_map(|stmt| {
+            if let StagedStmt::HandlerDef { name, return_clause: Some((p, b)), .. } = stmt {
+                Some((name.clone(), (p.clone(), rid(*b))))
+            } else {
+                None
+            }
+        })
+        .collect();
 
     // Build a variable-name → class-name map by scanning VarDecls that
     // initialize from a class constructor call (`var x = ClassName(...);`).
@@ -220,6 +231,7 @@ pub fn convert_to_runtime(
     let mut deferred_handles: Vec<(
         RuntimeNodeId, RuntimeNodeId, Vec<RuntimeNodeId>,
         Vec<(String, RuntimeNodeId)>,
+        Option<(String, String, RuntimeNodeId)>,
     )> = Vec::new();
 
     for (id, expr) in &staged.exprs {
@@ -228,7 +240,7 @@ pub fn convert_to_runtime(
                 let all_ops: Vec<RuntimeNodeId> = effects.iter()
                     .flat_map(|(_, stmts)| stmts.iter().map(|&s| rid(s)))
                     .collect();
-                deferred_handles.push((rid(*id), rid(*body), all_ops, Vec::new()));
+                deferred_handles.push((rid(*id), rid(*body), all_ops, Vec::new(), None));
                 continue;
             }
             StagedExpr::RunWith { body, handler_name, args } => {
@@ -240,16 +252,15 @@ pub fn convert_to_runtime(
                         runtime.insert_expr(rid(a), runtime_expr);
                     }
                 }
-                // Bind each handler param to its install-site arg. The op
-                // bodies reference them as free vars and capture them via the
-                // existing lambda-closure machinery.
                 let param_bindings: Vec<(String, RuntimeNodeId)> =
                     if let Some(pnames) = handler_param_names.get(handler_name) {
                         pnames.iter().zip(args.iter())
                             .map(|(n, &a)| (n.clone(), rid(a)))
                             .collect()
                     } else { Vec::new() };
-                deferred_handles.push((rid(*id), rid(*body), ops, param_bindings));
+                let lift = handler_returns.get(handler_name).cloned()
+                    .map(|(param, body)| (handler_name.clone(), param, body));
+                deferred_handles.push((rid(*id), rid(*body), ops, param_bindings, lift));
                 continue;
             }
             _ => {}
@@ -350,16 +361,69 @@ pub fn convert_to_runtime(
     for builtin in &["readfile", "writefile", "to_string", "to_int", "free", "print"] {
         globals.insert(builtin.to_string());
     }
+    // The lift fns emitted below are top-level — pre-register their names so
+    // the free-var collector doesn't treat them as captures.
+    for handler_name in handler_returns.keys() {
+        globals.insert(format!("__lift_{}", handler_name));
+    }
 
     // Second pass: process deferred RunHandle/RunWith exprs.
-    for (id, body, handler_stmts, param_bindings) in deferred_handles {
+    let mut emitted_lifts: HashSet<String> = HashSet::new();
+    for (id, body, handler_stmts, param_bindings, lift) in deferred_handles {
         let fn_name = format!("__handle_{}", next_id);
         next_id += 1;
 
-        let body_inner: Vec<RuntimeNodeId> = match runtime.get_stmt(body) {
+        let mut body_inner: Vec<RuntimeNodeId> = match runtime.get_stmt(body) {
             Some(RuntimeStmt::Block(stmts)) => stmts.clone(),
             _ => vec![body],
         };
+
+        // Wrap the body's tail expression in `__lift_<handler>(...)` if the
+        // handler has a `return(v) { ... }` clause. Chunk 2 supports only an
+        // `ExprStmt`-tailed body — that covers the common `run { expr }` form
+        // and is enough to exercise the round-trip; richer body shapes (return
+        // stmts, statement-tail with implicit Unit) fall through unchanged.
+        if let Some((handler_name, lift_param, lift_body)) = lift {
+            let lift_fn = format!("__lift_{}", handler_name);
+            if emitted_lifts.insert(lift_fn.clone()) {
+                // Convert the tail `ExprStmt(e)` of the lift body to
+                // `Return(Some(e))` so the lift fn yields a value. Other tail
+                // shapes (already-Return, control flow) are left alone.
+                if let Some(RuntimeStmt::Block(stmts)) = runtime.get_stmt(lift_body).cloned() {
+                    if let Some(&tail) = stmts.last() {
+                        if let Some(RuntimeStmt::ExprStmt(e)) = runtime.get_stmt(tail).cloned() {
+                            runtime.stmts.insert(tail, RuntimeStmt::Return(Some(e)));
+                        }
+                    }
+                }
+                let decl_id = RuntimeNodeId(next_id);
+                next_id += 1;
+                runtime.insert_stmt(decl_id, RuntimeStmt::FnDecl {
+                    name: lift_fn.clone(),
+                    params: vec![lift_param],
+                    type_params: vec![],
+                    body: lift_body,
+                });
+                runtime.sem_root_stmts.push(decl_id);
+            }
+            if let Some(&tail_id) = body_inner.last() {
+                if let Some(RuntimeStmt::ExprStmt(tail_expr)) = runtime.get_stmt(tail_id).cloned() {
+                    let call_id = RuntimeNodeId(next_id);
+                    next_id += 1;
+                    runtime.insert_expr(call_id, RuntimeExpr::Call {
+                        callee: lift_fn,
+                        args: vec![tail_expr],
+                    });
+                    // Emit `return __lift_<name>(tail_expr);` so the synthetic
+                    // __handle_N fn actually yields the lifted value to its
+                    // caller (the run-expression).
+                    let new_tail = RuntimeNodeId(next_id);
+                    next_id += 1;
+                    runtime.insert_stmt(new_tail, RuntimeStmt::Return(Some(call_id)));
+                    *body_inner.last_mut().unwrap() = new_tail;
+                }
+            }
+        }
         // Bind each handler param to its install-site arg expression. The
         // op bodies' free-var capture machinery picks the bindings up at
         // codegen / interpretation.

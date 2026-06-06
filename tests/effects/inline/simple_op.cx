@@ -1,0 +1,14 @@
+effect Log {
+    fn log(msg: String): Unit;
+}
+
+handler Print : Log {
+    fn log(msg) {
+        print(msg);
+    }
+}
+
+run {
+    log("hello");
+    log("world");
+} handle Print;

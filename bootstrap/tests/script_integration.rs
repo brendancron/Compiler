@@ -340,8 +340,20 @@ mod script_integration {
         cx_test!(effect_log, "tests/effects/log", "log");
         cx_test!(effect_exception, "tests/effects/exception", "exception");
         cx_test!(effect_flip, "tests/effects/flip", "flip");
+        cx_test!(effect_guard, "tests/effects/guard", "guard");
+        cx_test!(effect_ndet_all, "tests/effects/ndet", "all");
+        cx_test!(effect_ndet_first, "tests/effects/ndet", "first");
+        cx_test!(effect_lift, "tests/effects/lift", "lift");
+        cx_test!(effect_multi_lift, "tests/effects/lift", "multi_lift");
         cx_test!(effect_handler, "tests/effects/handler", "handler");
         cx_test!(effect_stream, "tests/effects/stream", "stream");
+        cx_test!(inline_simple_op, "tests/effects/inline", "simple_op");
+        cx_test!(inline_transitive, "tests/effects/inline", "transitive");
+        cx_test!(inline_recursive, "tests/effects/inline", "recursive");
+        cx_test!(inline_two_handlers, "tests/effects/inline", "two_handlers");
+        cx_test!(inline_lambda_with_effect, "tests/effects/inline", "lambda_with_effect");
+        cx_test!(inline_nested_handlers, "tests/effects/inline", "nested_handlers");
+        cx_test!(inline_tail_resume, "tests/effects/inline", "tail_resume");
         cx_test!(effect_async, "tests/effects/async", "async");
     }
 

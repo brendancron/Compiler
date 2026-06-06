@@ -1,0 +1,4 @@
+[outer] before
+[inner] middle
+[outer] during
+[outer] after

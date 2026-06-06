@@ -484,25 +484,57 @@ fn infer_expr_impl(
         }
 
         MetaExpr::RunWith { body, handler_name, args: _ } => {
-            let ret_tv = Type::Var(env.fresh());
+            let body_tv = Type::Var(env.fresh());
             let mut body_ctx = TypeCheckCtx::new();
-            body_ctx.return_type = Some(ret_tv.clone());
+            body_ctx.return_type = Some(body_tv.clone());
             infer_stmt(ast, *body, env, subst, &mut body_ctx, table)?;
-            // Find and type-check the handler's ops
-            let handler_ops: Vec<MetaNodeId> = ast.sem_root_stmts.iter()
-                .filter_map(|&id| {
-                    if let Some(MetaStmt::HandlerDef { name, ops, .. }) = ast.get_stmt(id) {
-                        if name == handler_name { Some(ops.clone()) } else { None }
-                    } else { None }
-                })
-                .flatten()
-                .collect();
+            // Locate the handler decl + collect ops + return_clause.
+            let mut handler_ops: Vec<MetaNodeId> = Vec::new();
+            let mut return_clause: Option<(String, MetaNodeId)> = None;
+            for &id in &ast.sem_root_stmts {
+                if let Some(MetaStmt::HandlerDef { name, ops, return_clause: rc, .. }) = ast.get_stmt(id) {
+                    if name == handler_name {
+                        handler_ops = ops.clone();
+                        return_clause = rc.clone();
+                        break;
+                    }
+                }
+            }
+            // Each ctl op's resume returns body_tv (the type the run-body would
+            // have produced before lift). The op's own return type matches the
+            // run-expression's final type, which is the lift's return type.
             for h in handler_ops {
                 let mut h_ctx = TypeCheckCtx::new();
-                h_ctx.return_type = Some(ret_tv.clone());
+                h_ctx.return_type = Some(body_tv.clone());
                 infer_stmt(ast, h, env, subst, &mut h_ctx, table)?;
             }
-            ret_tv
+            // With a `return(v) { ... }` clause, the run-expression's value
+            // type is the lift body's inferred type (with `v` bound to body_tv).
+            // Without a clause, identity → body_tv.
+            match return_clause {
+                Some((param, lift_body)) => {
+                    env.push_scope();
+                    env.bind_mono(&param, body_tv.clone());
+                    let mut lift_ctx = TypeCheckCtx::new();
+                    infer_stmt(ast, lift_body, env, subst, &mut lift_ctx, table)?;
+                    // The lift's effective return type is the type of its tail
+                    // expression (since `return(v) { e }` is desugared to a fn
+                    // whose body's tail ExprStmt becomes the Return). Block
+                    // inference itself reports unit, so look at the tail
+                    // directly.
+                    let lift_ty = match ast.get_stmt(lift_body) {
+                        Some(MetaStmt::Block(stmts)) => match stmts.last().and_then(|&id| ast.get_stmt(id)) {
+                            Some(MetaStmt::ExprStmt(e)) => infer_expr(ast, *e, env, subst, table)?,
+                            Some(MetaStmt::Return(Some(e))) => infer_expr(ast, *e, env, subst, table)?,
+                            _ => Type::Var(env.fresh()),
+                        },
+                        _ => Type::Var(env.fresh()),
+                    };
+                    env.pop_scope();
+                    lift_ty
+                }
+                None => body_tv,
+            }
         }
     };
 

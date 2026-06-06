@@ -31,7 +31,7 @@ fn mangle_type(ty: &Type) -> String {
 
 // ── ID-remapping clone helpers ──────────────────────────────────────────────
 
-fn clone_expr(
+pub(crate) fn clone_expr(
     ast: &RuntimeAst,
     expr_id: RuntimeNodeId,
     next_id: &mut usize,
@@ -117,7 +117,7 @@ fn clone_expr(
     new_id
 }
 
-fn clone_stmt(
+pub(crate) fn clone_stmt(
     ast: &RuntimeAst,
     stmt_id: RuntimeNodeId,
     next_id: &mut usize,

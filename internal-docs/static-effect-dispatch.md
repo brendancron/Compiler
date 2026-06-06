@@ -1,23 +1,33 @@
-# Static Effect Dispatch (Koka-style)
+# Static Effect Dispatch via Metaprocessing Reduction
 
-Status: design intent, multi-phase work, not started.
+Status: design intent, not started. Handler keyword work (separate
+`handler` from `class`) is complete and a prerequisite.
 
 ## Goal
 
-Replace the current dynamic-dispatch model for effect handlers with
-whole-program-ish static dispatch. Every effect operation call site
-resolves to a direct LLVM call into a specialized handler — no dispatch
-tables, no closure environments threaded at runtime, no indirect calls.
+Treat handler installation as a meta-time reduction inside
+`meta_processor`. Every `run { body } handle Name(args)` reduces by
+looking up the named `HandlerDef`, substituting params with args, and
+inlining op bodies at the matching call sites inside the run block.
 
-This is the Koka model. The win is (a) performance — effect ops become
-as cheap as regular function calls, (b) reasoning clarity — you can
-inspect the IR and see exactly which handler runs, (c) simpler runtime
-— ctl_handlers / fn_handlers stacks go away.
+The RuntimeAst that emerges from meta_processor has **no handler
+concepts** — no `HandlerDef`, `WithFn`, `WithCtl`, and no
+`with_fn_active` / `with_ctl_active` dispatch tables downstream.
+`Resume` stays because it's a continuation primitive (not a handler
+primitive); `cps_transform` continues to lower it to a tail call into
+the captured continuation, same as today. The change is in which
+*function* the resume is reached from, not in resume itself.
+
+This is the Koka compilation strategy expressed in your existing
+pipeline. The win is (a) performance — effect ops become as cheap as
+regular function calls, (b) reasoning clarity — inspect the IR and see
+exactly what code runs, (c) simpler downstream — cps_transform and
+codegen lose a whole category of code paths.
 
 The cost is (a) compile-time work — substantial. (b) constraints on
-what programs are expressible — `handle some_var` either disappears or
-needs special handling. (c) months of refactoring across the CPS
-transform, monomorphization, and codegen.
+what programs are expressible — handlers must be statically named at
+their install site (already enforced by the `handler` keyword in #11).
+(c) extends meta_processor with a new kind of reduction.
 
 ## Current model (for reference)
 
@@ -36,20 +46,25 @@ transform, monomorphization, and codegen.
 
 1. **Effect rows.** Every function carries a statically inferred row
    of effects it can perform. `effect_inference.rs` already starts this
-   — it needs to be made total and load-bearing.
-2. **Handler propagation.** At every call site of a function with a
-   non-empty row, the caller's handler context is propagated.
-3. **Specialization (handler-aware monomorphization).** A function
-   `fn greet(name)` with effect `Log` becomes a family
-   `greet__handle_print_log`, `greet__handle_prefix_log`, etc. — one
-   per distinct handler context observed at call sites.
-4. **Direct dispatch.** Every effect op call site resolves at compile
-   time to a direct call into the matching specialization of the
-   handler body. No table lookup.
-5. **CPS becomes inlined.** Continuations are still threaded as
-   explicit arguments, but the receiver knows statically which body to
-   run. Koka calls this "tail-resumptive" optimization for the common
-   single-resume case.
+   — it needs to be made total and load-bearing before any reduction
+   can run.
+2. **Handler propagation at meta time.** When meta_processor encounters
+   a `RunWith { handler_name, args, body }`, it looks up the named
+   HandlerDef in scope, binds params → args at the install site, and
+   walks `body` looking for effect-op calls handled by this handler.
+3. **Specialization.** For every function transitively called from
+   `body` that performs a handled op, meta_processor emits a
+   specialized copy `fn_name__handle_Name` where each op call is
+   replaced by the inlined op body (closed over the install-site
+   bindings). Call sites in body are rewritten to the specialized
+   names.
+4. **Inlined op bodies.** Inside specialized functions, every handled
+   op call becomes a direct sequence: bind op args, run op body,
+   reach `resume` → tail-call the saved continuation.
+5. **CPS still threads continuations.** `cps_transform` runs on the
+   already-reduced AST. It only worries about resumption flow, not
+   handler routing. No `with_fn_active` / `with_ctl_active` tables in
+   codegen.
 
 ## Constraints
 
@@ -72,86 +87,128 @@ transform, monomorphization, and codegen.
   partially convert without breaking the dispatch model. PRs must
   preserve test invariants at every commit point.
 
-## Phases
+## TDD strategy
 
-### Phase 1 — Effect row foundation
+- **Layer 1 — behavioral preservation.** `tests/effects/inline/*.cx`
+  programs covering specialization edge cases. All pass on the
+  interpreter today; serve as a regression net through the rewrite.
+- **Layer 2 — pass-output assertions.**
+  `bootstrap/tests/handler_reduction_tests.rs`: parse + stage + meta-
+  process a small program, assert the resulting RuntimeAst is
+  handler-free, specialized fn names exist, call sites point at
+  specialized targets.
+- **Layer 3 — negative tests.** Programs where an op call site is
+  statically unresolvable should fail with a clear error from effect
+  inference.
 
-Make effect inference total: every function's effect row is recorded
-and queryable. Strengthen the row type so it carries which specific
-handler installation site each effect originates from (not just "this
-function uses Log" but "this function uses the Log installed at
-stmt_id N"). Confirm the existing `effect_inference::infer_and_check`
-catches every effect use.
+## Chunks
 
-This phase makes no behavioral changes. It instruments the foundation.
+Each chunk ends with a working compiler. Each fits one focused
+session (1–3 hours). Sequential dependencies — earlier chunks unblock
+later ones. Acceptance criterion is stated per chunk.
 
-**Estimated effort:** 1-2 weeks.
+### Test scaffolding
 
-### Phase 2 — Static dispatch when resolvable
+**Chunk 1: Layer 1 test files.** Write 6 `.cx`/`.txt` pairs under
+`tests/effects/inline/` covering: `simple_op`, `transitive`,
+`recursive`, `two_handlers`, `lambda_with_effect`, `nested_handlers`.
+Register in `script_integration.rs`. Done when all 6 new tests pass
+on the interpreter.
 
-At every effect op call site, do a backward flow analysis: can we
-statically identify the unique handler installation site that will
-service this op when the program runs?
+### Effect inference foundation
 
-If yes, emit a direct call into that handler's function.
-If no, fall back to the existing dispatch table.
+**Chunk 2: Effect inference audit.** Read `effect_inference.rs`.
+Write `bootstrap/tests/effect_inference_completeness.rs` asserting
+every function in a sample program has a recorded effect row. Identify
+gaps; do not fix yet. Done when the test exists and its failure
+message lists every gap.
 
-This is incremental — the dispatch table stays, but it becomes
-unused for the easy cases. All existing tests should still pass
-because the fallback handles whatever the analysis can't prove.
+**Chunk 3: Effect inference — direct calls.** Fix gaps for direct
+function calls (`fn f() { g(); }` — f's row includes g's row). Done
+when completeness test passes for programs without function values
+or recursion.
 
-**Estimated effort:** 2-3 weeks.
+**Chunk 4: Effect inference — recursion + lambdas.** Recursive
+functions and lambda-with-effects. Function values last. Done when
+completeness test passes for all Layer 1 test programs.
 
-### Phase 3 — Handler-aware specialization
+### Reduction MVP
 
-Extend `monomorphize.rs` to specialize over handler contexts. The
-existing pass groups call sites by concrete argument types; extend it
-to also group by handler installation context.
+**Chunk 5: No-op reducer framework.** Add
+`bootstrap/src/semantics/meta/handler_reduce.rs` exposing
+`reduce_handlers(ast: RuntimeAst) -> RuntimeAst`. Wire into
+`meta_processor` after the current evaluation step; returns the AST
+unchanged. Write `bootstrap/tests/handler_reduction_tests.rs` with
+one test asserting "no-op pass-through." Done when existing suites
+still pass and the new test passes.
 
-For each `greet(name)` call observed at call site with handler context
-X, emit `greet__X` if not already present. Rewrite the call site to
-target the specialized name. Recursively specialize the body's effect
-op calls under context X.
+**Chunk 6: Inline single direct fn-op call.**
+`run { op(args); } handle Name { fn op(p) { body } }` reduces to
+`run { body[args/p] }`. Direct call from run body only; fn-shaped
+ops only; no ctl, no resume. Done when `simple_op.cx` passes through
+the reducer and the reduced AST has no `WithFn`/`HandlerDef` for this
+case.
 
-**Estimated effort:** 2-3 weeks.
+**Chunk 7: Inline ctl op + resume.** Same as Chunk 6 but for `ctl`
+ops with `resume`. Inlined body's `resume` becomes a tail call to
+the rest of the run body (CPS transform does the actual lowering).
+Done when simple `ctl` tests pass; resume still works downstream.
 
-### Phase 4 — Drop the dispatch table
+### Specialization
 
-After Phase 3, most programs will have no remaining dynamic call sites.
-Add a verification pass: assert `with_fn_active`/`with_ctl_active` are
-empty for the program. If so, strip the table emission entirely.
+**Chunk 8: Single transitive call.** `run { foo(); } handle Name`
+where `foo()` does an op. Emit `foo__handle_Name` with the op
+inlined; rewrite the call site. Done when `transitive.cx` passes
+with reduced output asserted.
 
-Programs that still need the table (handler-as-value cases, or
-analysis-incompleteness fallbacks) keep it as documented opt-in.
+**Chunk 9: Recursion.** `fn f() { op(); f(); }` — the recursive
+call inside `f__handle_Name` must point at `f__handle_Name`. Done
+when `recursive.cx` passes.
 
-**Estimated effort:** 1 week.
+**Chunk 10: Same fn, multiple handlers.** A function called from two
+different `handle` contexts gets two specializations. Done when
+`two_handlers.cx` passes.
 
-### Phase 5 — CPS inlining
+**Chunk 11: Lambdas with effects.** A lambda created inside a
+handler block performs an op. The lambda specializes at create-site,
+capturing the handler context. Done when `lambda_with_effect.cx`
+passes.
 
-Once specialization is in place, the CPS transform's job changes.
-Instead of emitting CPS calls that route through a dispatch table,
-emit CPS calls where the continuation receiver is statically known.
+**Chunk 12: Nested handlers.** `run { run { ... } handle B } handle A`.
+Propagate handler contexts inside-out. Op calls inside the inner
+block see B first, then A. Done when `nested_handlers.cx` passes.
 
-For tail-resumptive handlers (the common single-resume case),
-optimize the CPS further: inline the handler body at the op call
-site rather than emitting a separate function.
+### Migration + cleanup
 
-**Estimated effort:** 2-4 weeks. This phase is optional polish; the
-program is already correct after Phase 4.
+**Chunk 13: Migrate registered effect tests.** Verify every existing
+registered effect test (`handler.cx`, `stream.cx`, `async.cx`) still
+passes after reduction. Done when `script_integration` is 100% and
+`compile_integration` does not regress.
 
-### Phase 6 — Migration
+**Chunk 14: Drop `WithFn` from runtime.** Remove
+`RuntimeStmt::WithFn` entirely. `handler_transform.rs` shrinks (no
+`WithFn → Lambda` conversion). Codegen drops `with_fn_active` table.
+Done when the code compiles, tests pass, and the unused fields are
+gone.
 
-Move all existing effect tests to the new model. Mostly mechanical:
-the tests should be already passing if phases 1-4 preserved
-invariants. This phase confirms it.
+**Chunk 15: Drop `WithCtl` from runtime.** Same as 14 for `WithCtl`.
+Codegen drops `with_ctl_active`. `transform_ctl` shrinks or
+disappears. Done when the rewrite is complete; runtime AST is
+genuinely handler-free.
 
-**Estimated effort:** 1-2 weeks of bug-finding and stabilization.
+**Chunk 16: Drop `HandlerDef` from runtime.** The decl shouldn't
+survive into RuntimeAst at all; it's only used during meta-reduction.
+Move to MetaStmt-only. Done when `RuntimeStmt::HandlerDef` doesn't
+exist.
 
 ## Total
 
-9-16 weeks of focused work. The phases are independently shippable —
-each ends with a working compiler and unchanged test counts. Roll
-back at any phase if priorities change.
+~16 chunks at 1–3 hours each. Some may collapse if trivial; some may
+split if hairy. Should slot into 12–16 focused sessions.
+
+Each chunk ends with a working compiler, unchanged test counts (or
+better), and a single commit. Roll back at any chunk if priorities
+change.
 
 ## Decision points along the way
 

@@ -1,0 +1,31 @@
+effect Ndet {
+    ctl choose(opts: [Int]): Int;
+    ctl guard(cond: Bool): Unit;
+}
+
+handler All : Ndet {
+    ctl choose(opts) {
+        var acc = [];
+        for (x in opts) {
+            for (y in resume(x)) {
+                acc += y;
+            }
+        }
+        return acc;
+    }
+    ctl guard(c) {
+        if (c) {
+            return resume;
+        }
+        return [];
+    }
+    return(v) { [v] }
+}
+
+var r = run {
+    var x = choose([1, 2, 3]);
+    guard(x % 2 == 1);
+    x
+} handle All;
+
+print(r);
