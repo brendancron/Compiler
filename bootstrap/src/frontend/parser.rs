@@ -230,10 +230,19 @@ fn parse_class_decl(
         field_name: p.name.clone(),
         type_name: p.ty.as_ref().map(|t| t.to_string()).unwrap_or_else(|| "any".to_string()),
     }).collect();
-    for (n, ty, _) in &field_inits {
+    for (n, ty, init_expr) in &field_inits {
+        // Infer field type from the initializer when no annotation is given,
+        // so codegen knows e.g. `var queue = [];` is a slice not an int.
+        let type_name = if let Some(t) = ty.as_ref() {
+            t.to_string()
+        } else if let Some(MetaExpr::List(_)) = ctx.ast.get_expr(*init_expr) {
+            "[int]".to_string()
+        } else {
+            "any".to_string()
+        };
         fields.push(MetaFieldDecl {
             field_name: n.clone(),
-            type_name: ty.as_ref().map(|t| t.to_string()).unwrap_or_else(|| "any".to_string()),
+            type_name,
         });
     }
     let struct_id = ctx.ast.insert_stmt(&mut ctx.id_provider, MetaStmt::ClassDecl {

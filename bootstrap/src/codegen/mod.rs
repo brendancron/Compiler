@@ -2906,6 +2906,28 @@ impl<'ctx> Cg<'ctx> {
                                                 } else { None }
                                             } else { None }
                                         }
+                                        // `var x = obj.field;` — look up the field's declared type
+                                        // on the parent class to decide between Slice/Str/StructPtr.
+                                        Some(RuntimeExpr::DotAccess { object: inner, field }) => {
+                                            let parent_struct = if let Some(RuntimeExpr::Variable(vn)) = self.ast.get_expr(*inner) {
+                                                match locals.get(vn.as_str()) {
+                                                    Some(Local { kind: LocalKind::StructPtr(sn), .. }) => Some(sn.clone()),
+                                                    _ => None,
+                                                }
+                                            } else { None };
+                                            parent_struct.and_then(|sn| {
+                                                let meta = self.structs.get(&sn)?;
+                                                let fidx = meta.field_names.iter().position(|n| n == field)?;
+                                                let ft = meta.field_type_names.get(fidx)?;
+                                                if ft.starts_with('[') {
+                                                    Some(LocalKind::Slice)
+                                                } else if matches!(ft.as_str(), "string" | "String" | "str") {
+                                                    Some(LocalKind::Str)
+                                                } else if self.structs.contains_key(ft) {
+                                                    Some(LocalKind::StructPtr(ft.clone()))
+                                                } else { None }
+                                            })
+                                        }
                                         _ => None,
                                     };
                                     inferred.unwrap_or(LocalKind::Str)
@@ -3791,6 +3813,66 @@ impl<'ctx> Cg<'ctx> {
                         }
                     }
                 }
+                // Primitive Add dispatch (lhs is a Slice with a user `impl Add
+                // for list`). Inlined here as push-and-return-self because the
+                // stdlib body is skipped by codegen via `stdlib_fn_names`.
+                {
+                    let lhs_is_list = matches!(self.type_map.get(a), Some(Type::Slice(_)))
+                        || if let Some(RuntimeExpr::Variable(vname)) = self.ast.get_expr(*a) {
+                            matches!(locals.get(vname.as_str()).map(|l| &l.kind), Some(LocalKind::Slice))
+                        } else { false };
+                    if lhs_is_list
+                        && self.ast.op_dispatch.contains_key(&("Add".to_string(), "list".to_string()))
+                    {
+                        let slice_ty = self.slice_ty.ok_or(CodegenError::UnsupportedExpr(expr_id))?;
+                        let slice_ptr = match self.emit_expr(*a, locals)? {
+                            BasicValueEnum::PointerValue(p) => p,
+                            BasicValueEnum::IntValue(iv) =>
+                                self.builder.build_int_to_ptr(iv, self.ptr_ty, "list_i2p")?,
+                            _ => return Err(CodegenError::UnsupportedExpr(expr_id)),
+                        };
+                        let rhs_raw = self.emit_expr(*b, locals)?;
+                        let rhs_i64 = match rhs_raw {
+                            BasicValueEnum::IntValue(iv) => iv,
+                            BasicValueEnum::PointerValue(pv) =>
+                                self.builder.build_ptr_to_int(pv, self.i64_ty, "push_p2i")?,
+                            _ => return Err(CodegenError::UnsupportedExpr(expr_id)),
+                        };
+                        let i32_zero = self.context.i32_type().const_int(0, false);
+                        let lp = unsafe { self.builder.build_gep(slice_ty, slice_ptr, &[i32_zero, i32_zero], "len_f")? };
+                        let len = self.builder.build_load(self.i64_ty, lp, "len")?.into_int_value();
+                        let cp = unsafe { self.builder.build_gep(slice_ty, slice_ptr, &[i32_zero, self.context.i32_type().const_int(1, false)], "cap_f")? };
+                        let cap = self.builder.build_load(self.i64_ty, cp, "cap")?.into_int_value();
+                        let dp = unsafe { self.builder.build_gep(slice_ty, slice_ptr, &[i32_zero, self.context.i32_type().const_int(2, false)], "data_f")? };
+                        let realloc_fn = self.realloc_fn.ok_or(CodegenError::UnsupportedExpr(expr_id))?;
+                        let cur_fn = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                        let grow_bb = self.context.append_basic_block(cur_fn, "ladd_grow");
+                        let store_bb = self.context.append_basic_block(cur_fn, "ladd_store");
+                        let need_grow = self.builder.build_int_compare(IntPredicate::SGE, len, cap, "ladd_grow_q")?;
+                        self.builder.build_conditional_branch(need_grow, grow_bb, store_bb)?;
+                        self.builder.position_at_end(grow_bb);
+                        let two = self.i64_ty.const_int(2, false);
+                        let one = self.i64_ty.const_int(1, false);
+                        let cap_zero = self.builder.build_int_compare(IntPredicate::EQ, cap, self.i64_ty.const_int(0, false), "cap_eq0")?;
+                        let new_cap_pre = self.builder.build_int_mul(cap, two, "newcap_dbl")?;
+                        let new_cap = self.builder.build_select(cap_zero, two, self.builder.build_int_add(new_cap_pre, one, "newcap_or1")?, "new_cap_sel")?.into_int_value();
+                        let eight = self.i64_ty.const_int(8, false);
+                        let new_bytes = self.builder.build_int_mul(new_cap, eight, "new_bytes")?;
+                        let cur_data = self.builder.build_load(self.ptr_ty, dp, "cur_data")?.into_pointer_value();
+                        let new_data = self.builder.build_call(realloc_fn, &[cur_data.into(), new_bytes.into()], "realloc")?
+                            .try_as_basic_value().basic().unwrap().into_pointer_value();
+                        self.builder.build_store(dp, new_data)?;
+                        self.builder.build_store(cp, new_cap)?;
+                        self.builder.build_unconditional_branch(store_bb)?;
+                        self.builder.position_at_end(store_bb);
+                        let data = self.builder.build_load(self.ptr_ty, dp, "data")?.into_pointer_value();
+                        let ep = unsafe { self.builder.build_gep(self.i64_ty, data, &[len], "push_ep")? };
+                        self.builder.build_store(ep, rhs_i64)?;
+                        let new_len = self.builder.build_int_add(len, one, "new_len")?;
+                        self.builder.build_store(lp, new_len)?;
+                        return Ok(slice_ptr.as_basic_value_enum());
+                    }
+                }
                 // String concatenation when either operand is a string.
                 // Also checks LocalKind because type_map may have TypeVar for function-body
                 // variable expressions even when the actual runtime type is String.
@@ -4611,7 +4693,7 @@ impl<'ctx> Cg<'ctx> {
                     }
                 } else {
                     // ── Slice (list) methods ──────────────────────────────────
-                    let is_list_method = matches!(method.as_str(), "len" | "push" | "pop" | "contains");
+                    let is_list_method = matches!(method.as_str(), "len" | "push" | "pop" | "contains" | "remove");
                     let obj_is_slice = matches!(
                         self.type_map.get(object),
                         Some(Type::Slice(_))
@@ -4753,6 +4835,50 @@ impl<'ctx> Cg<'ctx> {
                                 } else {
                                     Ok(raw.as_basic_value_enum())
                                 }
+                            }
+                            "remove" => {
+                                // queue.remove(idx) → load + shift-left + decrement len.
+                                // Negative indices wrap (idx + len). Returns the removed element.
+                                let arg_id = args.first().copied().ok_or(CodegenError::UnsupportedExpr(expr_id))?;
+                                let idx = self.emit_int_expr(arg_id, locals)?;
+                                let len = load_len(slice_ptr)?;
+                                let data = load_data(slice_ptr)?;
+                                // Normalize negative idx: if idx<0 use idx+len.
+                                let zero64 = self.i64_ty.const_int(0, false);
+                                let is_neg = self.builder.build_int_compare(IntPredicate::SLT, idx, zero64, "is_neg")?;
+                                let adj = self.builder.build_int_add(idx, len, "neg_adj")?;
+                                let real_idx = self.builder.build_select(is_neg, adj, idx, "real_idx")?
+                                    .into_int_value();
+                                let ep = unsafe { self.builder.build_gep(self.i64_ty, data, &[real_idx], "rem_ep")? };
+                                let removed = self.builder.build_load(self.i64_ty, ep, "rem_val")?.into_int_value();
+
+                                // Shift loop: for i in real_idx..(len-1), data[i] = data[i+1]
+                                let cur_fn = self.builder.get_insert_block().unwrap().get_parent().unwrap();
+                                let i_slot = self.builder.build_alloca(self.i64_ty, "ri")?;
+                                self.builder.build_store(i_slot, real_idx)?;
+                                let one = self.i64_ty.const_int(1, false);
+                                let last_idx = self.builder.build_int_sub(len, one, "last_idx")?;
+                                let cond_bb = self.context.append_basic_block(cur_fn, "rem_cond");
+                                let body_bb = self.context.append_basic_block(cur_fn, "rem_body");
+                                let exit_bb = self.context.append_basic_block(cur_fn, "rem_exit");
+                                self.builder.build_unconditional_branch(cond_bb)?;
+                                self.builder.position_at_end(cond_bb);
+                                let i_val = self.builder.build_load(self.i64_ty, i_slot, "ri")?.into_int_value();
+                                let cont = self.builder.build_int_compare(IntPredicate::SLT, i_val, last_idx, "ri_lt")?;
+                                self.builder.build_conditional_branch(cont, body_bb, exit_bb)?;
+                                self.builder.position_at_end(body_bb);
+                                let i_next = self.builder.build_int_add(i_val, one, "ri_next")?;
+                                let next_ep = unsafe { self.builder.build_gep(self.i64_ty, data, &[i_next], "rem_next_ep")? };
+                                let next_val = self.builder.build_load(self.i64_ty, next_ep, "rem_next")?.into_int_value();
+                                let cur_ep = unsafe { self.builder.build_gep(self.i64_ty, data, &[i_val], "rem_cur_ep")? };
+                                self.builder.build_store(cur_ep, next_val)?;
+                                self.builder.build_store(i_slot, i_next)?;
+                                self.builder.build_unconditional_branch(cond_bb)?;
+                                self.builder.position_at_end(exit_bb);
+                                store_len(slice_ptr, last_idx)?;
+                                // The removed value's "kind" matches the slice element type;
+                                // codegen treats it as i64 (the caller coerces if needed).
+                                Ok(removed.as_basic_value_enum())
                             }
                             "contains" => {
                                 let arg_id = args.first().copied().ok_or(CodegenError::UnsupportedExpr(expr_id))?;
