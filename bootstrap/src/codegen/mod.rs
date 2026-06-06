@@ -744,8 +744,16 @@ pub fn compile(
         }
     }
 
+    // Deterministic LLVM struct-type emission order: sort by name so the
+    // resulting `%StructName = type { ... }` lines are stable across runs.
+    // Without this, HashMap iteration ordering changes the IR shape and
+    // golden-IR regression tests flake.
+    let mut sorted_struct_decls: Vec<(String, Vec<(String, String)>)> =
+        class_decl_map.into_iter().collect();
+    sorted_struct_decls.sort_by(|a, b| a.0.cmp(&b.0));
+
     let mut structs: HashMap<String, ClassMeta<'_>> = HashMap::new();
-    for (sname, fields) in &class_decl_map {
+    for (sname, fields) in &sorted_struct_decls {
         let llvm_ty = context.opaque_struct_type(sname);
         let field_types: Vec<BasicTypeEnum<'_>> = fields.iter()
             .map(|(_, type_name)| llvm_field_type(type_name, i64_ty, ptr_ty))
@@ -757,7 +765,7 @@ pub fn compile(
             field_type_names: fields.iter().map(|(_, t)| t.clone()).collect(),
         });
     }
-    let struct_decls: Vec<(String, Vec<(String, String)>)> = class_decl_map.into_iter().collect();
+    let struct_decls: Vec<(String, Vec<(String, String)>)> = sorted_struct_decls;
 
     // ── Pass 0c: create LLVM globals for all string literals ─────────────────
     // Collect unique strings and sort for deterministic @.str.N numbering.

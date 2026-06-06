@@ -766,26 +766,43 @@ pub fn stage_all_files(
             ) {
                 Ok(staged_id) => {
                     sem_root_stmts.push(staged_id);
-                    // Recurse into Block (class decls expand to a Block of stmts) to find
-                    // FnDecls and ImplDecls so stdlib classes register their mangled methods.
-                    match file.ast.get_stmt(stmt_id) {
-                        Some(MetaStmt::FnDecl { name, .. })
-                        | Some(MetaStmt::MetaFnDecl { name, .. }) => {
-                            exports.push((name.clone(), staged_id));
-                            if matches!(file.role, FileRole::StdLib(_)) {
-                                staged_forest.stdlib_fn_names.insert(name.clone());
+                    // Recurse into Block (class decls expand to a Block of
+                    // [ClassDecl, FnDecl ctor, ImplDecl, HandlerDef]) so stdlib
+                    // classes register both their constructor and their mangled
+                    // impl methods as stdlib_fn_names — codegen needs both to
+                    // skip emission for stdlib-only types like StringBuilder.
+                    fn collect_stdlib_exports(
+                        ast: &MetaAst,
+                        stmt_id: MetaNodeId,
+                        exports: &mut Vec<(String, crate::util::node_id::StagedNodeId)>,
+                        staged_id: crate::util::node_id::StagedNodeId,
+                        is_stdlib: bool,
+                        stdlib_names: &mut std::collections::HashSet<String>,
+                    ) {
+                        match ast.get_stmt(stmt_id) {
+                            Some(MetaStmt::FnDecl { name, .. })
+                            | Some(MetaStmt::MetaFnDecl { name, .. }) => {
+                                exports.push((name.clone(), staged_id));
+                                if is_stdlib { stdlib_names.insert(name.clone()); }
                             }
-                        }
-                        Some(MetaStmt::ImplDecl { type_name, methods, .. }) => {
-                            if matches!(file.role, FileRole::StdLib(_)) {
+                            Some(MetaStmt::ImplDecl { type_name, methods, .. }) if is_stdlib => {
                                 for method in methods {
-                                    let mangled = format!("{}__{}", type_name, method.name);
-                                    staged_forest.stdlib_fn_names.insert(mangled);
+                                    stdlib_names.insert(format!("{}__{}", type_name, method.name));
                                 }
                             }
+                            Some(MetaStmt::Block(children)) => {
+                                for &c in children {
+                                    collect_stdlib_exports(ast, c, exports, staged_id, is_stdlib, stdlib_names);
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
+                    let is_stdlib = matches!(file.role, FileRole::StdLib(_));
+                    collect_stdlib_exports(
+                        &file.ast, stmt_id, &mut exports, staged_id,
+                        is_stdlib, &mut staged_forest.stdlib_fn_names,
+                    );
                 }
                 Err(e) => errors.push(e),
             }
