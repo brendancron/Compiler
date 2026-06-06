@@ -37,6 +37,9 @@ pub enum MetaTypeExpr {
     App(String, Vec<MetaTypeExpr>),
     Tuple(Vec<MetaTypeExpr>),
     Slice(Box<MetaTypeExpr>),
+    /// `fn(P1, P2): R` function-type annotation. Used for higher-order
+    /// parameter and return type annotations.
+    Func(Vec<MetaTypeExpr>, Box<MetaTypeExpr>),
 }
 
 impl std::fmt::Display for MetaTypeExpr {
@@ -52,6 +55,10 @@ impl std::fmt::Display for MetaTypeExpr {
                 write!(f, "({})", s.join(", "))
             }
             MetaTypeExpr::Slice(inner) => write!(f, "[{inner}]"),
+            MetaTypeExpr::Func(params, ret) => {
+                let ps: Vec<String> = params.iter().map(|p| p.to_string()).collect();
+                write!(f, "fn({}): {ret}", ps.join(", "))
+            }
         }
     }
 }

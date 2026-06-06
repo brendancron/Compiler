@@ -46,6 +46,13 @@ fn meta_type_expr_to_type(te: &MetaTypeExpr, local_map: &HashMap<String, Type>, 
         MetaTypeExpr::Slice(inner) => {
             Type::Slice(Box::new(meta_type_expr_to_type(inner, local_map, env)))
         }
+        MetaTypeExpr::Func(params, ret) => {
+            Type::Func {
+                params: params.iter().map(|p| meta_type_expr_to_type(p, local_map, env)).collect(),
+                ret: Box::new(meta_type_expr_to_type(ret, local_map, env)),
+                effects: EffectRow::empty(),
+            }
+        }
     }
 }
 

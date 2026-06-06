@@ -659,25 +659,30 @@ fn parse_type_annot(tokens: &[Token], pos: &mut usize) -> Option<MetaTypeExpr> {
         return None;
     }
     *pos += 1; // consume `:`
-    // Function type: `fn(T, ...): R` — not a MetaTypeExpr, handled separately.
+    // Function type: `fn(P1, P2): R` — parse to MetaTypeExpr::Func so the
+    // Phase-1 type checker can resolve higher-order param types.
     if check(tokens, *pos, TokenType::Func) {
         *pos += 1;
+        let mut params: Vec<MetaTypeExpr> = Vec::new();
         if check(tokens, *pos, TokenType::LeftParen) {
-            let mut depth = 1usize;
             *pos += 1;
-            while *pos < tokens.len() && depth > 0 {
-                match tokens[*pos].token_type {
-                    TokenType::LeftParen  => { depth += 1; *pos += 1; }
-                    TokenType::RightParen => { depth -= 1; *pos += 1; }
-                    _ => { *pos += 1; }
+            while *pos < tokens.len() && !check(tokens, *pos, TokenType::RightParen) {
+                if let Ok(t) = parse_type_expr(tokens, pos) {
+                    params.push(t);
+                } else {
+                    *pos += 1;
                 }
+                if check(tokens, *pos, TokenType::Comma) { *pos += 1; }
             }
+            if check(tokens, *pos, TokenType::RightParen) { *pos += 1; }
         }
-        if check(tokens, *pos, TokenType::Colon) {
+        let ret = if check(tokens, *pos, TokenType::Colon) {
             *pos += 1;
-            if *pos < tokens.len() { *pos += 1; }
-        }
-        return Some(MetaTypeExpr::Named("fn".to_string()));
+            parse_type_expr(tokens, pos).unwrap_or(MetaTypeExpr::Named("Unit".into()))
+        } else {
+            MetaTypeExpr::Named("Unit".into())
+        };
+        return Some(MetaTypeExpr::Func(params, Box::new(ret)));
     }
     parse_type_expr(tokens, pos).ok()
 }
