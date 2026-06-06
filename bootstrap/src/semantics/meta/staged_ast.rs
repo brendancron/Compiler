@@ -247,6 +247,7 @@ pub enum StagedStmt {
     HandlerDef {
         name: String,
         effect_name: Option<String>,
+        params: Vec<crate::frontend::meta_ast::Param>,
         ops: Vec<StagedNodeId>,
     },
 
@@ -446,7 +447,7 @@ impl StagedAst {
                 vec![TreeNode::leaf(format!("Op({op_name})")), self.convert_stmt(*body)],
             ),
 
-            StagedStmt::HandlerDef { name, effect_name, ops } => (
+            StagedStmt::HandlerDef { name, effect_name, ops, .. } => (
                 format!("HandlerDef({}{})", name, effect_name.as_deref().map(|e| format!(":{e}")).unwrap_or_default()),
                 ops.iter().map(|&s| self.convert_stmt(s)).collect(),
             ),

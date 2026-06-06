@@ -2,7 +2,7 @@ effect Stream {
     ctl yield(i: Int): Unit;
 }
 
-class PrintStream : Stream {
+handler PrintStream : Stream {
     ctl yield(value) {
         print(value);
         resume;
@@ -29,4 +29,4 @@ fn fibonacci(n) {
 run {
     range(5, 15, 2);
     fibonacci(10);
-} handle PrintStream();
+} handle PrintStream;

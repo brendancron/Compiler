@@ -2,12 +2,6 @@ effect Async {
     ctl await(): Unit;
 }
 
-class AsyncHandler(loop: EventLoop) : Async {
-    ctl await(): Unit {
-        loop.spawn { resume; };
-    }
-}
-
 class EventLoop {
     var queue = [];
 
@@ -16,12 +10,15 @@ class EventLoop {
     }
 
     fn run() {
-        var loop_handler = AsyncHandler(this);
         while (queue.len() > 0) {
             var task = queue.remove(0);
             run {
                 task();
-            } handle loop_handler;
+            } handle Async {
+                ctl await() {
+                    this.spawn { resume; };
+                }
+            }
         }
     }
 }

@@ -149,7 +149,7 @@ pub fn convert_to_runtime(
 ) -> Result<RuntimeAst, AstConversionError> {
     let mut runtime = RuntimeAst::new();
 
-    // Build handler name → ops lookup for RunWith desugar.
+    // Build handler name → ops + params lookups for RunWith desugar.
     let handler_defs: std::collections::HashMap<String, Vec<RuntimeNodeId>> = staged.stmts.values()
         .filter_map(|stmt| {
             if let StagedStmt::HandlerDef { name, ops, .. } = stmt {
@@ -159,26 +159,21 @@ pub fn convert_to_runtime(
             }
         })
         .collect();
-
-    // Build a variable-name → class-name map by scanning VarDecls that
-    // initialize from a class constructor call (`var x = ClassName(...);`).
-    // Lets `handle x` resolve to the same HandlerDef that `handle ClassName(...)`
-    // would, when `x` holds an instance of a handler class.
-    let var_to_class: std::collections::HashMap<String, String> = staged.stmts.values()
+    let handler_param_names: std::collections::HashMap<String, Vec<String>> = staged.stmts.values()
         .filter_map(|stmt| {
-            let StagedStmt::VarDecl { name, expr } = stmt else { return None; };
-            let init = staged.get_expr(*expr)?;
-            let StagedExpr::Call { callee, .. } = init else { return None; };
-            // Only treat as a handler binding if `callee` is itself a class
-            // that has a HandlerDef registered. Avoids false positives when
-            // a variable happens to be assigned from any function call.
-            if handler_defs.contains_key(callee) {
-                Some((name.clone(), callee.clone()))
+            if let StagedStmt::HandlerDef { name, params, .. } = stmt {
+                Some((name.clone(), params.iter().map(|p| p.name.clone()).collect()))
             } else {
                 None
             }
         })
         .collect();
+
+    // Build a variable-name → class-name map by scanning VarDecls that
+    // initialize from a class constructor call (`var x = ClassName(...);`).
+    // Handler-as-value (handle <var> where var holds a handler instance) is
+    // no longer supported — the `handler` keyword separates handlers from
+    // classes and `handle` always names the handler statically.
 
     let max_staged = staged.stmts.keys().chain(staged.exprs.keys()).map(|id| id.0).max().unwrap_or(0);
     let max_meta = meta_generated.values()
@@ -217,15 +212,14 @@ pub fn convert_to_runtime(
     // all stmts to be in runtime first. First pass: non-handle exprs. Second pass
     // (after stmt conversion): RunHandle/RunWith exprs with correct free-var analysis.
     //
-    // The 4th tuple field describes what `this` binding to inject before the
-    // handler ops, if any:
-    //   - None: no `this`.
-    //   - Some((class_name, args, false)): construct `var this = class_name(args);`.
-    //   - Some((var_name,  _,    true )): bind `var this = var_name;` (handler
-    //     name was a variable holding a handler-class instance).
+    // The 4th tuple field describes per-handler-param bindings to inject
+    // before the handler ops, derived from `handle Name(args)` install sites.
+    // Each entry is `(param_name, arg_runtime_id)` — emitted as
+    // `var <param_name> = <arg_runtime_id>;` so the op bodies see them as
+    // free vars and capture them via the existing lambda closure machinery.
     let mut deferred_handles: Vec<(
         RuntimeNodeId, RuntimeNodeId, Vec<RuntimeNodeId>,
-        Option<(String, Vec<RuntimeNodeId>, bool)>,
+        Vec<(String, RuntimeNodeId)>,
     )> = Vec::new();
 
     for (id, expr) in &staged.exprs {
@@ -234,20 +228,11 @@ pub fn convert_to_runtime(
                 let all_ops: Vec<RuntimeNodeId> = effects.iter()
                     .flat_map(|(_, stmts)| stmts.iter().map(|&s| rid(s)))
                     .collect();
-                deferred_handles.push((rid(*id), rid(*body), all_ops, None));
+                deferred_handles.push((rid(*id), rid(*body), all_ops, Vec::new()));
                 continue;
             }
             StagedExpr::RunWith { body, handler_name, args } => {
-                // Resolve handler_name → class HandlerDef. Direct match wins;
-                // otherwise fall back to a variable-bound handler instance.
-                let (resolved_class, from_var) = if handler_defs.contains_key(handler_name) {
-                    (handler_name.clone(), false)
-                } else if let Some(class) = var_to_class.get(handler_name) {
-                    (class.clone(), true)
-                } else {
-                    (handler_name.clone(), false)
-                };
-                let ops = handler_defs.get(&resolved_class).cloned().unwrap_or_default();
+                let ops = handler_defs.get(handler_name).cloned().unwrap_or_default();
                 // Convert each arg expr now (the outer loop would otherwise skip it).
                 for &a in args {
                     if let Some(arg_expr) = staged.get_expr(a) {
@@ -255,16 +240,16 @@ pub fn convert_to_runtime(
                         runtime.insert_expr(rid(a), runtime_expr);
                     }
                 }
-                let this_binding = if from_var {
-                    // Bind `var this = <handler_name>;`. `args` ignored here —
-                    // the variable already holds the constructed instance.
-                    Some((handler_name.clone(), Vec::new(), true))
-                } else if !args.is_empty() {
-                    Some((handler_name.clone(), args.iter().map(|&a| rid(a)).collect(), false))
-                } else {
-                    None
-                };
-                deferred_handles.push((rid(*id), rid(*body), ops, this_binding));
+                // Bind each handler param to its install-site arg. The op
+                // bodies reference them as free vars and capture them via the
+                // existing lambda-closure machinery.
+                let param_bindings: Vec<(String, RuntimeNodeId)> =
+                    if let Some(pnames) = handler_param_names.get(handler_name) {
+                        pnames.iter().zip(args.iter())
+                            .map(|(n, &a)| (n.clone(), rid(a)))
+                            .collect()
+                    } else { Vec::new() };
+                deferred_handles.push((rid(*id), rid(*body), ops, param_bindings));
                 continue;
             }
             _ => {}
@@ -367,7 +352,7 @@ pub fn convert_to_runtime(
     }
 
     // Second pass: process deferred RunHandle/RunWith exprs.
-    for (id, body, handler_stmts, this_binding) in deferred_handles {
+    for (id, body, handler_stmts, param_bindings) in deferred_handles {
         let fn_name = format!("__handle_{}", next_id);
         next_id += 1;
 
@@ -375,24 +360,16 @@ pub fn convert_to_runtime(
             Some(RuntimeStmt::Block(stmts)) => stmts.clone(),
             _ => vec![body],
         };
-        // For class-handler form: bind `this` so op bodies' own
-        // `var p = this.p;` prelude resolves. Either:
-        //   - `var this = ClassName(args);` (constructor call), or
-        //   - `var this = <var_name>;`      (variable holds a handler instance).
+        // Bind each handler param to its install-site arg expression. The
+        // op bodies' free-var capture machinery picks the bindings up at
+        // codegen / interpretation.
         let mut prelude: Vec<RuntimeNodeId> = Vec::new();
-        if let Some((name, arg_ids, from_var)) = this_binding {
-            let init_expr_id = RuntimeNodeId(next_id);
-            next_id += 1;
-            if from_var {
-                runtime.insert_expr(init_expr_id, RuntimeExpr::Variable(name));
-            } else {
-                runtime.insert_expr(init_expr_id, RuntimeExpr::Call { callee: name, args: arg_ids });
-            }
+        for (param_name, arg_id) in param_bindings {
             let bind_id = RuntimeNodeId(next_id);
             next_id += 1;
             runtime.insert_stmt(bind_id, RuntimeStmt::VarDecl {
-                name: "this".to_string(),
-                expr: init_expr_id,
+                name: param_name,
+                expr: arg_id,
             });
             prelude.push(bind_id);
         }

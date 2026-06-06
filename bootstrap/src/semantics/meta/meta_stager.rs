@@ -573,7 +573,7 @@ pub fn process_stmt(
             });
         }
 
-        MetaStmt::HandlerDef { name, effect_name, ops } => {
+        MetaStmt::HandlerDef { name, effect_name, params, ops } => {
             let op_ids: Result<Vec<StagedNodeId>, _> = ops
                 .iter()
                 .map(|&s| process_stmt(meta_ast, s, staged_ast, id_provider, dependency_set, staged_forest, type_env))
@@ -581,6 +581,7 @@ pub fn process_stmt(
             staged_ast.insert_stmt(staged_stmt_id, StagedStmt::HandlerDef {
                 name: name.clone(),
                 effect_name: effect_name.clone(),
+                params: params.clone(),
                 ops: op_ids?,
             });
         }

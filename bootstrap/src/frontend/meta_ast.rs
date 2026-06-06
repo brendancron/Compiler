@@ -317,10 +317,14 @@ pub enum MetaStmt {
         ops: Vec<EffectOp>,
     },
 
-    /// `handler name : effect_name { ops }` or `handle name { ops }`
+    /// `handler Name(params)? : EffectName { ops }` or `handle name { ops }`.
+    /// Params declare values to be supplied at the install site (`handle Name(args)`)
+    /// and become closure captures inside op bodies. A handler is never a value;
+    /// it can only be referenced statically by name at a `handle` site.
     HandlerDef {
         name: String,
         effect_name: Option<String>,
+        params: Vec<Param>,
         ops: Vec<MetaNodeId>,
     },
 
@@ -704,10 +708,18 @@ impl MetaAst {
                 ],
             ),
 
-            MetaStmt::HandlerDef { name, effect_name, ops } => (
-                format!("HandlerDef({}{})", name, effect_name.as_deref().map(|e| format!(":{e}")).unwrap_or_default()),
-                ops.iter().map(|&s| self.convert_stmt(s)).collect(),
-            ),
+            MetaStmt::HandlerDef { name, effect_name, params, ops } => {
+                let label = if params.is_empty() {
+                    format!("HandlerDef({}{})", name, effect_name.as_deref().map(|e| format!(":{e}")).unwrap_or_default())
+                } else {
+                    let ps: Vec<String> = params.iter().map(|p| match &p.ty {
+                        Some(t) => format!("{}: {t}", p.name),
+                        None => p.name.clone(),
+                    }).collect();
+                    format!("HandlerDef({}({}){})", name, ps.join(", "), effect_name.as_deref().map(|e| format!(":{e}")).unwrap_or_default())
+                };
+                (label, ops.iter().map(|&s| self.convert_stmt(s)).collect())
+            },
 
             MetaStmt::Resume(opt_expr) => (
                 "Resume".into(),
