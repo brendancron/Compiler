@@ -2852,6 +2852,16 @@ impl<'ctx> Cg<'ctx> {
                                 self.str_slices.borrow_mut().insert(name.clone());
                                 LocalKind::Slice
                             }
+                            // Call whose callee is a class constructor → struct ptr.
+                            // Phase-2 type-checks the synth ctor's return as
+                            // Type::Enum(class_name) since class names are not in
+                            // the type-env enum registry; recover the class
+                            // identity from `self.structs` here.
+                            Some(RuntimeExpr::Call { callee, .. })
+                                if self.structs.contains_key(callee) =>
+                            {
+                                LocalKind::StructPtr(callee.clone())
+                            }
                             _ => match self.type_map.get(expr) {
                                 Some(Type::Class { name: sname, .. }) =>
                                     LocalKind::StructPtr(sname.clone()),
@@ -5325,6 +5335,23 @@ fn collect_refs_expr(
         Some(RuntimeExpr::ClassLiteral { fields, .. }) => {
             let fields = fields.clone();
             for (_, val) in fields { collect_refs_expr(ast, val, bound, refs); }
+        }
+        Some(RuntimeExpr::DotAccess { object, .. }) => {
+            collect_refs_expr(ast, *object, bound, refs);
+        }
+        Some(RuntimeExpr::TupleIndex { object, .. }) => {
+            collect_refs_expr(ast, *object, bound, refs);
+        }
+        Some(RuntimeExpr::EnumConstructor { payload, .. }) => {
+            use crate::semantics::meta::runtime_ast::RuntimeConstructorPayload;
+            let payload = payload.clone();
+            match payload {
+                RuntimeConstructorPayload::Unit => {}
+                RuntimeConstructorPayload::Tuple(ids) =>
+                    for id in ids { collect_refs_expr(ast, id, bound, refs); }
+                RuntimeConstructorPayload::Struct(fs) =>
+                    for (_, id) in fs { collect_refs_expr(ast, id, bound, refs); }
+            }
         }
         _ => {}
     }

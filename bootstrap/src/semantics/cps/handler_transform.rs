@@ -117,11 +117,29 @@ fn rewrite_stmts(
                     body,
                 });
                 // Record param type hints so the type checker can resolve handler params.
-                let hints: Vec<Option<String>> = params.iter().map(|p| {
-                    p.ty.as_ref().and_then(|te| match te {
+                // Prefer the user-written annotation; fall back to the effect op's
+                // declared param type so untyped handler params like `fn log(msg)`
+                // still get treated as String for codegen purposes.
+                let effect_op_params: Option<Vec<Option<String>>> = ast.stmts.values()
+                    .find_map(|stmt| {
+                        let RuntimeStmt::EffectDecl { ops, .. } = stmt else { return None; };
+                        ops.iter().find(|op| op.name == op_name).map(|op| {
+                            op.params.iter().map(|p| {
+                                p.ty.as_ref().and_then(|te| match te {
+                                    crate::frontend::meta_ast::MetaTypeExpr::Named(n) => Some(n.clone()),
+                                    _ => None,
+                                })
+                            }).collect()
+                        })
+                    });
+                let hints: Vec<Option<String>> = params.iter().enumerate().map(|(i, p)| {
+                    if let Some(annot) = p.ty.as_ref().and_then(|te| match te {
                         crate::frontend::meta_ast::MetaTypeExpr::Named(n) => Some(n.clone()),
                         _ => None,
-                    })
+                    }) {
+                        return Some(annot);
+                    }
+                    effect_op_params.as_ref().and_then(|v| v.get(i).cloned()).flatten()
                 }).collect();
                 if hints.iter().any(|h| h.is_some()) {
                     ast.lambda_param_hints.insert(lambda_id, hints);
