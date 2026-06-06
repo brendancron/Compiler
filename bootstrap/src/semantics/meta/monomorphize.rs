@@ -191,15 +191,140 @@ fn clone_stmt(
 // ── Main monomorphization pass ───────────────────────────────────────────────
 
 pub fn monomorphize(ast: &mut RuntimeAst, type_map: &HashMap<RuntimeNodeId, Type>) {
-    let generic_fns: HashMap<String, RuntimeNodeId> = ast.stmts.iter()
+    // Detect monomorphization candidates by scanning call sites: a function is
+    // polymorphic when it's called with two distinct concrete arg-type tuples.
+    // (Type-map signatures on the FnDecl can be misleading — Phase-2 records
+    // a single concrete type even for genuinely polymorphic functions.)
+    // Class constructors share the class name with a ClassDecl. Skip them —
+    // their body is `return Class { f1: f1, ... }` which produces the same
+    // heap layout for any T, so monomorphization would just bloat the IR.
+    let class_names: std::collections::HashSet<String> = ast.stmts.values()
+        .filter_map(|s| if let RuntimeStmt::ClassDecl { name, .. } = s { Some(name.clone()) } else { None })
+        .collect();
+
+    let fn_decls: HashMap<String, RuntimeNodeId> = ast.stmts.iter()
         .filter_map(|(&id, stmt)| {
             if let RuntimeStmt::FnDecl { name, type_params, .. } = stmt {
+                if class_names.contains(name) { return None; }
                 if !type_params.is_empty() {
                     return Some((name.clone(), id));
                 }
+                // Untyped: candidate if its sig in type_map has any var, OR if
+                // it has no entry yet — both cases are confirmed below by
+                // checking for multiple distinct concrete call sites.
+                return Some((name.clone(), id));
             }
             None
         })
+        .collect();
+
+    if fn_decls.is_empty() { return; }
+
+    // Build a name → resolved-Type map for top-level VarDecls so a Variable
+    // arg whose Phase-2 type wasn't pinned can fall back to its initializer
+    // type. Picks up cases like `var a = Article(...); notify(a);` where
+    // `a`'s Variable expr has an unresolved Type::Var in type_map but the
+    // VarDecl's initializer expr has a concrete Type::Class.
+    let mut var_decl_types: HashMap<String, Type> = HashMap::new();
+    for stmt in ast.stmts.values() {
+        if let RuntimeStmt::VarDecl { name, expr } = stmt {
+            // First try the recorded type_map entry; fall back to the
+            // initializer's syntactic shape (Call → callee return type).
+            if let Some(t) = type_map.get(expr) {
+                if !t.contains_var() {
+                    var_decl_types.insert(name.clone(), t.clone());
+                    continue;
+                }
+            }
+            if let Some(RuntimeExpr::Call { callee, .. }) = ast.get_expr(*expr) {
+                // Synth class constructors all return `Type::Enum(class_name)`
+                // (Type::Class isn't used for nominals here); promote.
+                if fn_decls.contains_key(callee.as_str()) || callee.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                    var_decl_types.insert(name.clone(), Type::Enum(callee.clone()));
+                }
+            }
+        }
+    }
+
+    // Group concrete arg-types per callee.
+    let mut callee_arg_tuples: HashMap<String, std::collections::BTreeSet<Vec<String>>> = HashMap::new();
+    for expr in ast.exprs.values() {
+        if let RuntimeExpr::Call { callee, args } = expr {
+            if !fn_decls.contains_key(callee.as_str()) { continue; }
+            let arg_types: Vec<Type> = args.iter()
+                .map(|&aid| {
+                    let primary = type_map.get(&aid).cloned()
+                        .unwrap_or(Type::Var(TypeVar { id: usize::MAX }));
+                    if !primary.contains_var() { return primary; }
+                    // Fallback: if arg is a bare Variable, use its VarDecl's
+                    // resolved initializer type.
+                    if let Some(RuntimeExpr::Variable(vname)) = ast.get_expr(aid) {
+                        if let Some(t) = var_decl_types.get(vname) {
+                            return t.clone();
+                        }
+                    }
+                    primary
+                })
+                .collect();
+            if arg_types.iter().any(|t| t.contains_var()) { continue; }
+            let key: Vec<String> = arg_types.iter().map(mangle_type).collect();
+            callee_arg_tuples.entry(callee.clone()).or_default().insert(key);
+        }
+    }
+
+    // Helper: does `body_id` reference `self_name` anywhere?
+    fn references_name(ast: &RuntimeAst, body_id: RuntimeNodeId, self_name: &str) -> bool {
+        fn s(ast: &RuntimeAst, id: RuntimeNodeId, n: &str) -> bool {
+            match ast.get_stmt(id) {
+                Some(RuntimeStmt::Block(c)) => c.iter().any(|&i| s(ast, i, n)),
+                Some(RuntimeStmt::ExprStmt(e))
+                | Some(RuntimeStmt::Print(e))
+                | Some(RuntimeStmt::Return(Some(e)))
+                | Some(RuntimeStmt::VarDecl { expr: e, .. })
+                | Some(RuntimeStmt::Assign { expr: e, .. }) => e_ref(ast, *e, n),
+                Some(RuntimeStmt::If { cond, body, else_branch }) => {
+                    e_ref(ast, *cond, n) || s(ast, *body, n)
+                        || else_branch.map(|e| s(ast, e, n)).unwrap_or(false)
+                }
+                Some(RuntimeStmt::WhileLoop { cond, body }) => e_ref(ast, *cond, n) || s(ast, *body, n),
+                Some(RuntimeStmt::ForEach { iterable, body, .. }) => e_ref(ast, *iterable, n) || s(ast, *body, n),
+                Some(RuntimeStmt::Match { scrutinee, arms }) =>
+                    e_ref(ast, *scrutinee, n) || arms.iter().any(|a| s(ast, a.body, n)),
+                _ => false,
+            }
+        }
+        fn e_ref(ast: &RuntimeAst, id: RuntimeNodeId, n: &str) -> bool {
+            match ast.get_expr(id) {
+                Some(RuntimeExpr::Call { callee, args }) =>
+                    callee == n || args.iter().any(|&a| e_ref(ast, a, n)),
+                Some(RuntimeExpr::DotCall { object, args, .. }) =>
+                    e_ref(ast, *object, n) || args.iter().any(|&a| e_ref(ast, a, n)),
+                Some(RuntimeExpr::DotAccess { object, .. }) => e_ref(ast, *object, n),
+                Some(RuntimeExpr::Add(a,b)|RuntimeExpr::Sub(a,b)|RuntimeExpr::Mult(a,b)|RuntimeExpr::Div(a,b)|RuntimeExpr::Mod(a,b)
+                    |RuntimeExpr::Equals(a,b)|RuntimeExpr::NotEquals(a,b)|RuntimeExpr::Lt(a,b)|RuntimeExpr::Gt(a,b)
+                    |RuntimeExpr::Lte(a,b)|RuntimeExpr::Gte(a,b)|RuntimeExpr::And(a,b)|RuntimeExpr::Or(a,b))
+                    => e_ref(ast, *a, n) || e_ref(ast, *b, n),
+                Some(RuntimeExpr::Not(a)) => e_ref(ast, *a, n),
+                Some(RuntimeExpr::Variable(name)) => name == n,
+                _ => false,
+            }
+        }
+        s(ast, body_id, self_name)
+    }
+
+    // A function is genuinely polymorphic only if it has ≥2 distinct concrete
+    // call shapes. (Single-shape callees stay un-renamed; nothing to do.)
+    // Skip recursive generic functions — naïve per-callsite renaming would
+    // mis-route the recursive call to the outer specialization.
+    let generic_fns: HashMap<String, RuntimeNodeId> = fn_decls.iter()
+        .filter(|(name, _)| callee_arg_tuples.get(name.as_str()).map(|s| s.len()) > Some(1))
+        .filter(|(name, id)| {
+            let body = if let Some(RuntimeStmt::FnDecl { body, .. }) = ast.stmts.get(id) {
+                *body
+            } else { return false; };
+            !references_name(ast, body, name)
+        })
+        .map(|(n, id)| (n.clone(), *id))
         .collect();
 
     if generic_fns.is_empty() {
@@ -208,20 +333,33 @@ pub fn monomorphize(ast: &mut RuntimeAst, type_map: &HashMap<RuntimeNodeId, Type
 
     let mut next_id = ast.stmts.keys().chain(ast.exprs.keys()).map(|id| id.0).max().unwrap_or(0) + 1;
 
-    let mut instantiations: HashMap<String, (String, RuntimeNodeId)> = HashMap::new();
+    // Each (callee, concrete-arg-tuple) → unique mangled name.
+    let mut instantiations: HashMap<String, (String, RuntimeNodeId, Vec<Type>)> = HashMap::new();
     let mut call_rewrites: HashMap<RuntimeNodeId, String> = HashMap::new();
 
     for (&expr_id, expr) in &ast.exprs {
         if let RuntimeExpr::Call { callee, args } = expr {
             if let Some(&orig_stmt_id) = generic_fns.get(callee.as_str()) {
                 let arg_types: Vec<Type> = args.iter()
-                    .map(|&arg_id| type_map.get(&arg_id).cloned()
-                         .unwrap_or(Type::Var(TypeVar { id: usize::MAX })))
+                    .map(|&arg_id| {
+                        let primary = type_map.get(&arg_id).cloned()
+                            .unwrap_or(Type::Var(TypeVar { id: usize::MAX }));
+                        if !primary.contains_var() { return primary; }
+                        if let Some(RuntimeExpr::Variable(vname)) = ast.get_expr(arg_id) {
+                            if let Some(t) = var_decl_types.get(vname) {
+                                return t.clone();
+                            }
+                        }
+                        primary
+                    })
                     .collect();
+                // Skip call sites with unresolved arg types — we can't pick
+                // a specialization for those.
+                if arg_types.iter().any(|t| t.contains_var()) { continue; }
                 let suffix = arg_types.iter().map(mangle_type).collect::<Vec<_>>().join("__");
                 let mangled = format!("{callee}__{suffix}");
                 instantiations.entry(mangled.clone())
-                    .or_insert_with(|| (callee.clone(), orig_stmt_id));
+                    .or_insert_with(|| (callee.clone(), orig_stmt_id, arg_types.clone()));
                 call_rewrites.insert(expr_id, mangled);
             }
         }
@@ -233,7 +371,7 @@ pub fn monomorphize(ast: &mut RuntimeAst, type_map: &HashMap<RuntimeNodeId, Type
 
     let mut new_fn_stmt_ids: Vec<RuntimeNodeId> = Vec::new();
     let mut cloned_call_rewrites: HashMap<RuntimeNodeId, String> = HashMap::new();
-    for (mangled_name, (_, orig_stmt_id)) in &instantiations {
+    for (mangled_name, (_, orig_stmt_id, _arg_types)) in &instantiations {
         if let Some(RuntimeStmt::FnDecl { params, body, .. }) = ast.stmts.get(orig_stmt_id).cloned() {
             let mut stmt_map: HashMap<RuntimeNodeId, RuntimeNodeId> = HashMap::new();
             let mut expr_map: HashMap<RuntimeNodeId, RuntimeNodeId> = HashMap::new();

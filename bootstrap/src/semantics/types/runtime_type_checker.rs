@@ -149,6 +149,13 @@ pub fn type_check_runtime(
             if ast.stdlib_fn_names.contains(callee.as_str()) {
                 continue;
             }
+            // Skip class constructors: their bodies are trivial structural
+            // copies, and codegen handles polymorphic struct layouts via the
+            // shared underlying class type.
+            let is_class_ctor = ast.stmts.values().any(|s|
+                matches!(s, RuntimeStmt::ClassDecl { name, .. } if name == callee)
+            );
+            if is_class_ctor { continue; }
             if let Some((existing_args, existing_ret)) = fn_call_types.get(callee.as_str()).cloned() {
                 let existing_len = existing_args.len();
                 if existing_len != arg_types.len() {
