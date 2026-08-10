@@ -1,0 +1,362 @@
+type error =
+  { line : int
+  ; col : int
+  ; message : string
+  }
+
+type state =
+  { tokens : Token.t array
+  ; mutable current : int
+  ; mutable errors : error list (* reversed *)
+  }
+
+(* Raised to unwind to the enclosing declaration, which then resynchronizes.
+   The error itself is recorded before raising. *)
+exception Parse_error
+
+let peek s = s.tokens.(s.current)
+let previous s = s.tokens.(s.current - 1)
+let is_at_end s = (peek s).Token.kind = Token.Eof
+
+let advance s =
+  if not (is_at_end s) then s.current <- s.current + 1;
+  previous s
+
+let check s kind = (not (is_at_end s)) && (peek s).Token.kind = kind
+
+let matches s kinds =
+  if List.exists (check s) kinds then Some (advance s) else None
+
+let error s (tok : Token.t) message =
+  s.errors <- { line = tok.line; col = tok.col; message } :: s.errors;
+  Parse_error
+
+let consume s kind message =
+  if check s kind then advance s else raise (error s (peek s) message)
+
+let consume_identifier s message =
+  match (peek s).Token.kind with
+  | Token.Identifier name ->
+    ignore (advance s);
+    name
+  | _ -> raise (error s (peek s) message)
+
+(* Consume the next token only if it is one of [ops] at this precedence level. *)
+let matches_binop s ops =
+  let kind = (peek s).Token.kind in
+  if List.mem kind ops
+  then (
+    match Ast.binop_of_token kind with
+    | Some op ->
+      ignore (advance s);
+      Some op
+    | None -> None)
+  else None
+
+(* Panic-mode recovery: skip to what looks like the start of a declaration. *)
+let synchronize s =
+  ignore (advance s);
+  let rec loop () =
+    if is_at_end s || (previous s).Token.kind = Token.Semicolon
+    then ()
+    else (
+      match (peek s).Token.kind with
+      | Token.Fn | Token.Var | Token.For | Token.If | Token.While | Token.Return -> ()
+      | _ ->
+        ignore (advance s);
+        loop ())
+  in
+  loop ()
+
+(* ---- expressions ---- *)
+
+(* A binary node takes the span of its left operand, so it points at where the
+   expression begins rather than at the operator. *)
+let rec expression s : Ast.expr = assignment s
+
+and assignment s : Ast.expr =
+  let left = or_expr s in
+  let target op tok =
+    let value = assignment s in
+    match left.Ast.it, op with
+    | `Var name, None -> Ast.at left.Ast.span (`Assign (name, value))
+    | `Var name, Some binop -> Ast.at left.Ast.span (`Compound (binop, name, value))
+    | _ ->
+      (* Recorded, not raised: the parse is still well-formed from here. *)
+      ignore (error s tok "Invalid assignment target.");
+      left
+  in
+  match (peek s).Token.kind with
+  | Token.Equal -> target None (advance s)
+  | Token.Plus_equal -> target (Some Ast.Add) (advance s)
+  | Token.Minus_equal -> target (Some Ast.Sub) (advance s)
+  | Token.Star_equal -> target (Some Ast.Mul) (advance s)
+  | Token.Slash_equal -> target (Some Ast.Div) (advance s)
+  | _ -> left
+
+and or_expr s : Ast.expr =
+  let rec loop left =
+    match matches s [ Token.Or ] with
+    | Some _ ->
+      let right = and_expr s in
+      loop (Ast.at left.Ast.span (`Or (left, right)))
+    | None -> left
+  in
+  loop (and_expr s)
+
+and and_expr s : Ast.expr =
+  let rec loop left =
+    match matches s [ Token.And ] with
+    | Some _ ->
+      let right = equality s in
+      loop (Ast.at left.Ast.span (`And (left, right)))
+    | None -> left
+  in
+  loop (equality s)
+
+and binary_level s ops next : Ast.expr =
+  let rec loop left =
+    match matches_binop s ops with
+    | Some op ->
+      let right = next s in
+      loop (Ast.at left.Ast.span (`Binop (op, left, right)))
+    | None -> left
+  in
+  loop (next s)
+
+and equality s : Ast.expr =
+  binary_level s [ Token.Bang_equal; Token.Equal_equal ] comparison
+
+and comparison s : Ast.expr =
+  binary_level
+    s
+    [ Token.Greater; Token.Greater_equal; Token.Less; Token.Less_equal ]
+    term
+
+and term s : Ast.expr = binary_level s [ Token.Minus; Token.Plus ] factor
+and factor s : Ast.expr = binary_level s [ Token.Slash; Token.Star ] unary
+
+and unary s : Ast.expr =
+  match Ast.unop_of_token (peek s).Token.kind with
+  | Some op ->
+    let tok = advance s in
+    let right = unary s in
+    Ast.at (Ast.span_of_token tok) (`Unop (op, right))
+  | None -> postfix s
+
+(* `x++` / `x--` bind tighter than any prefix or infix operator. They yield the
+   updated value, so `++x` and `x++` would mean the same thing; only the
+   postfix spelling is accepted. *)
+and postfix s : Ast.expr =
+  let rec loop left =
+    let step op tok =
+      match left.Ast.it with
+      | `Var name ->
+        let one = Ast.at (Ast.span_of_token tok) (`Num 1.) in
+        loop (Ast.at left.Ast.span (`Compound (op, name, one)))
+      | _ ->
+        ignore (error s tok "Invalid increment target.");
+        left
+    in
+    match (peek s).Token.kind with
+    | Token.Plus_plus -> step Ast.Add (advance s)
+    | Token.Minus_minus -> step Ast.Sub (advance s)
+    | _ -> left
+  in
+  loop (call s)
+
+and call s : Ast.expr =
+  let rec loop callee =
+    match matches s [ Token.Left_paren ] with
+    | Some _ -> loop (finish_call s callee)
+    | None -> callee
+  in
+  loop (primary s)
+
+and finish_call s callee : Ast.expr =
+  let args =
+    if check s Token.Right_paren
+    then []
+    else (
+      let rec loop acc =
+        let arg = expression s in
+        match matches s [ Token.Comma ] with
+        | Some _ -> loop (arg :: acc)
+        | None -> List.rev (arg :: acc)
+      in
+      loop [])
+  in
+  ignore (consume s Token.Right_paren "Expected ')' after arguments.");
+  Ast.at callee.Ast.span (`Call (callee, args))
+
+and primary s : Ast.expr =
+  let tok = peek s in
+  let sp = Ast.span_of_token tok in
+  match tok.Token.kind with
+  | Token.Number n ->
+    ignore (advance s);
+    Ast.at sp (`Num n)
+  | Token.String str ->
+    ignore (advance s);
+    Ast.at sp (`Str str)
+  | Token.True ->
+    ignore (advance s);
+    Ast.at sp (`Bool true)
+  | Token.False ->
+    ignore (advance s);
+    Ast.at sp (`Bool false)
+  | Token.Identifier name ->
+    ignore (advance s);
+    Ast.at sp (`Var name)
+  | Token.Left_paren ->
+    ignore (advance s);
+    let e = expression s in
+    ignore (consume s Token.Right_paren "Expected ')' after expression.");
+    (* Parens shape the parse only; no node survives them. *)
+    e
+  | _ -> raise (error s tok "Expected an expression.")
+
+(* ---- statements ---- *)
+
+let rec declaration s : Ast.stmt option =
+  try
+    let tok = peek s in
+    let sp = Ast.span_of_token tok in
+    match tok.Token.kind with
+    | Token.Fn ->
+      ignore (advance s);
+      Some (fn_decl s sp)
+    | Token.Var ->
+      ignore (advance s);
+      Some (var_decl s sp)
+    | _ -> Some (statement s)
+  with
+  | Parse_error ->
+    synchronize s;
+    None
+
+and fn_decl s sp : Ast.stmt =
+  let name = consume_identifier s "Expected function name." in
+  ignore (consume s Token.Left_paren "Expected '(' after function name.");
+  let params =
+    if check s Token.Right_paren
+    then []
+    else (
+      let rec loop acc =
+        let p = consume_identifier s "Expected parameter name." in
+        match matches s [ Token.Comma ] with
+        | Some _ -> loop (p :: acc)
+        | None -> List.rev (p :: acc)
+      in
+      loop [])
+  in
+  ignore (consume s Token.Right_paren "Expected ')' after parameters.");
+  ignore (consume s Token.Left_brace "Expected '{' before function body.");
+  Ast.at sp (`Fn (name, params, block s))
+
+and var_decl s sp : Ast.stmt =
+  let name = consume_identifier s "Expected variable name." in
+  let init =
+    match matches s [ Token.Equal ] with
+    | Some _ -> Some (expression s)
+    | None -> None
+  in
+  ignore (consume s Token.Semicolon "Expected ';' after variable declaration.");
+  Ast.at sp (`Var_decl (name, init))
+
+(* Assumes the '{' has been consumed; consumes the closing '}'. *)
+and block s : Ast.stmt list =
+  let rec loop acc =
+    if check s Token.Right_brace || is_at_end s
+    then List.rev acc
+    else (
+      match declaration s with
+      | Some st -> loop (st :: acc)
+      | None -> loop acc)
+  in
+  let body = loop [] in
+  ignore (consume s Token.Right_brace "Expected '}' after block.");
+  body
+
+and statement s : Ast.stmt =
+  let tok = peek s in
+  let sp = Ast.span_of_token tok in
+  match tok.Token.kind with
+  | Token.For ->
+    ignore (advance s);
+    for_stmt s sp
+  | Token.If ->
+    ignore (advance s);
+    if_stmt s sp
+  | Token.While ->
+    ignore (advance s);
+    while_stmt s sp
+  | Token.Return ->
+    ignore (advance s);
+    return_stmt s sp
+  | Token.Left_brace ->
+    ignore (advance s);
+    Ast.at sp (`Block (block s))
+  | _ -> expr_stmt s sp
+
+and expr_stmt s sp : Ast.stmt =
+  let e = expression s in
+  ignore (consume s Token.Semicolon "Expected ';' after expression.");
+  Ast.at sp (`Expr e)
+
+and if_stmt s sp : Ast.stmt =
+  ignore (consume s Token.Left_paren "Expected '(' after 'if'.");
+  let cond = expression s in
+  ignore (consume s Token.Right_paren "Expected ')' after if condition.");
+  let then_branch = statement s in
+  let else_branch =
+    match matches s [ Token.Else ] with
+    | Some _ -> Some (statement s)
+    | None -> None
+  in
+  Ast.at sp (`If (cond, then_branch, else_branch))
+
+and while_stmt s sp : Ast.stmt =
+  ignore (consume s Token.Left_paren "Expected '(' after 'while'.");
+  let cond = expression s in
+  ignore (consume s Token.Right_paren "Expected ')' after while condition.");
+  Ast.at sp (`While (cond, statement s))
+
+and for_stmt s sp : Ast.stmt =
+  ignore (consume s Token.Left_paren "Expected '(' after 'for'.");
+  let init =
+    let tok = peek s in
+    match tok.Token.kind with
+    | Token.Semicolon ->
+      ignore (advance s);
+      None
+    | Token.Var ->
+      ignore (advance s);
+      Some (var_decl s (Ast.span_of_token tok))
+    | _ -> Some (expr_stmt s (Ast.span_of_token tok))
+  in
+  let cond = if check s Token.Semicolon then None else Some (expression s) in
+  ignore (consume s Token.Semicolon "Expected ';' after loop condition.");
+  let step = if check s Token.Right_paren then None else Some (expression s) in
+  ignore (consume s Token.Right_paren "Expected ')' after for clauses.");
+  Ast.at sp (`For (init, cond, step, statement s))
+
+and return_stmt s sp : Ast.stmt =
+  let value = if check s Token.Semicolon then None else Some (expression s) in
+  ignore (consume s Token.Semicolon "Expected ';' after return value.");
+  Ast.at sp (`Return value)
+
+let parse (tokens : Token.t list) : (Ast.program, error list) result =
+  let s = { tokens = Array.of_list tokens; current = 0; errors = [] } in
+  let rec loop acc =
+    if is_at_end s
+    then List.rev acc
+    else (
+      match declaration s with
+      | Some st -> loop (st :: acc)
+      | None -> loop acc)
+  in
+  let program = loop [] in
+  match s.errors with
+  | [] -> Ok program
+  | errors -> Error (List.rev errors)
