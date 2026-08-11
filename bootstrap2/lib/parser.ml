@@ -78,7 +78,19 @@ let rec type_expr s : Ast.type_expr =
   match tok.Token.token_type with
   | Token.Identifier name ->
     ignore (advance s);
-    Ast.at sp (Ast.Ty_name name)
+    if check s Token.Less
+    then (
+      ignore (advance s);
+      let rec loop acc =
+        let arg = type_expr s in
+        match matches s [ Token.Comma ] with
+        | Some _ -> loop (arg :: acc)
+        | None -> List.rev (arg :: acc)
+      in
+      let args = loop [] in
+      ignore (consume s Token.Greater "Expected '>' after type arguments.");
+      Ast.at sp (Ast.Ty_app (name, args)))
+    else Ast.at sp (Ast.Ty_name name)
   (* `(int, string) -> bool` — a parenthesized list is only ever a function
      type, since there are no tuples in the language yet. *)
   | Token.Left_paren ->
@@ -97,8 +109,10 @@ let rec type_expr s : Ast.type_expr =
     in
     ignore (consume s Token.Right_paren "Expected ')' after parameter types.");
     ignore (consume s Token.Arrow "Expected '->' after parameter types.");
-    let ret = type_expr s in
-    Ast.at sp (Ast.Ty_fn (params, ret, row_annotation s))
+    (* The row comes first so that `<` after the arrow is never mistaken for a
+       type argument list. *)
+    let row = row_annotation s in
+    Ast.at sp (Ast.Ty_fn (params, type_expr s, row))
   | _ -> raise (error s tok "Expected a type.")
 
 (* `<log, exn>`. A written row is closed, so its absence means pure. *)
@@ -126,15 +140,14 @@ let type_annotation s : Ast.type_expr option =
   | Some _ -> Some (type_expr s)
   | None -> None
 
-(* Cronyx spells return types both ways: `fn f(): T` and `fn f() -> T`. *)
+(* Cronyx spells return types both ways: `fn f(): T` and `fn f() -> T`, with an
+   effect row before the type when one is written. *)
 let signature s : Ast.signature =
-  let ret =
-    match matches s [ Token.Arrow; Token.Colon ] with
-    | Some _ -> Some (type_expr s)
-    | None -> None
-  in
-  let row = if check s Token.Less then Some (row_annotation s) else None in
-  { Ast.ret; row }
+  match matches s [ Token.Arrow; Token.Colon ] with
+  | None -> { Ast.ret = None; row = None }
+  | Some _ ->
+    let row = if check s Token.Less then Some (row_annotation s) else None in
+    { Ast.ret = Some (type_expr s); row }
 
 (* ---- expressions ---- *)
 
@@ -149,6 +162,8 @@ and assignment s : Ast.expr =
     match left.Ast.it, op with
     | `Var name, None -> Ast.at left.Ast.span (`Assign (name, value))
     | `Var name, Some binop -> Ast.at left.Ast.span (`Compound (binop, name, value))
+    | `Index (target, i), None ->
+      Ast.at left.Ast.span (`Index_assign (target, i, value))
     | _ ->
       (* Recorded, not raised: the parse is still well-formed from here. *)
       ignore (error s tok "Invalid assignment target.");
@@ -235,9 +250,16 @@ and postfix s : Ast.expr =
 
 and call s : Ast.expr =
   let rec loop callee =
-    match matches s [ Token.Left_paren ] with
-    | Some _ -> loop (finish_call s callee)
-    | None -> callee
+    match (peek s).Token.token_type with
+    | Token.Left_paren ->
+      ignore (advance s);
+      loop (finish_call s callee)
+    | Token.Left_bracket ->
+      ignore (advance s);
+      let index = expression s in
+      ignore (consume s Token.Right_bracket "Expected ']' after index.");
+      loop (Ast.at callee.Ast.span (`Index (callee, index)))
+    | _ -> callee
   in
   loop (primary s)
 
@@ -285,6 +307,22 @@ and primary s : Ast.expr =
     let e = expression s in
     ignore (consume s Token.Right_paren "Expected ')' after typeof operand.");
     Ast.at sp (`Typeof e)
+  | Token.Left_bracket ->
+    ignore (advance s);
+    let items =
+      if check s Token.Right_bracket
+      then []
+      else (
+        let rec loop acc =
+          let item = expression s in
+          match matches s [ Token.Comma ] with
+          | Some _ -> loop (item :: acc)
+          | None -> List.rev (item :: acc)
+        in
+        loop [])
+    in
+    ignore (consume s Token.Right_bracket "Expected ']' after collection items.");
+    Ast.at sp (`Collection_lit items)
   | Token.Left_paren ->
     ignore (advance s);
     let e = expression s in

@@ -13,6 +13,7 @@ type ty =
   | Str
   | Bool
   | Unit
+  | Array of ty
   | Fn of ty list * ty * row
   (* Quantified, not unresolved. Reaching codegen means the call site was never
      monomorphized. *)
@@ -30,6 +31,7 @@ type infer_ty =
   | IStr
   | IBool
   | IUnit
+  | IArray of infer_ty
   | IFn of infer_ty list * infer_ty * infer_row
   | IVar of tv ref
 
@@ -122,12 +124,13 @@ let rec string_of_infer_ty (t : infer_ty) : string =
   | IStr -> "string"
   | IBool -> "bool"
   | IUnit -> "unit"
+  | IArray elem -> Printf.sprintf "Array<%s>" (string_of_infer_ty elem)
   | IFn (params, ret, row) ->
     Printf.sprintf
-      "(%s) -> %s%s"
+      "(%s) ->%s %s"
       (String.concat ", " (List.map string_of_infer_ty params))
-      (string_of_infer_ty ret)
       (string_of_infer_row row)
+      (string_of_infer_ty ret)
   | IVar { contents = Unbound (id, _) } -> Printf.sprintf "'%d" id
   | IVar { contents = Link _ } -> assert false (* repr collapsed these *)
 
@@ -138,12 +141,13 @@ let rec string_of_ty (t : ty) : string =
   | Str -> "string"
   | Bool -> "bool"
   | Unit -> "unit"
+  | Array elem -> Printf.sprintf "Array<%s>" (string_of_ty elem)
   | Fn (params, ret, row) ->
     Printf.sprintf
-      "(%s) -> %s%s"
+      "(%s) ->%s %s"
       (String.concat ", " (List.map string_of_ty params))
-      (string_of_ty ret)
       (string_of_row row)
+      (string_of_ty ret)
   | Generic id -> Printf.sprintf "'%d" id
 
 (* ---- row unification ---- *)
@@ -203,6 +207,7 @@ let kind_admits kind (t : infer_ty) =
 let rec occurs id (t : infer_ty) =
   match repr t with
   | IVar { contents = Unbound (id', _) } -> id = id'
+  | IArray elem -> occurs id elem
   | IFn (params, ret, _) -> List.exists (occurs id) params || occurs id ret
   | _ -> false
 
@@ -223,6 +228,7 @@ let rec unify (a : infer_ty) (b : infer_ty) : unit =
     then error "Expected %s, got %s." (string_of_kind kind) (string_of_infer_ty t);
     r := Link t
   | IInt, IInt | IFloat, IFloat | IStr, IStr | IBool, IBool | IUnit, IUnit -> ()
+  | IArray a, IArray b -> unify a b
   | IFn (p1, r1, e1), IFn (p2, r2, e2) ->
     if List.length p1 <> List.length p2
     then
@@ -243,6 +249,7 @@ let free_vars (t : infer_ty) : (int * kind) list =
     match repr t with
     | IVar { contents = Unbound (id, kind) } ->
       if not (List.mem_assoc id !acc) then acc := (id, kind) :: !acc
+    | IArray elem -> walk elem
     | IFn (params, ret, _) ->
       List.iter walk params;
       walk ret
@@ -262,6 +269,7 @@ let free_row_vars (t : infer_ty) : int list =
   in
   let rec walk t =
     match repr t with
+    | IArray elem -> walk elem
     | IFn (params, ret, row) ->
       List.iter walk params;
       walk ret;
@@ -316,6 +324,7 @@ let instantiate (s : scheme) : infer_ty =
             Hashtbl.add types id copy;
             copy)
         else original
+      | IArray elem -> IArray (walk elem)
       | IFn (params, ret, row) -> IFn (List.map walk params, walk ret, walk_row row)
       | concrete -> concrete
     in
@@ -331,6 +340,9 @@ let rec concrete (t : infer_ty) : ty option =
   | IStr -> Some Str
   | IBool -> Some Bool
   | IUnit -> Some Unit
+  | IArray elem ->
+    let* elem = concrete elem in
+    Some (Array elem)
   | IFn (params, ret, row) ->
     let* params =
       List.fold_right
@@ -344,6 +356,23 @@ let rec concrete (t : infer_ty) : ty option =
     let* ret = concrete ret in
     Some (Fn (params, ret, List.sort String.compare (fst (labels_of_infer_row row))))
   | IVar _ -> None
+
+(* Back the other way, for a rule that has a concrete type in hand and needs to
+   unify against it. *)
+let rec of_ty (t : ty) : infer_ty =
+  match t with
+  | Int -> IInt
+  | Float -> IFloat
+  | Str -> IStr
+  | Bool -> IBool
+  | Unit -> IUnit
+  | Array elem -> IArray (of_ty elem)
+  | Fn (params, ret, row) ->
+    IFn
+      ( List.map of_ty params
+      , of_ty ret
+      , List.fold_right (fun l rest -> RCons (l, rest)) row REmpty )
+  | Generic _ -> fresh ()
 
 (* ---- resolve ---- *)
 
@@ -362,6 +391,7 @@ let rec resolve (t : infer_ty) : ty =
   | IStr -> Str
   | IBool -> Bool
   | IUnit -> Unit
+  | IArray elem -> Array (resolve elem)
   | IFn (params, ret, row) -> Fn (List.map resolve params, resolve ret, resolve_row row)
   | IVar { contents = Unbound (id, kind) } ->
     (match kind with

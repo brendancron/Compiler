@@ -1,5 +1,7 @@
 type value =
   | Int of int
+  (* Mutable and shared: `var ys = xs` aliases rather than copies. *)
+  | Array of value array
   | Float of float
   | Str of string
   | Bool of bool
@@ -39,6 +41,7 @@ let rec lookup env name =
      | None -> None)
 
 let type_name = function
+  | Array _ -> "array"
   | Int _ -> "int"
   | Float _ -> "float"
   | Str _ -> "string"
@@ -46,7 +49,9 @@ let type_name = function
   | Unit -> "unit"
   | Closure _ | Native _ -> "fn"
 
-let string_of_value = function
+let rec string_of_value = function
+  | Array items ->
+    "[" ^ String.concat ", " (Array.to_list (Array.map string_of_value items)) ^ "]"
   | Int n -> string_of_int n
   | Float n -> Token.float_to_string n
   | Str s -> s
@@ -64,6 +69,8 @@ let as_bool span = function
    raising on functional values. *)
 let values_equal a b =
   match a, b with
+  (* Arrays have identity, so equality is identity. *)
+  | Array x, Array y -> x == y
   | Int x, Int y -> x = y
   | Float x, Float y -> x = y
   | Str x, Str y -> String.equal x y
@@ -134,6 +141,23 @@ let rec eval env (e : Ast.cps_expr) : value =
   | `Call (callee, args) ->
     let f = eval env callee in
     call span f (List.map (eval env) args)
+  | `Array_lit items -> Array (Array.of_list (List.map (eval env) items))
+  | `Index (target, index) ->
+    (match eval env target, eval env index with
+     | Array items, Int i ->
+       if i < 0 || i >= Array.length items
+       then fail span "Index %d is out of bounds for length %d." i (Array.length items);
+       items.(i)
+     | v, _ -> fail span "Cannot index %s." (type_name v))
+  | `Index_assign (target, index, v) ->
+    let value = eval env v in
+    (match eval env target, eval env index with
+     | Array items, Int i ->
+       if i < 0 || i >= Array.length items
+       then fail span "Index %d is out of bounds for length %d." i (Array.length items);
+       items.(i) <- value;
+       value
+     | v, _ -> fail span "Cannot index %s." (type_name v))
 
 and call span f args =
   match f with

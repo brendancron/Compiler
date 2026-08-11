@@ -1,0 +1,8 @@
+// Arrays have identity: a second name is the same array, not a copy.
+var xs = [1, 2];
+var ys = xs;
+ys[1] = 77;
+print(xs[1]);
+
+print([1] == [1]);
+print(xs == ys);

@@ -10,6 +10,8 @@ let rec expr (e : Ast.resolved_expr) : Ast.reflected_expr =
     | #Ast.vars as v -> (Ast.map_vars expr v :> Ast.reflected_expr_kind)
     | #Ast.ops as o -> (Ast.map_ops expr o :> Ast.reflected_expr_kind)
     | #Ast.logic as l -> (Ast.map_logic expr l :> Ast.reflected_expr_kind)
+    | #Ast.indexing as i -> (Ast.map_indexing expr i :> Ast.reflected_expr_kind)
+    | #Ast.array_lit as a -> (Ast.map_array_lit expr a :> Ast.reflected_expr_kind)
   in
   { Ast.it; span = e.Ast.span; ann = e.Ast.ann }
 

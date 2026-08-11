@@ -133,6 +133,8 @@ let scan_token s =
   match advance s with
   | '(' -> add_token s Token.Left_paren
   | ')' -> add_token s Token.Right_paren
+  | '[' -> add_token s Token.Left_bracket
+  | ']' -> add_token s Token.Right_bracket
   | '{' -> add_token s Token.Left_brace
   | '}' -> add_token s Token.Right_brace
   | ',' -> add_token s Token.Comma

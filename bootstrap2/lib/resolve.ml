@@ -34,10 +34,14 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
          in
          `Call (callee, [ a; b ])
        | _ -> `Binop (op, a, b))
+    (* Only arrays exist so far, so every literal lowers to the primitive. *)
+    | `Collection_lit items -> `Array_lit (List.map (expr registry) items)
     | #Ast.lit as l -> l
     | #Ast.vars as v -> (Ast.map_vars (expr registry) v :> Ast.resolved_expr_kind)
     | #Ast.ops as o -> (Ast.map_ops (expr registry) o :> Ast.resolved_expr_kind)
     | #Ast.logic as l -> (Ast.map_logic (expr registry) l :> Ast.resolved_expr_kind)
+    | #Ast.indexing as i ->
+      (Ast.map_indexing (expr registry) i :> Ast.resolved_expr_kind)
     | #Ast.reflect as r ->
       (Ast.map_reflect (expr registry) r :> Ast.resolved_expr_kind)
   in

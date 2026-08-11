@@ -4,6 +4,8 @@ type token_type =
   | Right_paren
   | Left_brace
   | Right_brace
+  | Left_bracket
+  | Right_bracket
   | Comma
   | Minus
   | Plus
@@ -68,6 +70,8 @@ let token_type_to_string = function
   | Right_paren -> "RIGHT_PAREN"
   | Left_brace -> "LEFT_BRACE"
   | Right_brace -> "RIGHT_BRACE"
+  | Left_bracket -> "LEFT_BRACKET"
+  | Right_bracket -> "RIGHT_BRACKET"
   | Comma -> "COMMA"
   | Minus -> "MINUS"
   | Plus -> "PLUS"

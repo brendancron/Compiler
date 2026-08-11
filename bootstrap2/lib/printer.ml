@@ -13,6 +13,8 @@ let string_of_row = function
 let rec string_of_type_expr (t : Ast.type_expr) : string =
   match t.Ast.it with
   | Ast.Ty_name name -> name
+  | Ast.Ty_app (name, args) ->
+    Printf.sprintf "%s<%s>" name (String.concat ", " (List.map string_of_type_expr args))
   | Ast.Ty_fn (params, ret, row) ->
     Printf.sprintf
       "(%s) -> %s%s"
@@ -51,6 +53,15 @@ let rec string_of_expr (e : Ast.expr) : string =
   | `And (a, b) -> Printf.sprintf "(and %s %s)" (string_of_expr a) (string_of_expr b)
   | `Or (a, b) -> Printf.sprintf "(or %s %s)" (string_of_expr a) (string_of_expr b)
   | `Typeof e -> Printf.sprintf "(typeof %s)" (string_of_expr e)
+  | `Collection_lit items ->
+    Printf.sprintf "[%s]" (String.concat " " (List.map string_of_expr items))
+  | `Index (t, i) -> Printf.sprintf "(index %s %s)" (string_of_expr t) (string_of_expr i)
+  | `Index_assign (t, i, v) ->
+    Printf.sprintf
+      "(index-set %s %s %s)"
+      (string_of_expr t)
+      (string_of_expr i)
+      (string_of_expr v)
 
 let opt_expr = function
   | None -> "_"
@@ -155,6 +166,16 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
     | `Compound (op, name, v) ->
       Printf.sprintf "(%s= %s %s)" (string_of_binop op) name (string_of_typed_expr v)
     | `Typeof e -> Printf.sprintf "(typeof %s)" (string_of_typed_expr e)
+    | `Collection_lit items ->
+      Printf.sprintf "[%s]" (String.concat " " (List.map string_of_typed_expr items))
+    | `Index (t, i) ->
+      Printf.sprintf "(index %s %s)" (string_of_typed_expr t) (string_of_typed_expr i)
+    | `Index_assign (t, i, v) ->
+      Printf.sprintf
+        "(index-set %s %s %s)"
+        (string_of_typed_expr t)
+        (string_of_typed_expr i)
+        (string_of_typed_expr v)
   in
   Printf.sprintf "%s:%s" body ty
 

@@ -43,6 +43,10 @@ let cases =
   ; "tests/effects/recover/recover"
   ; "tests/effects/handler/handler"
   ; "tests/effects/stream/stream"
+  ; "tests/core/arrays/basics"
+  ; "tests/core/arrays/identity"
+  ; "tests/core/lists/index_access"
+  ; "tests/core/lists/index_assign"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
@@ -61,6 +65,9 @@ let error_cases =
   ; "tests/effects/errors/unknown_effect"
   ; "tests/effects/errors/purity_violated"
   ; "tests/effects/errors/unknown_handler"
+  ; "tests/core/arrays/errors/mixed_elements"
+  ; "tests/core/arrays/errors/not_indexable"
+  ; "tests/core/arrays/errors/element_mismatch"
   ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)

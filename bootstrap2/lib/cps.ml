@@ -186,6 +186,8 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
     | #Ast.vars as v -> (Ast.map_vars (expr info) v :> Ast.cps_expr_kind)
     | #Ast.ops as o -> (Ast.map_ops (expr info) o :> Ast.cps_expr_kind)
     | #Ast.logic as l -> (Ast.map_logic (expr info) l :> Ast.cps_expr_kind)
+    | #Ast.indexing as i -> (Ast.map_indexing (expr info) i :> Ast.cps_expr_kind)
+    | #Ast.array_lit as a -> (Ast.map_array_lit (expr info) a :> Ast.cps_expr_kind)
   in
   { Ast.it; span = e.Ast.span; ann = e.Ast.ann }
 
@@ -199,7 +201,11 @@ let rec suspends info (e : Ast.reflected_expr) =
      | _ -> is_delimited info (row_of callee.Ast.ann))
     || List.exists (suspends info) args
   | `Assign (_, v) | `Unop (_, v) -> suspends info v
-  | `Binop (_, a, b) | `And (a, b) | `Or (a, b) -> suspends info a || suspends info b
+  | `Binop (_, a, b) | `And (a, b) | `Or (a, b) | `Index (a, b) ->
+    suspends info a || suspends info b
+  | `Index_assign (a, b, c) ->
+    suspends info a || suspends info b || suspends info c
+  | `Array_lit items -> List.exists (suspends info) items
 
 let rec suspends_stmt info (s : Ast.reflected_stmt) =
   match s.Ast.it with
@@ -227,6 +233,16 @@ let rec extract info (e : Ast.reflected_expr)
   | `Call (_, args) when suspends info e && not (List.exists (suspends info) args) ->
     Some (e, fun name -> { Ast.it = `Var name; span = e.Ast.span; ann = e.Ast.ann })
   | `Call (callee, args) -> extract_list info args (fun args -> rebuild (`Call (callee, args)))
+  | `Index (a, b) ->
+    extract_list info [ a; b ] (function
+      | [ a; b ] -> rebuild (`Index (a, b))
+      | _ -> assert false)
+  | `Index_assign (a, b, c) ->
+    extract_list info [ a; b; c ] (function
+      | [ a; b; c ] -> rebuild (`Index_assign (a, b, c))
+      | _ -> assert false)
+  | `Array_lit items ->
+    extract_list info items (fun items -> rebuild (`Array_lit items))
   | `Assign (name, v) ->
     extract info v |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Assign (name, f n)))
   | `Unop (op, v) ->

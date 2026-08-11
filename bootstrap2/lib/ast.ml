@@ -37,6 +37,7 @@ type type_expr = (type_expr_kind, unit) node
 
 and type_expr_kind =
   | Ty_name of string
+  | Ty_app of string * type_expr list
   (* The row is the written one, so an omitted `<...>` means pure. *)
   | Ty_fn of type_expr list * type_expr * string list
 
@@ -99,6 +100,20 @@ type 'e logic =
 
 type 'e compound = [ `Compound of binop * string * 'e ]
 
+(* Indexing is a primitive: it survives every pass, and [Resolve] only decides
+   whether a given operand type keeps it or turns it into a call. *)
+type 'e indexing =
+  [ `Index of 'e * 'e
+  | `Index_assign of 'e * 'e * 'e
+  ]
+
+(* What the container is comes from context, so this cannot be lowered until
+   the checker has run. [Resolve] turns it into an [`Array_lit] or a call. *)
+type 'e collection = [ `Collection_lit of 'e list ]
+
+(* The primitive the others are built from. *)
+type 'e array_lit = [ `Array_lit of 'e list ]
+
 (* Eliminated by the CPS pass, which is why the interpreter has no handler
    stack: by the time it runs, these are ordinary closures and calls. *)
 (* A `run` may name a handler declared elsewhere. Both forms exist in the parsed
@@ -140,6 +155,8 @@ and expr_kind =
   | expr ops
   | expr logic
   | expr compound
+  | expr indexing
+  | expr collection
   | expr reflect
   ]
 
@@ -164,6 +181,8 @@ and desugared_expr_kind =
   | desugared_expr ops
   | desugared_expr logic
   | desugared_expr compound
+  | desugared_expr indexing
+  | desugared_expr collection
   | desugared_expr reflect
   ]
 
@@ -183,6 +202,8 @@ and typed_expr_kind =
   | typed_expr ops
   | typed_expr logic
   | typed_expr compound
+  | typed_expr indexing
+  | typed_expr collection
   | typed_expr reflect
   ]
 
@@ -201,6 +222,8 @@ and resolved_expr_kind =
   | resolved_expr vars
   | resolved_expr ops
   | resolved_expr logic
+  | resolved_expr indexing
+  | resolved_expr array_lit
   | resolved_expr reflect
   ]
 
@@ -219,6 +242,8 @@ and reflected_expr_kind =
   | reflected_expr vars
   | reflected_expr ops
   | reflected_expr logic
+  | reflected_expr indexing
+  | reflected_expr array_lit
   ]
 
 type reflected_stmt = (reflected_stmt_kind, Types.ty) node
@@ -236,6 +261,8 @@ and cps_expr_kind =
   | cps_expr vars
   | cps_expr ops
   | cps_expr logic
+  | cps_expr indexing
+  | cps_expr array_lit
   ]
 
 type cps_stmt = (cps_stmt_kind, Types.ty) node
@@ -260,6 +287,19 @@ let map_logic (f : 'a -> 'b) (e : 'a logic) : 'b logic =
 let map_compound (f : 'a -> 'b) (e : 'a compound) : 'b compound =
   match e with
   | `Compound (op, name, v) -> `Compound (op, name, f v)
+
+let map_indexing (f : 'a -> 'b) (e : 'a indexing) : 'b indexing =
+  match e with
+  | `Index (target, i) -> `Index (f target, f i)
+  | `Index_assign (target, i, v) -> `Index_assign (f target, f i, f v)
+
+let map_collection (f : 'a -> 'b) (e : 'a collection) : 'b collection =
+  match e with
+  | `Collection_lit items -> `Collection_lit (List.map f items)
+
+let map_array_lit (f : 'a -> 'b) (e : 'a array_lit) : 'b array_lit =
+  match e with
+  | `Array_lit items -> `Array_lit (List.map f items)
 
 let map_reflect (f : 'a -> 'b) (e : 'a reflect) : 'b reflect =
   match e with
