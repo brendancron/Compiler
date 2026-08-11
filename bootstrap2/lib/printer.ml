@@ -1,16 +1,6 @@
 (* S-expression dump of the parsed tree. *)
 
-let string_of_binop : Ast.binop -> string = function
-  | Ast.Add -> "+"
-  | Ast.Sub -> "-"
-  | Ast.Mul -> "*"
-  | Ast.Div -> "/"
-  | Ast.Equal -> "=="
-  | Ast.Not_equal -> "!="
-  | Ast.Less -> "<"
-  | Ast.Less_equal -> "<="
-  | Ast.Greater -> ">"
-  | Ast.Greater_equal -> ">="
+let string_of_binop = Ast.string_of_binop
 
 let string_of_unop : Ast.unop -> string = function
   | Ast.Neg -> "-"

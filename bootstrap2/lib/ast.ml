@@ -307,6 +307,18 @@ let map_effects
   | `Run (body, handlers) -> `Run (List.map fs body, List.map fh handlers)
   | `Resume e -> `Resume (Option.map fe e)
 
+let string_of_binop = function
+  | Add -> "+"
+  | Sub -> "-"
+  | Mul -> "*"
+  | Div -> "/"
+  | Equal -> "=="
+  | Not_equal -> "!="
+  | Less -> "<"
+  | Less_equal -> "<="
+  | Greater -> ">"
+  | Greater_equal -> ">="
+
 let binop_of_token : Token.token_type -> binop option = function
   | Token.Plus -> Some Add
   | Token.Minus -> Some Sub

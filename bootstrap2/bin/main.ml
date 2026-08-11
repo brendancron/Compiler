@@ -99,7 +99,8 @@ let () =
           report e.span.line e.span.col "Desugar" e.message;
           exit 65
         | Ok desugared ->
-        match Typecheck.check desugared with
+        let registry = Registry.builtins () in
+        match Typecheck.check ~registry desugared with
         | Error errors ->
           List.iter
             (fun (e : Typecheck.error) ->
@@ -111,7 +112,7 @@ let () =
           then (
             print_endline "-- types --";
             print_string (Printer.string_of_typed_program typed));
-          (match Cps.program (Reflect.program (Resolve.program typed)) with
+          (match Cps.program (Reflect.program (Resolve.program ~registry typed)) with
            | Error e ->
              report e.span.line e.span.col "CPS" e.message;
              exit 70

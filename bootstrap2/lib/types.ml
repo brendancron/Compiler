@@ -321,6 +321,30 @@ let instantiate (s : scheme) : infer_ty =
     in
     walk s.body)
 
+(* The resolved type, but only when nothing is still being inferred. Used where
+   a lookup needs a concrete type and must not force a defaulting decision. *)
+let rec concrete (t : infer_ty) : ty option =
+  let ( let* ) = Option.bind in
+  match repr t with
+  | IInt -> Some Int
+  | IFloat -> Some Float
+  | IStr -> Some Str
+  | IBool -> Some Bool
+  | IUnit -> Some Unit
+  | IFn (params, ret, row) ->
+    let* params =
+      List.fold_right
+        (fun p acc ->
+          let* acc = acc in
+          let* p = concrete p in
+          Some (p :: acc))
+        params
+        (Some [])
+    in
+    let* ret = concrete ret in
+    Some (Fn (params, ret, List.sort String.compare (fst (labels_of_infer_row row))))
+  | IVar _ -> None
+
 (* ---- resolve ---- *)
 
 (* An unconstrained row is closed to empty, so a pure function prints as

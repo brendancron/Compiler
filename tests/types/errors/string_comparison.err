@@ -1,1 +1,1 @@
-[2:7] Expected int or float, got string.
+[2:7] No operator < for string and string.

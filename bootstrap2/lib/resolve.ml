@@ -5,7 +5,7 @@
    type supplies an in-place entry, and no type does yet. Operators, indexing,
    and collection literals join it here as the registry grows. *)
 
-let rec expr (e : Ast.typed_expr) : Ast.resolved_expr =
+let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
   let span = e.Ast.span
   and ann = e.Ast.ann in
   let it : Ast.resolved_expr_kind =
@@ -16,24 +16,47 @@ let rec expr (e : Ast.typed_expr) : Ast.resolved_expr =
     | `Compound (op, name, v) ->
       let target : Ast.resolved_expr = { Ast.it = `Var name; span; ann } in
       let combined : Ast.resolved_expr =
-        { Ast.it = `Binop (op, target, expr v); span; ann }
+        { Ast.it = `Binop (op, target, expr registry v); span; ann }
       in
       `Assign (name, combined)
+    (* Selection happens here, once. A builtin stands as written; a declared
+       operator becomes a call. *)
+    | `Binop (op, a, b) ->
+      let a = expr registry a
+      and b = expr registry b in
+      (match Registry.find registry op a.Ast.ann b.Ast.ann with
+       | Some { Registry.emit = Registry.Call name; _ } ->
+         let callee : Ast.resolved_expr =
+           { Ast.it = `Var name
+           ; span
+           ; ann = Types.Fn ([ a.Ast.ann; b.Ast.ann ], ann, [])
+           }
+         in
+         `Call (callee, [ a; b ])
+       | _ -> `Binop (op, a, b))
     | #Ast.lit as l -> l
-    | #Ast.vars as v -> (Ast.map_vars expr v :> Ast.resolved_expr_kind)
-    | #Ast.ops as o -> (Ast.map_ops expr o :> Ast.resolved_expr_kind)
-    | #Ast.logic as l -> (Ast.map_logic expr l :> Ast.resolved_expr_kind)
-    | #Ast.reflect as r -> (Ast.map_reflect expr r :> Ast.resolved_expr_kind)
+    | #Ast.vars as v -> (Ast.map_vars (expr registry) v :> Ast.resolved_expr_kind)
+    | #Ast.ops as o -> (Ast.map_ops (expr registry) o :> Ast.resolved_expr_kind)
+    | #Ast.logic as l -> (Ast.map_logic (expr registry) l :> Ast.resolved_expr_kind)
+    | #Ast.reflect as r ->
+      (Ast.map_reflect (expr registry) r :> Ast.resolved_expr_kind)
   in
   { Ast.it; span; ann }
 
-let rec stmt (s : Ast.typed_stmt) : Ast.resolved_stmt =
+let rec stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt =
   let it : Ast.resolved_stmt_kind =
     match s.Ast.it with
-    | #Ast.stmts as st -> (Ast.map_stmts expr stmt st :> Ast.resolved_stmt_kind)
+    | #Ast.stmts as st ->
+      (Ast.map_stmts (expr registry) (stmt registry) st :> Ast.resolved_stmt_kind)
     | #Ast.effects as e ->
-      (Ast.map_effects expr stmt (Ast.map_handler stmt) e :> Ast.resolved_stmt_kind)
+      (Ast.map_effects
+         (expr registry)
+         (stmt registry)
+         (Ast.map_handler (stmt registry))
+         e
+       :> Ast.resolved_stmt_kind)
   in
   { Ast.it; span = s.Ast.span; ann = s.Ast.ann }
 
-let program (p : Ast.typed_stmt list) : Ast.resolved_stmt list = List.map stmt p
+let program ~registry (p : Ast.typed_stmt list) : Ast.resolved_stmt list =
+  List.map (stmt registry) p

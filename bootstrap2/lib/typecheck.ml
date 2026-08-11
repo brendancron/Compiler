@@ -35,7 +35,8 @@ type env =
   }
 
 type ctx =
-  { mutable return_type : Types.infer_ty option
+  { registry : Registry.t
+  ; mutable return_type : Types.infer_ty option
   ; mutable saw_return : bool
   (* The row of the enclosing function or run block. Effectful calls rewrite it
      to admit their label; it stays open until generalization closes it. *)
@@ -195,22 +196,31 @@ let assigned_names body =
    are checked structurally and a bare reference gets an unconstrained type. *)
 let variadic_builtins = [ "print" ]
 
-(* Shared by `Binop` and `Compound`: operands agree, the operator constrains
-   them, and the result is either that type or a bool. *)
-let binop_result (op : Ast.binop) a b =
+(* Shared by `Binop` and `Compound`. Operands agree; then the registry answers
+   if both are known, and a constraint stands in for the answer if they are
+   not. *)
+let binop_result registry (op : Ast.binop) a b =
   Types.unify a b;
-  match op with
-  (* `+` is also string concatenation. *)
-  | Ast.Add ->
-    Types.unify a (Types.fresh_with Types.Addable);
-    a
-  | Ast.Sub | Ast.Mul | Ast.Div ->
-    Types.unify a (Types.fresh_with Types.Numeric);
-    a
-  | Ast.Less | Ast.Less_equal | Ast.Greater | Ast.Greater_equal ->
-    Types.unify a (Types.fresh_with Types.Numeric);
-    Types.IBool
-  | Ast.Equal | Ast.Not_equal -> Types.IBool
+  match Types.concrete a, Types.concrete b with
+  | Some lhs, Some rhs ->
+    (match Registry.find registry op lhs rhs with
+     | Some entry ->
+       (match Registry.result_of entry lhs with
+        | Types.Int -> Types.IInt
+        | Types.Float -> Types.IFloat
+        | Types.Str -> Types.IStr
+        | Types.Bool -> Types.IBool
+        | Types.Unit -> Types.IUnit
+        | _ -> Types.fresh ())
+     | None ->
+       Types.error
+         "No operator %s for %s and %s."
+         (Ast.string_of_binop op)
+         (Types.string_of_ty lhs)
+         (Types.string_of_ty rhs))
+  | _ ->
+    Types.unify a (Types.fresh_with (Registry.constraint_of op));
+    Registry.unresolved_result op a
 
 let rec infer_expr env ctx (e : Ast.desugared_expr) : checked_expr =
   try infer_expr_impl env ctx e with
@@ -247,7 +257,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
   | `Binop (op, a, b) ->
     let a = infer_expr env ctx a in
     let b = infer_expr env ctx b in
-    node (binop_result op a.Ast.ann b.Ast.ann) (`Binop (op, a, b))
+    node (binop_result ctx.registry op a.Ast.ann b.Ast.ann) (`Binop (op, a, b))
   (* `x op= v` types as `x = x op v` does. Whether it stays that way is
      [Resolve]'s decision, not the checker's. *)
   | `Compound (op, name, v) ->
@@ -256,7 +266,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
      | Some scheme ->
        let target = Types.instantiate scheme in
        let v = infer_expr env ctx v in
-       let result = binop_result op target v.Ast.ann in
+       let result = binop_result ctx.registry op target v.Ast.ann in
        Types.unify target result;
        let it : checked_expr_kind = `Compound (op, name, v) in
        node target it)
@@ -614,12 +624,15 @@ let globals () =
     };
   env
 
-let check (program : Ast.desugared_stmt list) : (Ast.typed_stmt list, error list) result =
+let check ~registry (program : Ast.desugared_stmt list)
+  : (Ast.typed_stmt list, error list) result
+  =
   Types.reset ();
   reset_effects ();
   let env = globals () in
   let ctx =
-    { return_type = None
+    { registry
+    ; return_type = None
     ; saw_return = false
     ; row = Types.fresh_row ()
     ; resume_type = None

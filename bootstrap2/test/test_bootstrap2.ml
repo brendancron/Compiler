@@ -104,13 +104,14 @@ let interpret source =
           Error
             (Printf.sprintf "desugar error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Ok desugared ->
-        match Typecheck.check desugared with
+        let registry = Registry.builtins () in
+        match Typecheck.check ~registry desugared with
         | Error (e :: _) ->
           Error
             (Printf.sprintf "type error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Error [] -> Error "type check failed"
         | Ok typed ->
-          (match Cps.program (Reflect.program (Resolve.program typed)) with
+          (match Cps.program (Reflect.program (Resolve.program ~registry typed)) with
            | Error e ->
              Error
                (Printf.sprintf "cps error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
@@ -146,7 +147,7 @@ let rejections source =
         | Error e ->
           Ok (Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Ok desugared ->
-        match Typecheck.check desugared with
+        match Typecheck.check ~registry:(Registry.builtins ()) desugared with
         | Ok _ -> Error "expected an error, but the program checked"
         | Error errors ->
           Ok
