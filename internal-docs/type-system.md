@@ -255,7 +255,7 @@ fresh-variable counter. Results land in side tables keyed by node id.
 | Types and unification | `lib/types.ml` |
 | Inference | `lib/typecheck.ml` |
 | `--dump-types` | `bin/main.ml`, `lib/printer.ml` |
-| Fixtures | `tests/types/inference/`, `tests/types/errors/` |
+| Fixtures | `tests/types/inference/`, `tests/types/errors/`, `tests/reflection/` |
 
 Notes on the parts that differ from the plan above:
 

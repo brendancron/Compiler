@@ -30,9 +30,9 @@ let cases =
   ; "tests/types/inference/polymorphism"
   ; "tests/types/inference/float_math"
   ; "tests/types/inference/higher_order"
-  ; "tests/types/inference/typeof_exprs"
-  ; "tests/types/typeof_primitives"
-  ; "tests/types/typeof_fn"
+  ; "tests/reflection/typeof_exprs"
+  ; "tests/reflection/typeof_primitives"
+  ; "tests/reflection/typeof_fn"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
