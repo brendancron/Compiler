@@ -15,14 +15,11 @@ let rec expr (e : expr) : desugared_expr =
   let sp = e.span in
   let it : desugared_expr_kind =
     match e.it with
-    (* x op= v  ⇒  x = x op v.  [sp] is the span of `x` itself, since the parser
-       gives an assignment its target's span. *)
-    | `Compound (op, name, v) ->
-      `Assign (name, at sp (`Binop (op, at sp (`Var name), expr v)))
     | #lit as l -> l
     | #vars as v -> (map_vars expr v :> desugared_expr_kind)
     | #ops as o -> (map_ops expr o :> desugared_expr_kind)
     | #logic as l -> (map_logic expr l :> desugared_expr_kind)
+    | #compound as c -> (map_compound expr c :> desugared_expr_kind)
     | #reflect as r -> (map_reflect expr r :> desugared_expr_kind)
   in
   { it; span = sp; ann = () }

@@ -18,6 +18,7 @@ and checked_expr_kind =
   | checked_expr Ast.vars
   | checked_expr Ast.ops
   | checked_expr Ast.logic
+  | checked_expr Ast.compound
   | checked_expr Ast.reflect
   ]
 
@@ -148,7 +149,7 @@ let is_syntactic_value (e : Ast.desugared_expr) =
 let rec assigned_in_expr (e : Ast.desugared_expr) acc =
   match e.Ast.it with
   | #Ast.lit | `Var _ -> acc
-  | `Assign (name, v) -> assigned_in_expr v (name :: acc)
+  | `Assign (name, v) | `Compound (_, name, v) -> assigned_in_expr v (name :: acc)
   | `Unop (_, a) -> assigned_in_expr a acc
   | `Binop (_, a, b) | `And (a, b) | `Or (a, b) ->
     assigned_in_expr b (assigned_in_expr a acc)
@@ -194,6 +195,23 @@ let assigned_names body =
    are checked structurally and a bare reference gets an unconstrained type. *)
 let variadic_builtins = [ "print" ]
 
+(* Shared by `Binop` and `Compound`: operands agree, the operator constrains
+   them, and the result is either that type or a bool. *)
+let binop_result (op : Ast.binop) a b =
+  Types.unify a b;
+  match op with
+  (* `+` is also string concatenation. *)
+  | Ast.Add ->
+    Types.unify a (Types.fresh_with Types.Addable);
+    a
+  | Ast.Sub | Ast.Mul | Ast.Div ->
+    Types.unify a (Types.fresh_with Types.Numeric);
+    a
+  | Ast.Less | Ast.Less_equal | Ast.Greater | Ast.Greater_equal ->
+    Types.unify a (Types.fresh_with Types.Numeric);
+    Types.IBool
+  | Ast.Equal | Ast.Not_equal -> Types.IBool
+
 let rec infer_expr env ctx (e : Ast.desugared_expr) : checked_expr =
   try infer_expr_impl env ctx e with
   | Types.Type_error message -> raise (Located { span = e.Ast.span; message })
@@ -229,22 +247,19 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
   | `Binop (op, a, b) ->
     let a = infer_expr env ctx a in
     let b = infer_expr env ctx b in
-    Types.unify a.Ast.ann b.Ast.ann;
-    let result =
-      match op with
-      (* `+` is also string concatenation. *)
-      | Ast.Add ->
-        Types.unify a.Ast.ann (Types.fresh_with Types.Addable);
-        a.Ast.ann
-      | Ast.Sub | Ast.Mul | Ast.Div ->
-        Types.unify a.Ast.ann (Types.fresh_with Types.Numeric);
-        a.Ast.ann
-      | Ast.Less | Ast.Less_equal | Ast.Greater | Ast.Greater_equal ->
-        Types.unify a.Ast.ann (Types.fresh_with Types.Numeric);
-        Types.IBool
-      | Ast.Equal | Ast.Not_equal -> Types.IBool
-    in
-    node result (`Binop (op, a, b))
+    node (binop_result op a.Ast.ann b.Ast.ann) (`Binop (op, a, b))
+  (* `x op= v` types as `x = x op v` does. Whether it stays that way is
+     [Resolve]'s decision, not the checker's. *)
+  | `Compound (op, name, v) ->
+    (match lookup env name with
+     | None -> fail span "Undefined variable '%s'." name
+     | Some scheme ->
+       let target = Types.instantiate scheme in
+       let v = infer_expr env ctx v in
+       let result = binop_result op target v.Ast.ann in
+       Types.unify target result;
+       let it : checked_expr_kind = `Compound (op, name, v) in
+       node target it)
   | `And (a, b) | `Or (a, b) ->
     let a = infer_expr env ctx a in
     let b = infer_expr env ctx b in
@@ -559,6 +574,7 @@ let rec resolve_expr (e : checked_expr) : Ast.typed_expr =
     | #Ast.vars as v -> (Ast.map_vars resolve_expr v :> Ast.typed_expr_kind)
     | #Ast.ops as o -> (Ast.map_ops resolve_expr o :> Ast.typed_expr_kind)
     | #Ast.logic as l -> (Ast.map_logic resolve_expr l :> Ast.typed_expr_kind)
+    | #Ast.compound as c -> (Ast.map_compound resolve_expr c :> Ast.typed_expr_kind)
     | #Ast.reflect as r -> (Ast.map_reflect resolve_expr r :> Ast.typed_expr_kind)
   in
   { Ast.it; span = e.Ast.span; ann = Types.resolve e.Ast.ann }

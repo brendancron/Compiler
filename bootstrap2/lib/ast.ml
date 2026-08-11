@@ -154,7 +154,8 @@ and stmt_kind =
 
 type program = stmt list
 
-(* No [`Compound], no [`For]. *)
+(* No [`For]. [`Compound] survives: whether `x += v` updates in place or
+   rebuilds depends on the type, so only [Resolve] can decide it. *)
 type desugared_expr = (desugared_expr_kind, unit) node
 
 and desugared_expr_kind =
@@ -162,6 +163,7 @@ and desugared_expr_kind =
   | desugared_expr vars
   | desugared_expr ops
   | desugared_expr logic
+  | desugared_expr compound
   | desugared_expr reflect
   ]
 
@@ -180,6 +182,7 @@ and typed_expr_kind =
   | typed_expr vars
   | typed_expr ops
   | typed_expr logic
+  | typed_expr compound
   | typed_expr reflect
   ]
 
@@ -188,6 +191,24 @@ type typed_stmt = (typed_stmt_kind, Types.ty) node
 and typed_stmt_kind =
   [ (typed_expr, typed_stmt) stmts
   | (typed_expr, typed_stmt, typed_stmt handler) effects
+  ]
+
+(* No [`Compound]: every operator is now a primitive or a call. *)
+type resolved_expr = (resolved_expr_kind, Types.ty) node
+
+and resolved_expr_kind =
+  [ lit
+  | resolved_expr vars
+  | resolved_expr ops
+  | resolved_expr logic
+  | resolved_expr reflect
+  ]
+
+type resolved_stmt = (resolved_stmt_kind, Types.ty) node
+
+and resolved_stmt_kind =
+  [ (resolved_expr, resolved_stmt) stmts
+  | (resolved_expr, resolved_stmt, resolved_stmt handler) effects
   ]
 
 (* No [`Typeof]: the interpreter cannot be handed one. *)

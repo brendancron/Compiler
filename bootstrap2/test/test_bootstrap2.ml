@@ -110,7 +110,7 @@ let interpret source =
             (Printf.sprintf "type error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Error [] -> Error "type check failed"
         | Ok typed ->
-          (match Cps.program (Reflect.program typed) with
+          (match Cps.program (Reflect.program (Resolve.program typed)) with
            | Error e ->
              Error
                (Printf.sprintf "cps error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)

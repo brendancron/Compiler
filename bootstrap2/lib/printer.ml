@@ -162,6 +162,8 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
       Printf.sprintf "(and %s %s)" (string_of_typed_expr a) (string_of_typed_expr b)
     | `Or (a, b) ->
       Printf.sprintf "(or %s %s)" (string_of_typed_expr a) (string_of_typed_expr b)
+    | `Compound (op, name, v) ->
+      Printf.sprintf "(%s= %s %s)" (string_of_binop op) name (string_of_typed_expr v)
     | `Typeof e -> Printf.sprintf "(typeof %s)" (string_of_typed_expr e)
   in
   Printf.sprintf "%s:%s" body ty
