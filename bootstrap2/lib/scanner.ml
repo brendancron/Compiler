@@ -12,7 +12,7 @@ type state =
   ; mutable current : int (* offset of the next char to consume *)
   ; mutable line : int
   ; mutable line_start : int (* offset just past the most recent newline *)
-  ; mutable tokens : Token.t list (* reversed *)
+  ; mutable tokens : Token.token list (* reversed *)
   ; mutable errors : error list (* reversed *)
   }
 
@@ -47,9 +47,10 @@ let lexeme s = String.sub s.source s.start (s.current - s.start)
 
 (* Tokens and errors are positioned at their first character, not at wherever
    the cursor happens to be — a multi-line string points at its opening quote. *)
-let add_token s kind =
+let add_token s token_type =
   s.tokens
-  <- Token.make kind ~lexeme:(lexeme s) ~line:s.start_line ~col:s.start_col :: s.tokens
+  <- Token.make token_type ~lexeme:(lexeme s) ~line:s.start_line ~col:s.start_col
+     :: s.tokens
 
 let error s message =
   s.errors <- { line = s.start_line; col = s.start_col; message } :: s.errors
@@ -109,7 +110,7 @@ let identifier s =
   done;
   let text = lexeme s in
   match keyword text with
-  | Some kind -> add_token s kind
+  | Some token_type -> add_token s token_type
   | None -> add_token s (Token.Identifier text)
 
 let scan_token s =

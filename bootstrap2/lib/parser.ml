@@ -5,7 +5,7 @@ type error =
   }
 
 type state =
-  { tokens : Token.t array
+  { tokens : Token.token array
   ; mutable current : int
   ; mutable errors : error list (* reversed *)
   }
@@ -16,26 +16,26 @@ exception Parse_error
 
 let peek s = s.tokens.(s.current)
 let previous s = s.tokens.(s.current - 1)
-let is_at_end s = (peek s).Token.kind = Token.Eof
+let is_at_end s = (peek s).Token.token_type = Token.Eof
 
 let advance s =
   if not (is_at_end s) then s.current <- s.current + 1;
   previous s
 
-let check s kind = (not (is_at_end s)) && (peek s).Token.kind = kind
+let check s token_type = (not (is_at_end s)) && (peek s).Token.token_type = token_type
 
-let matches s kinds =
-  if List.exists (check s) kinds then Some (advance s) else None
+let matches s token_types =
+  if List.exists (check s) token_types then Some (advance s) else None
 
-let error s (tok : Token.t) message =
+let error s (tok : Token.token) message =
   s.errors <- { line = tok.line; col = tok.col; message } :: s.errors;
   Parse_error
 
-let consume s kind message =
-  if check s kind then advance s else raise (error s (peek s) message)
+let consume s token_type message =
+  if check s token_type then advance s else raise (error s (peek s) message)
 
 let consume_identifier s message =
-  match (peek s).Token.kind with
+  match (peek s).Token.token_type with
   | Token.Identifier name ->
     ignore (advance s);
     name
@@ -43,10 +43,10 @@ let consume_identifier s message =
 
 (* Consume the next token only if it is one of [ops] at this precedence level. *)
 let matches_binop s ops =
-  let kind = (peek s).Token.kind in
-  if List.mem kind ops
+  let token_type = (peek s).Token.token_type in
+  if List.mem token_type ops
   then (
-    match Ast.binop_of_token kind with
+    match Ast.binop_of_token token_type with
     | Some op ->
       ignore (advance s);
       Some op
@@ -57,10 +57,10 @@ let matches_binop s ops =
 let synchronize s =
   ignore (advance s);
   let rec loop () =
-    if is_at_end s || (previous s).Token.kind = Token.Semicolon
+    if is_at_end s || (previous s).Token.token_type = Token.Semicolon
     then ()
     else (
-      match (peek s).Token.kind with
+      match (peek s).Token.token_type with
       | Token.Fn | Token.Var | Token.For | Token.If | Token.While | Token.Return -> ()
       | _ ->
         ignore (advance s);
@@ -86,7 +86,7 @@ and assignment s : Ast.expr =
       ignore (error s tok "Invalid assignment target.");
       left
   in
-  match (peek s).Token.kind with
+  match (peek s).Token.token_type with
   | Token.Equal -> target None (advance s)
   | Token.Plus_equal -> target (Some Ast.Add) (advance s)
   | Token.Minus_equal -> target (Some Ast.Sub) (advance s)
@@ -137,7 +137,7 @@ and term s : Ast.expr = binary_level s [ Token.Minus; Token.Plus ] factor
 and factor s : Ast.expr = binary_level s [ Token.Slash; Token.Star ] unary
 
 and unary s : Ast.expr =
-  match Ast.unop_of_token (peek s).Token.kind with
+  match Ast.unop_of_token (peek s).Token.token_type with
   | Some op ->
     let tok = advance s in
     let right = unary s in
@@ -158,7 +158,7 @@ and postfix s : Ast.expr =
         ignore (error s tok "Invalid increment target.");
         left
     in
-    match (peek s).Token.kind with
+    match (peek s).Token.token_type with
     | Token.Plus_plus -> step Ast.Add (advance s)
     | Token.Minus_minus -> step Ast.Sub (advance s)
     | _ -> left
@@ -192,7 +192,7 @@ and finish_call s callee : Ast.expr =
 and primary s : Ast.expr =
   let tok = peek s in
   let sp = Ast.span_of_token tok in
-  match tok.Token.kind with
+  match tok.Token.token_type with
   | Token.Number n ->
     ignore (advance s);
     Ast.at sp (`Num n)
@@ -222,7 +222,7 @@ let rec declaration s : Ast.stmt option =
   try
     let tok = peek s in
     let sp = Ast.span_of_token tok in
-    match tok.Token.kind with
+    match tok.Token.token_type with
     | Token.Fn ->
       ignore (advance s);
       Some (fn_decl s sp)
@@ -281,7 +281,7 @@ and block s : Ast.stmt list =
 and statement s : Ast.stmt =
   let tok = peek s in
   let sp = Ast.span_of_token tok in
-  match tok.Token.kind with
+  match tok.Token.token_type with
   | Token.For ->
     ignore (advance s);
     for_stmt s sp
@@ -326,7 +326,7 @@ and for_stmt s sp : Ast.stmt =
   ignore (consume s Token.Left_paren "Expected '(' after 'for'.");
   let init =
     let tok = peek s in
-    match tok.Token.kind with
+    match tok.Token.token_type with
     | Token.Semicolon ->
       ignore (advance s);
       None
@@ -346,7 +346,7 @@ and return_stmt s sp : Ast.stmt =
   ignore (consume s Token.Semicolon "Expected ';' after return value.");
   Ast.at sp (`Return value)
 
-let parse (tokens : Token.t list) : (Ast.program, error list) result =
+let parse (tokens : Token.token list) : (Ast.program, error list) result =
   let s = { tokens = Array.of_list tokens; current = 0; errors = [] } in
   let rec loop acc =
     if is_at_end s

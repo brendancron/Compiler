@@ -1,4 +1,4 @@
-type kind =
+type token_type =
   (* Single-character tokens. *)
   | Left_paren
   | Right_paren
@@ -43,16 +43,16 @@ type kind =
   | While
   | Eof
 
-type t =
-  { kind : kind
+type token =
+  { token_type : token_type
   ; lexeme : string
   ; line : int (* 1-based *)
   ; col : int (* 1-based, counted from the start of `line` *)
   }
 
-let make kind ~lexeme ~line ~col = { kind; lexeme; line; col }
+let make token_type ~lexeme ~line ~col = { token_type; lexeme; line; col }
 
-let kind_to_string = function
+let token_type_to_string = function
   | Left_paren -> "LEFT_PAREN"
   | Right_paren -> "RIGHT_PAREN"
   | Left_brace -> "LEFT_BRACE"
@@ -103,5 +103,11 @@ let literal_to_string = function
   | Number n -> number_to_string n
   | _ -> "null"
 
-let to_string { kind; lexeme; line; col } =
-  Printf.sprintf "%d:%d %s %s %s" line col (kind_to_string kind) lexeme (literal_to_string kind)
+let to_string { token_type; lexeme; line; col } =
+  Printf.sprintf
+    "%d:%d %s %s %s"
+    line
+    col
+    (token_type_to_string token_type)
+    lexeme
+    (literal_to_string token_type)

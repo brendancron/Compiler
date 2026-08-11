@@ -53,8 +53,6 @@ type 'e logic =
   | `Or of 'e * 'e
   ]
 
-(* `x += e`, `x -= e`, `x++`, `x--` — all four are one shape: read a variable,
-   apply a binop, store it back. Desugaring rewrites them to [`Assign]. *)
 type 'e compound = [ `Compound of binop * string * 'e ]
 
 type ('e, 's) stmts =
@@ -136,7 +134,7 @@ let map_loops (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) loops)
   | `For (init, cond, step, body) ->
     `For (Option.map fs init, Option.map fe cond, Option.map fe step, fs body)
 
-let binop_of_token : Token.kind -> binop option = function
+let binop_of_token : Token.token_type -> binop option = function
   | Token.Plus -> Some Add
   | Token.Minus -> Some Sub
   | Token.Star -> Some Mul
@@ -149,9 +147,9 @@ let binop_of_token : Token.kind -> binop option = function
   | Token.Greater_equal -> Some Greater_equal
   | _ -> None
 
-let unop_of_token : Token.kind -> unop option = function
+let unop_of_token : Token.token_type -> unop option = function
   | Token.Minus -> Some Neg
   | Token.Bang -> Some Not
   | _ -> None
 
-let span_of_token (t : Token.t) = { line = t.line; col = t.col }
+let span_of_token (t : Token.token) = { line = t.line; col = t.col }
