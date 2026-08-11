@@ -32,6 +32,32 @@ cd bootstrap && RUSTFLAGS="-A warnings" cargo test
 - `--dump-all --out-dir out` — write debug files for every pipeline stage
 - `--dump-runtime-ast`, `--dump-cps`, `--dump-staged`, etc. — individual stage dumps
 
+## Code style
+
+Applies to both `bootstrap/` (Rust) and `bootstrap2/` (OCaml).
+
+**Write few comments.** Most code should carry none. Two kinds earn their place:
+
+1. **Clarifying genuinely complex logic** — a subtle invariant, a trap, why the obvious alternative fails.
+2. **Organizing** — a short label over a long list, like `(* One or two character tokens. *)` in `token.ml`.
+
+Anything else is noise. Do not summarize what a function does when its name and signature already say it, and do not restate the line below.
+
+**Never describe development in code.** No stages, milestones, plan phases, what a rewrite replaced, or what is coming next. Write for someone reading the file in three years with no memory of how it was built — "Stage 1 → stage 2" means nothing to them, and the types (`desugared_expr` → `typed_expr`) already say what a pass consumes and produces. That material belongs in conversation or `internal-docs/`, never in a source file.
+
+**Explain why, not how.** The code shows how. A comment is for the reasoning a reader cannot recover from it.
+
+```ocaml
+(* Bad — development framing, and the types already say this. *)
+(* Stage 1 → stage 2: Hindley-Milner inference over the desugared tree.
+   Three passes, in this order: hoist, infer, resolve. *)
+
+(* Good — a trap that costs an hour to rediscover. *)
+(* Drop the monomorphic binding [hoist] installed: leaving it in place makes the
+   function's own variables count as free in the enclosing scope, so nothing is
+   ever quantified. *)
+```
+
 ## Architecture
 
 Cronyx is a statically-typed, metaprogramming-first language. The compiler lives entirely in `bootstrap/src/`.
