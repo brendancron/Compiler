@@ -16,14 +16,19 @@ let string_of_unop : Ast.unop -> string = function
   | Ast.Neg -> "-"
   | Ast.Not -> "!"
 
+let string_of_row = function
+  | [] -> ""
+  | labels -> Printf.sprintf " <%s>" (String.concat ", " labels)
+
 let rec string_of_type_expr (t : Ast.type_expr) : string =
   match t.Ast.it with
   | Ast.Ty_name name -> name
-  | Ast.Ty_fn (params, ret) ->
+  | Ast.Ty_fn (params, ret, row) ->
     Printf.sprintf
-      "(%s) -> %s"
+      "(%s) -> %s%s"
       (String.concat ", " (List.map string_of_type_expr params))
       (string_of_type_expr ret)
+      (string_of_row row)
 
 let annotation = function
   | None -> ""
@@ -79,21 +84,37 @@ let rec write_stmt buf indent (s : Ast.stmt) =
       (Printf.sprintf "if %s" (string_of_expr cond))
       (then_branch :: Option.to_list else_branch)
   | `While (cond, body) -> nested (Printf.sprintf "while %s" (string_of_expr cond)) [ body ]
-  | `Fn (name, params, ret, body) ->
+  | `Fn (name, params, signature, body) ->
     nested
       (Printf.sprintf
-         "fn %s (%s)%s"
+         "fn %s (%s)%s%s"
          name
          (String.concat " " (List.map string_of_param params))
-         (match ret with
+         (match signature.Ast.ret with
           | None -> ""
-          | Some t -> " -> " ^ string_of_type_expr t))
+          | Some t -> " -> " ^ string_of_type_expr t)
+         (match signature.Ast.row with
+          | None -> ""
+          | Some labels -> string_of_row labels))
       body
   | `Return value -> line "%s(return %s)\n" pad (opt_expr value)
   | `For (init, cond, step, body) ->
     line "%s(for %s %s\n" pad (opt_expr cond) (opt_expr step);
     List.iter (write_stmt buf (indent + 1)) (Option.to_list init @ [ body ]);
     line "%s)\n" pad
+  | `Effect_decl (name, ops) ->
+    line
+      "%s(effect %s%s)\n"
+      pad
+      name
+      (String.concat "" (List.map (fun (o : Ast.op_decl) -> " " ^ o.Ast.op_name) ops))
+  | `Run (body, handlers) ->
+    nested
+      (Printf.sprintf
+         "run%s"
+         (String.concat "" (List.map (fun h -> " handle " ^ h.Ast.handled) handlers)))
+      (body @ List.concat_map (fun h -> List.concat_map (fun a -> a.Ast.arm_body) h.Ast.arms) handlers)
+  | `Resume value -> line "%s(resume %s)\n" pad (opt_expr value)
 
 let string_of_program (program : Ast.program) : string =
   let buf = Buffer.create 256 in
@@ -163,6 +184,14 @@ let rec write_typed_stmt buf indent (s : Ast.typed_stmt) =
          (String.concat " " (List.map (fun (p : Ast.param) -> p.Ast.name) params)))
       body
   | `Return value -> line "%s(return %s)\n" pad (opt_typed_expr value)
+  | `Effect_decl (name, _) -> line "%s(effect %s)\n" pad name
+  | `Run (body, handlers) ->
+    nested
+      (Printf.sprintf
+         "run%s"
+         (String.concat "" (List.map (fun h -> " handle " ^ h.Ast.handled) handlers)))
+      (body @ List.concat_map (fun h -> List.concat_map (fun a -> a.Ast.arm_body) h.Ast.arms) handlers)
+  | `Resume value -> line "%s(resume %s)\n" pad (opt_typed_expr value)
 
 let string_of_typed_program (program : Ast.typed_stmt list) : string =
   let buf = Buffer.create 256 in

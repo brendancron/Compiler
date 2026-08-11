@@ -97,8 +97,29 @@ let rec type_expr s : Ast.type_expr =
     in
     ignore (consume s Token.Right_paren "Expected ')' after parameter types.");
     ignore (consume s Token.Arrow "Expected '->' after parameter types.");
-    Ast.at sp (Ast.Ty_fn (params, type_expr s))
+    let ret = type_expr s in
+    Ast.at sp (Ast.Ty_fn (params, ret, row_annotation s))
   | _ -> raise (error s tok "Expected a type.")
+
+(* `<log, exn>`. A written row is closed, so its absence means pure. *)
+and row_annotation s : string list =
+  match matches s [ Token.Less ] with
+  | None -> []
+  | Some _ ->
+    if check s Token.Greater
+    then (
+      ignore (advance s);
+      [])
+    else (
+      let rec loop acc =
+        let label = consume_identifier s "Expected an effect name." in
+        match matches s [ Token.Comma ] with
+        | Some _ -> loop (label :: acc)
+        | None -> List.rev (label :: acc)
+      in
+      let labels = loop [] in
+      ignore (consume s Token.Greater "Expected '>' after effect row.");
+      labels)
 
 let type_annotation s : Ast.type_expr option =
   match matches s [ Token.Colon ] with
@@ -106,10 +127,14 @@ let type_annotation s : Ast.type_expr option =
   | None -> None
 
 (* Cronyx spells return types both ways: `fn f(): T` and `fn f() -> T`. *)
-let return_annotation s : Ast.type_expr option =
-  match matches s [ Token.Arrow; Token.Colon ] with
-  | Some _ -> Some (type_expr s)
-  | None -> None
+let signature s : Ast.signature =
+  let ret =
+    match matches s [ Token.Arrow; Token.Colon ] with
+    | Some _ -> Some (type_expr s)
+    | None -> None
+  in
+  let row = if check s Token.Less then Some (row_annotation s) else None in
+  { Ast.ret; row }
 
 (* ---- expressions ---- *)
 
@@ -281,6 +306,9 @@ let rec declaration s : Ast.stmt option =
     | Token.Var ->
       ignore (advance s);
       Some (var_decl s sp)
+    | Token.Effect ->
+      ignore (advance s);
+      Some (effect_decl s sp)
     | _ -> Some (statement s)
   with
   | Parse_error ->
@@ -304,9 +332,9 @@ and fn_decl s sp : Ast.stmt =
       loop [])
   in
   ignore (consume s Token.Right_paren "Expected ')' after parameters.");
-  let ret = return_annotation s in
+  let signature = signature s in
   ignore (consume s Token.Left_brace "Expected '{' before function body.");
-  Ast.at sp (`Fn (name, params, ret, block s))
+  Ast.at sp (`Fn (name, params, signature, block s))
 
 and var_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected variable name." in
@@ -349,6 +377,12 @@ and statement s : Ast.stmt =
   | Token.Return ->
     ignore (advance s);
     return_stmt s sp
+  | Token.Run ->
+    ignore (advance s);
+    run_stmt s sp
+  | Token.Resume ->
+    ignore (advance s);
+    resume_stmt s sp
   | Token.Left_brace ->
     ignore (advance s);
     Ast.at sp (`Block (block s))
@@ -395,6 +429,103 @@ and for_stmt s sp : Ast.stmt =
   let step = if check s Token.Right_paren then None else Some (expression s) in
   ignore (consume s Token.Right_paren "Expected ')' after for clauses.");
   Ast.at sp (`For (init, cond, step, statement s))
+
+and op_kind s : Ast.op_kind =
+  match (peek s).Token.token_type with
+  | Token.Fn ->
+    ignore (advance s);
+    Ast.Op_fn
+  | Token.Ctl ->
+    ignore (advance s);
+    Ast.Op_ctl
+  | _ -> raise (error s (peek s) "Expected 'fn' or 'ctl'.")
+
+and effect_decl s sp : Ast.stmt =
+  let name = consume_identifier s "Expected effect name." in
+  ignore (consume s Token.Left_brace "Expected '{' after effect name.");
+  let rec loop acc =
+    if check s Token.Right_brace || is_at_end s
+    then List.rev acc
+    else (
+      let kind = op_kind s in
+      let op_name = consume_identifier s "Expected operation name." in
+      ignore (consume s Token.Left_paren "Expected '(' after operation name.");
+      let params =
+        if check s Token.Right_paren
+        then []
+        else (
+          let rec params acc =
+            let param_name = consume_identifier s "Expected parameter name." in
+            let p = { Ast.name = param_name; ty = type_annotation s } in
+            match matches s [ Token.Comma ] with
+            | Some _ -> params (p :: acc)
+            | None -> List.rev (p :: acc)
+          in
+          params [])
+      in
+      ignore (consume s Token.Right_paren "Expected ')' after parameters.");
+      let op_ret =
+        match matches s [ Token.Arrow; Token.Colon ] with
+        | Some _ -> Some (type_expr s)
+        | None -> None
+      in
+      ignore (consume s Token.Semicolon "Expected ';' after operation.");
+      loop ({ Ast.op_name; op_kind = kind; op_params = params; op_ret } :: acc))
+  in
+  let ops = loop [] in
+  ignore (consume s Token.Right_brace "Expected '}' after effect operations.");
+  Ast.at sp (`Effect_decl (name, ops))
+
+and handler s : Ast.stmt Ast.handler =
+  let handled = consume_identifier s "Expected an effect name after 'handle'." in
+  ignore (consume s Token.Left_brace "Expected '{' after effect name.");
+  let rec loop acc =
+    if check s Token.Right_brace || is_at_end s
+    then List.rev acc
+    else (
+      let kind = op_kind s in
+      let arm_name = consume_identifier s "Expected operation name." in
+      ignore (consume s Token.Left_paren "Expected '(' after operation name.");
+      let params =
+        if check s Token.Right_paren
+        then []
+        else (
+          let rec params acc =
+            let p = consume_identifier s "Expected parameter name." in
+            (* The effect declaration is authoritative, so an annotation here is
+               accepted and discarded. *)
+            ignore (type_annotation s);
+            match matches s [ Token.Comma ] with
+            | Some _ -> params (p :: acc)
+            | None -> List.rev (p :: acc)
+          in
+          params [])
+      in
+      ignore (consume s Token.Right_paren "Expected ')' after parameters.");
+      ignore (consume s Token.Left_brace "Expected '{' before operation body.");
+      loop
+        ({ Ast.arm_name; arm_kind = kind; arm_params = params; arm_body = block s } :: acc))
+  in
+  let arms = loop [] in
+  ignore (consume s Token.Right_brace "Expected '}' after handler.");
+  { Ast.handled; arms }
+
+and run_stmt s sp : Ast.stmt =
+  ignore (consume s Token.Left_brace "Expected '{' after 'run'.");
+  let body = block s in
+  let rec loop acc =
+    match matches s [ Token.Handle ] with
+    | Some _ -> loop (handler s :: acc)
+    | None -> List.rev acc
+  in
+  let handlers = loop [] in
+  if handlers = [] then ignore (error s (peek s) "Expected 'handle' after a run block.");
+  Ast.at sp (`Run (body, handlers))
+
+and resume_stmt s sp : Ast.stmt =
+  let value = if check s Token.Semicolon then None else Some (expression s) in
+  ignore (consume s Token.Semicolon "Expected ';' after resume.");
+  Ast.at sp (`Resume value)
 
 and return_stmt s sp : Ast.stmt =
   let value = if check s Token.Semicolon then None else Some (expression s) in

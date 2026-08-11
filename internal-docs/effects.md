@@ -1,6 +1,15 @@
 # Algebraic effects — bootstrap2
 
-Status: **design, not implemented.**
+Status: **rows implemented; CPS partial.**
+
+| Piece | State |
+|-------|-------|
+| Effect rows, inference, discharge | done (`lib/types.ml`, `lib/typecheck.ml`) |
+| `fn` operations | run, via evidence passing (`lib/cps.ml`) |
+| Tail-resumptive `ctl` | run, compiled as `fn` (bind-inversion) |
+| Aborting `ctl` | rejected — needs continuations |
+| Multi-shot `resume` | rejected — needs continuations |
+| Effectful function as a value | rejected — needs row monomorphization |
 
 Two pieces of work that meet in the middle: effect rows in the type system, and
 a selective CPS pass that consumes what the checker inferred.

@@ -1,0 +1,8 @@
+effect one { fn a(): unit; }
+
+run {
+    a();
+} handle one {
+    fn a() { }
+    fn b() { }
+}

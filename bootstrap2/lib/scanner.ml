@@ -60,13 +60,18 @@ let is_alphanumeric c = is_alpha c || is_digit c
 
 let keyword = function
   | "and" -> Some Token.And
+  | "ctl" -> Some Token.Ctl
+  | "effect" -> Some Token.Effect
   | "else" -> Some Token.Else
   | "false" -> Some Token.False
   | "fn" -> Some Token.Fn
   | "for" -> Some Token.For
   | "if" -> Some Token.If
+  | "handle" -> Some Token.Handle
   | "or" -> Some Token.Or
+  | "resume" -> Some Token.Resume
   | "return" -> Some Token.Return
+  | "run" -> Some Token.Run
   | "true" -> Some Token.True
   | "typeof" -> Some Token.Typeof
   | "var" -> Some Token.Var

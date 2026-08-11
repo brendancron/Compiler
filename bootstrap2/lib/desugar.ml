@@ -47,6 +47,7 @@ let rec stmt (s : stmt) : desugared_stmt =
          | Some i -> [ stmt i; loop ]
          | None -> [ loop ])
     | #stmts as s -> (map_stmts expr stmt s :> desugared_stmt_kind)
+    | #effects as e -> (map_effects expr stmt e :> desugared_stmt_kind)
   in
   { it; span = sp; ann = () }
 

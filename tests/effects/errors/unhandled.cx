@@ -1,0 +1,4 @@
+effect logger { fn log(msg: string): unit; }
+
+// Nothing encloses the top level, so this effect is never discharged.
+log("boom");

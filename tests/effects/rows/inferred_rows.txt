@@ -1,0 +1,4 @@
+(string) -> unit <logger>
+(string) -> unit <counter, logger>
+() -> unit <counter, logger>
+(int) -> int

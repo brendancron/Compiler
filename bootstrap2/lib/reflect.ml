@@ -14,9 +14,11 @@ let rec expr (e : Ast.typed_expr) : Ast.reflected_expr =
   { Ast.it; span = e.Ast.span; ann = e.Ast.ann }
 
 let rec stmt (s : Ast.typed_stmt) : Ast.reflected_stmt =
-  { Ast.it = Ast.map_stmts expr stmt s.Ast.it
-  ; span = s.Ast.span
-  ; ann = s.Ast.ann
-  }
+  let it : Ast.reflected_stmt_kind =
+    match s.Ast.it with
+    | #Ast.stmts as st -> (Ast.map_stmts expr stmt st :> Ast.reflected_stmt_kind)
+    | #Ast.effects as e -> (Ast.map_effects expr stmt e :> Ast.reflected_stmt_kind)
+  in
+  { Ast.it; span = s.Ast.span; ann = s.Ast.ann }
 
 let program (p : Ast.typed_stmt list) : Ast.reflected_stmt list = List.map stmt p

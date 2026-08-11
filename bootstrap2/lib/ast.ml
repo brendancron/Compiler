@@ -37,11 +37,41 @@ type type_expr = (type_expr_kind, unit) node
 
 and type_expr_kind =
   | Ty_name of string
-  | Ty_fn of type_expr list * type_expr
+  (* The row is the written one, so an omitted `<...>` means pure. *)
+  | Ty_fn of type_expr list * type_expr * string list
 
 type param =
   { name : string
   ; ty : type_expr option
+  }
+
+(* [row = None] leaves the effect row to inference; [Some labels] closes it. *)
+type signature =
+  { ret : type_expr option
+  ; row : string list option
+  }
+
+type op_kind =
+  | Op_fn (* resumes automatically with the arm's value *)
+  | Op_ctl (* resumes only via `resume`, and may do so more than once *)
+
+type op_decl =
+  { op_name : string
+  ; op_kind : op_kind
+  ; op_params : param list
+  ; op_ret : type_expr option
+  }
+
+type 's handler =
+  { handled : string
+  ; arms : 's arm list
+  }
+
+and 's arm =
+  { arm_name : string
+  ; arm_kind : op_kind
+  ; arm_params : string list
+  ; arm_body : 's list
   }
 
 type lit =
@@ -69,6 +99,14 @@ type 'e logic =
 
 type 'e compound = [ `Compound of binop * string * 'e ]
 
+(* Eliminated by the CPS pass, which is why the interpreter has no handler
+   stack: by the time it runs, these are ordinary closures and calls. *)
+type ('e, 's) effects =
+  [ `Effect_decl of string * op_decl list
+  | `Run of 's list * 's handler list
+  | `Resume of 'e option
+  ]
+
 (* Eliminated by [Reflect], which needs the checker's annotations to do it. *)
 type 'e reflect = [ `Typeof of 'e ]
 
@@ -78,7 +116,7 @@ type ('e, 's) stmts =
   | `Block of 's list
   | `If of 'e * 's * 's option
   | `While of 'e * 's
-  | `Fn of string * param list * type_expr option * 's list
+  | `Fn of string * param list * signature * 's list
   | `Return of 'e option
   ]
 
@@ -97,7 +135,12 @@ and expr_kind =
   ]
 
 type stmt = (stmt_kind, unit) node
-and stmt_kind = [ (expr, stmt) stmts | (expr, stmt) loops ]
+
+and stmt_kind =
+  [ (expr, stmt) stmts
+  | (expr, stmt) loops
+  | (expr, stmt) effects
+  ]
 
 type program = stmt list
 
@@ -113,7 +156,11 @@ and desugared_expr_kind =
   ]
 
 type desugared_stmt = (desugared_stmt_kind, unit) node
-and desugared_stmt_kind = (desugared_expr, desugared_stmt) stmts
+
+and desugared_stmt_kind =
+  [ (desugared_expr, desugared_stmt) stmts
+  | (desugared_expr, desugared_stmt) effects
+  ]
 
 (* Same constructors, every node carrying a resolved type. *)
 type typed_expr = (typed_expr_kind, Types.ty) node
@@ -127,7 +174,11 @@ and typed_expr_kind =
   ]
 
 type typed_stmt = (typed_stmt_kind, Types.ty) node
-and typed_stmt_kind = (typed_expr, typed_stmt) stmts
+
+and typed_stmt_kind =
+  [ (typed_expr, typed_stmt) stmts
+  | (typed_expr, typed_stmt) effects
+  ]
 
 (* No [`Typeof]: the interpreter cannot be handed one. *)
 type reflected_expr = (reflected_expr_kind, Types.ty) node
@@ -140,7 +191,24 @@ and reflected_expr_kind =
   ]
 
 type reflected_stmt = (reflected_stmt_kind, Types.ty) node
-and reflected_stmt_kind = (reflected_expr, reflected_stmt) stmts
+
+and reflected_stmt_kind =
+  [ (reflected_expr, reflected_stmt) stmts
+  | (reflected_expr, reflected_stmt) effects
+  ]
+
+(* No effect constructs: the CPS pass has turned them into closures and calls. *)
+type cps_expr = (cps_expr_kind, Types.ty) node
+
+and cps_expr_kind =
+  [ lit
+  | cps_expr vars
+  | cps_expr ops
+  | cps_expr logic
+  ]
+
+type cps_stmt = (cps_stmt_kind, Types.ty) node
+and cps_stmt_kind = (cps_expr, cps_stmt) stmts
 
 let map_vars (f : 'a -> 'b) (e : 'a vars) : 'b vars =
   match e with
@@ -175,7 +243,8 @@ let map_stmts (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) stmts)
   | `Block body -> `Block (List.map fs body)
   | `If (c, t, e) -> `If (fe c, fs t, Option.map fs e)
   | `While (c, body) -> `While (fe c, fs body)
-  | `Fn (name, params, ret, body) -> `Fn (name, params, ret, List.map fs body)
+  | `Fn (name, params, signature, body) ->
+    `Fn (name, params, signature, List.map fs body)
   | `Return e -> `Return (Option.map fe e)
 
 let map_loops (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) loops)
@@ -184,6 +253,24 @@ let map_loops (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) loops)
   match s with
   | `For (init, cond, step, body) ->
     `For (Option.map fs init, Option.map fe cond, Option.map fe step, fs body)
+
+let map_effects (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) effects)
+  : ('e2, 's2) effects
+  =
+  let arm (a : 's1 arm) : 's2 arm =
+    { arm_name = a.arm_name
+    ; arm_kind = a.arm_kind
+    ; arm_params = a.arm_params
+    ; arm_body = List.map fs a.arm_body
+    }
+  in
+  match s with
+  | `Effect_decl (name, ops) -> `Effect_decl (name, ops)
+  | `Run (body, handlers) ->
+    `Run
+      ( List.map fs body
+      , List.map (fun h -> { handled = h.handled; arms = List.map arm h.arms }) handlers )
+  | `Resume e -> `Resume (Option.map fe e)
 
 let binop_of_token : Token.token_type -> binop option = function
   | Token.Plus -> Some Add

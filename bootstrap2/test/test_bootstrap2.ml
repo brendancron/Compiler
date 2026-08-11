@@ -33,6 +33,10 @@ let cases =
   ; "tests/reflection/typeof_exprs"
   ; "tests/reflection/typeof_primitives"
   ; "tests/reflection/typeof_fn"
+  ; "tests/effects/rows/inferred_rows"
+  ; "tests/effects/log/log"
+  ; "tests/effects/ask/ask"
+  ; "tests/effects/multi_handle/multi_handle"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
@@ -45,6 +49,11 @@ let error_cases =
   ; "tests/types/errors/assign_mismatch"
   ; "tests/types/errors/unknown_type"
   ; "tests/types/errors/string_comparison"
+  ; "tests/effects/errors/unhandled"
+  ; "tests/effects/errors/non_exhaustive"
+  ; "tests/effects/errors/no_such_operation"
+  ; "tests/effects/errors/unknown_effect"
+  ; "tests/effects/errors/purity_violated"
   ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)
@@ -89,15 +98,20 @@ let interpret source =
             (Printf.sprintf "type error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Error [] -> Error "type check failed"
         | Ok typed ->
-          (match Interp.run ~out (Reflect.program typed) with
-           | Ok () -> Ok (Buffer.contents buf)
+          (match Cps.program (Reflect.program typed) with
            | Error e ->
              Error
-               (Printf.sprintf
-                  "runtime error [%d:%d] %s"
-                  e.span.Ast.line
-                  e.span.Ast.col
-                  e.message))))
+               (Printf.sprintf "cps error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+           | Ok converted ->
+             (match Interp.run ~out converted with
+              | Ok () -> Ok (Buffer.contents buf)
+              | Error e ->
+                Error
+                  (Printf.sprintf
+                     "runtime error [%d:%d] %s"
+                     e.span.Ast.line
+                     e.span.Ast.col
+                     e.message)))))
 
 (* Formats diagnostics the way a .err file spells them. *)
 let type_errors source =

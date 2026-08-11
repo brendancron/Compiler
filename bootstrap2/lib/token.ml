@@ -34,13 +34,18 @@ type token_type =
   | Float of float
   (* Keywords. *)
   | And
+  | Ctl
+  | Effect
   | Else
   | False
   | Fn
   | For
   | If
   | Or
+  | Handle
+  | Resume
   | Return
+  | Run
   | True
   | Typeof
   | Var
@@ -88,13 +93,18 @@ let token_type_to_string = function
   | Int _ -> "INT"
   | Float _ -> "FLOAT"
   | And -> "AND"
+  | Ctl -> "CTL"
+  | Effect -> "EFFECT"
   | Else -> "ELSE"
   | False -> "FALSE"
   | Fn -> "FN"
   | For -> "FOR"
   | If -> "IF"
   | Or -> "OR"
+  | Handle -> "HANDLE"
+  | Resume -> "RESUME"
   | Return -> "RETURN"
+  | Run -> "RUN"
   | True -> "TRUE"
   | Typeof -> "TYPEOF"
   | Var -> "VAR"
