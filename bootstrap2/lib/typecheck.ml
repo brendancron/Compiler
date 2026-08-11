@@ -20,6 +20,7 @@ and checked_expr_kind =
   | checked_expr Ast.logic
   | checked_expr Ast.compound
   | checked_expr Ast.indexing
+  | checked_expr Ast.tuple
   | checked_expr Ast.collection
   | checked_expr Ast.reflect
   ]
@@ -124,6 +125,7 @@ let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
   | Ast.Ty_name "string" -> Types.IStr
   | Ast.Ty_name "bool" -> Types.IBool
   | Ast.Ty_name "unit" -> Types.IUnit
+  | Ast.Ty_tuple items -> Types.ITuple (List.map infer_ty_of_annotation items)
   | Ast.Ty_app ("Array", [ elem ]) -> Types.IArray (infer_ty_of_annotation elem)
   | Ast.Ty_app (name, args) ->
     fail
@@ -169,8 +171,9 @@ let rec assigned_in_expr (e : Ast.desugared_expr) acc =
   | `Index (a, b) -> assigned_in_expr b (assigned_in_expr a acc)
   | `Index_assign (a, b, c) ->
     assigned_in_expr c (assigned_in_expr b (assigned_in_expr a acc))
-  | `Collection_lit items ->
+  | `Collection_lit items | `Tuple items ->
     List.fold_left (fun acc i -> assigned_in_expr i acc) acc items
+  | `Tuple_get (t, _) -> assigned_in_expr t acc
 
 let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   let opt f o acc =
@@ -335,6 +338,32 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       (fun (i : checked_expr) -> unify_at i.Ast.span elem i.Ast.ann)
       items;
     node (Types.IArray elem) (`Collection_lit items)
+  | `Tuple items ->
+    let items = List.map (infer_expr env ctx) items in
+    node
+      (Types.ITuple (List.map (fun (i : checked_expr) -> i.Ast.ann) items))
+      (`Tuple items)
+  (* The index is part of the syntax, so the element type is known exactly
+     rather than being unified into place. *)
+  | `Tuple_get (target, index) ->
+    let target = infer_expr env ctx target in
+    (match Types.concrete target.Ast.ann with
+     | Some (Types.Tuple items) ->
+       (match List.nth_opt items index with
+        | Some ty -> node (Types.of_ty ty) (`Tuple_get (target, index))
+        | None ->
+          fail
+            span
+            "A tuple of %d element(s) has no field %d."
+            (List.length items)
+            index)
+     | Some other ->
+       fail target.Ast.span "Cannot take a field of %s." (Types.string_of_ty other)
+     | None ->
+       fail
+         target.Ast.span
+         "The type of this tuple is not known here, so field %d cannot be resolved."
+         index)
   | `Index (target, index) ->
     let target = infer_expr env ctx target in
     let index = infer_expr env ctx index in
@@ -635,6 +664,7 @@ let rec resolve_expr (e : checked_expr) : Ast.typed_expr =
     | #Ast.logic as l -> (Ast.map_logic resolve_expr l :> Ast.typed_expr_kind)
     | #Ast.compound as c -> (Ast.map_compound resolve_expr c :> Ast.typed_expr_kind)
     | #Ast.indexing as i -> (Ast.map_indexing resolve_expr i :> Ast.typed_expr_kind)
+    | #Ast.tuple as t -> (Ast.map_tuple resolve_expr t :> Ast.typed_expr_kind)
     | #Ast.collection as c ->
       (Ast.map_collection resolve_expr c :> Ast.typed_expr_kind)
     | #Ast.reflect as r -> (Ast.map_reflect resolve_expr r :> Ast.typed_expr_kind)

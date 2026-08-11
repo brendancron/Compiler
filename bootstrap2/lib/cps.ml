@@ -187,6 +187,7 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
     | #Ast.ops as o -> (Ast.map_ops (expr info) o :> Ast.cps_expr_kind)
     | #Ast.logic as l -> (Ast.map_logic (expr info) l :> Ast.cps_expr_kind)
     | #Ast.indexing as i -> (Ast.map_indexing (expr info) i :> Ast.cps_expr_kind)
+    | #Ast.tuple as t -> (Ast.map_tuple (expr info) t :> Ast.cps_expr_kind)
     | #Ast.array_lit as a -> (Ast.map_array_lit (expr info) a :> Ast.cps_expr_kind)
   in
   { Ast.it; span = e.Ast.span; ann = e.Ast.ann }
@@ -205,7 +206,8 @@ let rec suspends info (e : Ast.reflected_expr) =
     suspends info a || suspends info b
   | `Index_assign (a, b, c) ->
     suspends info a || suspends info b || suspends info c
-  | `Array_lit items -> List.exists (suspends info) items
+  | `Array_lit items | `Tuple items -> List.exists (suspends info) items
+  | `Tuple_get (t, _) -> suspends info t
 
 let rec suspends_stmt info (s : Ast.reflected_stmt) =
   match s.Ast.it with
@@ -243,6 +245,9 @@ let rec extract info (e : Ast.reflected_expr)
       | _ -> assert false)
   | `Array_lit items ->
     extract_list info items (fun items -> rebuild (`Array_lit items))
+  | `Tuple items -> extract_list info items (fun items -> rebuild (`Tuple items))
+  | `Tuple_get (t, i) ->
+    extract info t |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Tuple_get (f n, i)))
   | `Assign (name, v) ->
     extract info v |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Assign (name, f n)))
   | `Unop (op, v) ->

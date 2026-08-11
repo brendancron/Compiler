@@ -71,6 +71,22 @@ let rec expr (e : Ast.cps_expr) : unit =
          items
      | other ->
        fail span "An array literal is annotated %s." (Types.string_of_ty other))
+  | `Tuple items ->
+    List.iter expr items;
+    expect
+      span
+      "A tuple"
+      (Types.Tuple (List.map (fun (i : Ast.cps_expr) -> i.Ast.ann) items))
+      ann
+  | `Tuple_get (target, index) ->
+    expr target;
+    (match target.Ast.ann with
+     | Types.Tuple items ->
+       (match List.nth_opt items index with
+        | Some ty -> expect span "A tuple field" ty ann
+        | None -> fail span "A tuple has no field %d." index)
+     | other ->
+       fail target.Ast.span "Taking a field of %s." (Types.string_of_ty other))
   | `Index (target, i) ->
     expr target;
     expr i;

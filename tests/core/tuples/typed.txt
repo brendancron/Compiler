@@ -1,0 +1,5 @@
+1 a
+a 1
+((int, string)) -> (string, int)
+b Array<(int, string)>
+true

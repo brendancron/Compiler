@@ -140,6 +140,7 @@ let scan_token s =
   | ',' -> add_token s Token.Comma
   | ';' -> add_token s Token.Semicolon
   | ':' -> add_token s Token.Colon
+  | '.' -> add_token s Token.Dot
   | '*' -> add_token s (if matches s '=' then Token.Star_equal else Token.Star)
   | '+' ->
     add_token

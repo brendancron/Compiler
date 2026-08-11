@@ -13,6 +13,7 @@ type token_type =
   | Slash
   | Star
   | Colon
+  | Dot
   (* One or two character tokens. *)
   | Bang
   | Bang_equal
@@ -79,6 +80,7 @@ let token_type_to_string = function
   | Slash -> "SLASH"
   | Star -> "STAR"
   | Colon -> "COLON"
+  | Dot -> "DOT"
   | Bang -> "BANG"
   | Bang_equal -> "BANG_EQUAL"
   | Equal -> "EQUAL"

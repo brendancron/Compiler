@@ -95,7 +95,7 @@ let rec type_expr s : Ast.type_expr =
      type, since there are no tuples in the language yet. *)
   | Token.Left_paren ->
     ignore (advance s);
-    let params =
+    let items =
       if check s Token.Right_paren
       then []
       else (
@@ -107,12 +107,16 @@ let rec type_expr s : Ast.type_expr =
         in
         loop [])
     in
-    ignore (consume s Token.Right_paren "Expected ')' after parameter types.");
-    ignore (consume s Token.Arrow "Expected '->' after parameter types.");
-    (* The row comes first so that `<` after the arrow is never mistaken for a
-       type argument list. *)
-    let row = row_annotation s in
-    Ast.at sp (Ast.Ty_fn (params, type_expr s, row))
+    ignore (consume s Token.Right_paren "Expected ')' after type list.");
+    (* An arrow makes it a function type; without one it is a tuple. *)
+    if check s Token.Arrow
+    then (
+      ignore (advance s);
+      (* The row comes first so that `<` after the arrow is never mistaken for a
+         type argument list. *)
+      let row = row_annotation s in
+      Ast.at sp (Ast.Ty_fn (items, type_expr s, row)))
+    else Ast.at sp (Ast.Ty_tuple items)
   | _ -> raise (error s tok "Expected a type.")
 
 (* `<log, exn>`. A written row is closed, so its absence means pure. *)
@@ -259,6 +263,13 @@ and call s : Ast.expr =
       let index = expression s in
       ignore (consume s Token.Right_bracket "Expected ']' after index.");
       loop (Ast.at callee.Ast.span (`Index (callee, index)))
+    | Token.Dot ->
+      ignore (advance s);
+      (match (peek s).Token.token_type with
+       | Token.Int n ->
+         ignore (advance s);
+         loop (Ast.at callee.Ast.span (`Tuple_get (callee, n)))
+       | _ -> raise (error s (peek s) "Expected a tuple field number after '.'."))
     | _ -> callee
   in
   loop (primary s)
@@ -325,10 +336,22 @@ and primary s : Ast.expr =
     Ast.at sp (`Collection_lit items)
   | Token.Left_paren ->
     ignore (advance s);
-    let e = expression s in
-    ignore (consume s Token.Right_paren "Expected ')' after expression.");
-    (* Parens shape the parse only; no node survives them. *)
-    e
+    let first = expression s in
+    (* A comma is what makes it a tuple; otherwise the parens only shaped the
+       parse and no node survives them. *)
+    if check s Token.Comma
+    then (
+      let rec loop acc =
+        match matches s [ Token.Comma ] with
+        | Some _ -> loop (expression s :: acc)
+        | None -> List.rev acc
+      in
+      let items = loop [ first ] in
+      ignore (consume s Token.Right_paren "Expected ')' after tuple.");
+      Ast.at sp (`Tuple items))
+    else (
+      ignore (consume s Token.Right_paren "Expected ')' after expression.");
+      first)
   | _ -> raise (error s tok "Expected an expression.")
 
 (* ---- statements ---- *)

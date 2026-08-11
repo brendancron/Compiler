@@ -14,6 +14,7 @@ type ty =
   | Bool
   | Unit
   | Array of ty
+  | Tuple of ty list
   | Fn of ty list * ty * row
   (* Quantified, not unresolved. Reaching codegen means the call site was never
      monomorphized. *)
@@ -32,6 +33,7 @@ type infer_ty =
   | IBool
   | IUnit
   | IArray of infer_ty
+  | ITuple of infer_ty list
   | IFn of infer_ty list * infer_ty * infer_row
   | IVar of tv ref
 
@@ -125,6 +127,8 @@ let rec string_of_infer_ty (t : infer_ty) : string =
   | IBool -> "bool"
   | IUnit -> "unit"
   | IArray elem -> Printf.sprintf "Array<%s>" (string_of_infer_ty elem)
+  | ITuple items ->
+    Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_infer_ty items))
   | IFn (params, ret, row) ->
     Printf.sprintf
       "(%s) ->%s %s"
@@ -142,6 +146,8 @@ let rec string_of_ty (t : ty) : string =
   | Bool -> "bool"
   | Unit -> "unit"
   | Array elem -> Printf.sprintf "Array<%s>" (string_of_ty elem)
+  | Tuple items ->
+    Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_ty items))
   | Fn (params, ret, row) ->
     Printf.sprintf
       "(%s) ->%s %s"
@@ -208,6 +214,7 @@ let rec occurs id (t : infer_ty) =
   match repr t with
   | IVar { contents = Unbound (id', _) } -> id = id'
   | IArray elem -> occurs id elem
+  | ITuple items -> List.exists (occurs id) items
   | IFn (params, ret, _) -> List.exists (occurs id) params || occurs id ret
   | _ -> false
 
@@ -229,6 +236,14 @@ let rec unify (a : infer_ty) (b : infer_ty) : unit =
     r := Link t
   | IInt, IInt | IFloat, IFloat | IStr, IStr | IBool, IBool | IUnit, IUnit -> ()
   | IArray a, IArray b -> unify a b
+  | ITuple a, ITuple b ->
+    if List.length a <> List.length b
+    then
+      error
+        "Expected a tuple of %d element(s), got one of %d."
+        (List.length a)
+        (List.length b);
+    List.iter2 unify a b
   | IFn (p1, r1, e1), IFn (p2, r2, e2) ->
     if List.length p1 <> List.length p2
     then
@@ -250,6 +265,7 @@ let free_vars (t : infer_ty) : (int * kind) list =
     | IVar { contents = Unbound (id, kind) } ->
       if not (List.mem_assoc id !acc) then acc := (id, kind) :: !acc
     | IArray elem -> walk elem
+    | ITuple items -> List.iter walk items
     | IFn (params, ret, _) ->
       List.iter walk params;
       walk ret
@@ -270,6 +286,7 @@ let free_row_vars (t : infer_ty) : int list =
   let rec walk t =
     match repr t with
     | IArray elem -> walk elem
+    | ITuple items -> List.iter walk items
     | IFn (params, ret, row) ->
       List.iter walk params;
       walk ret;
@@ -325,6 +342,7 @@ let instantiate (s : scheme) : infer_ty =
             copy)
         else original
       | IArray elem -> IArray (walk elem)
+      | ITuple items -> ITuple (List.map walk items)
       | IFn (params, ret, row) -> IFn (List.map walk params, walk ret, walk_row row)
       | concrete -> concrete
     in
@@ -343,6 +361,17 @@ let rec concrete (t : infer_ty) : ty option =
   | IArray elem ->
     let* elem = concrete elem in
     Some (Array elem)
+  | ITuple items ->
+    let* items =
+      List.fold_right
+        (fun i acc ->
+          let* acc = acc in
+          let* i = concrete i in
+          Some (i :: acc))
+        items
+        (Some [])
+    in
+    Some (Tuple items)
   | IFn (params, ret, row) ->
     let* params =
       List.fold_right
@@ -367,6 +396,7 @@ let rec of_ty (t : ty) : infer_ty =
   | Bool -> IBool
   | Unit -> IUnit
   | Array elem -> IArray (of_ty elem)
+  | Tuple items -> ITuple (List.map of_ty items)
   | Fn (params, ret, row) ->
     IFn
       ( List.map of_ty params
@@ -392,6 +422,7 @@ let rec resolve (t : infer_ty) : ty =
   | IBool -> Bool
   | IUnit -> Unit
   | IArray elem -> Array (resolve elem)
+  | ITuple items -> Tuple (List.map resolve items)
   | IFn (params, ret, row) -> Fn (List.map resolve params, resolve ret, resolve_row row)
   | IVar { contents = Unbound (id, kind) } ->
     (match kind with

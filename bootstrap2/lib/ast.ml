@@ -38,6 +38,7 @@ type type_expr = (type_expr_kind, unit) node
 and type_expr_kind =
   | Ty_name of string
   | Ty_app of string * type_expr list
+  | Ty_tuple of type_expr list
   (* The row is the written one, so an omitted `<...>` means pure. *)
   | Ty_fn of type_expr list * type_expr * string list
 
@@ -107,6 +108,12 @@ type 'e indexing =
   | `Index_assign of 'e * 'e * 'e
   ]
 
+(* Positional, fixed length, mixed types. Both forms are primitives. *)
+type 'e tuple =
+  [ `Tuple of 'e list
+  | `Tuple_get of 'e * int
+  ]
+
 (* What the container is comes from context, so this cannot be lowered until
    the checker has run. [Resolve] turns it into an [`Array_lit] or a call. *)
 type 'e collection = [ `Collection_lit of 'e list ]
@@ -156,6 +163,7 @@ and expr_kind =
   | expr logic
   | expr compound
   | expr indexing
+  | expr tuple
   | expr collection
   | expr reflect
   ]
@@ -182,6 +190,7 @@ and desugared_expr_kind =
   | desugared_expr logic
   | desugared_expr compound
   | desugared_expr indexing
+  | desugared_expr tuple
   | desugared_expr collection
   | desugared_expr reflect
   ]
@@ -203,6 +212,7 @@ and typed_expr_kind =
   | typed_expr logic
   | typed_expr compound
   | typed_expr indexing
+  | typed_expr tuple
   | typed_expr collection
   | typed_expr reflect
   ]
@@ -223,6 +233,7 @@ and resolved_expr_kind =
   | resolved_expr ops
   | resolved_expr logic
   | resolved_expr indexing
+  | resolved_expr tuple
   | resolved_expr array_lit
   | resolved_expr reflect
   ]
@@ -243,6 +254,7 @@ and reflected_expr_kind =
   | reflected_expr ops
   | reflected_expr logic
   | reflected_expr indexing
+  | reflected_expr tuple
   | reflected_expr array_lit
   ]
 
@@ -262,6 +274,7 @@ and cps_expr_kind =
   | cps_expr ops
   | cps_expr logic
   | cps_expr indexing
+  | cps_expr tuple
   | cps_expr array_lit
   ]
 
@@ -292,6 +305,11 @@ let map_indexing (f : 'a -> 'b) (e : 'a indexing) : 'b indexing =
   match e with
   | `Index (target, i) -> `Index (f target, f i)
   | `Index_assign (target, i, v) -> `Index_assign (f target, f i, f v)
+
+let map_tuple (f : 'a -> 'b) (e : 'a tuple) : 'b tuple =
+  match e with
+  | `Tuple items -> `Tuple (List.map f items)
+  | `Tuple_get (t, i) -> `Tuple_get (f t, i)
 
 let map_collection (f : 'a -> 'b) (e : 'a collection) : 'b collection =
   match e with

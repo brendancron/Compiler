@@ -15,6 +15,8 @@ let rec string_of_type_expr (t : Ast.type_expr) : string =
   | Ast.Ty_name name -> name
   | Ast.Ty_app (name, args) ->
     Printf.sprintf "%s<%s>" name (String.concat ", " (List.map string_of_type_expr args))
+  | Ast.Ty_tuple items ->
+    Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_type_expr items))
   | Ast.Ty_fn (params, ret, row) ->
     Printf.sprintf
       "(%s) -> %s%s"
@@ -55,6 +57,9 @@ let rec string_of_expr (e : Ast.expr) : string =
   | `Typeof e -> Printf.sprintf "(typeof %s)" (string_of_expr e)
   | `Collection_lit items ->
     Printf.sprintf "[%s]" (String.concat " " (List.map string_of_expr items))
+  | `Tuple items ->
+    Printf.sprintf "(tuple %s)" (String.concat " " (List.map string_of_expr items))
+  | `Tuple_get (t, i) -> Printf.sprintf "(get %s %d)" (string_of_expr t) i
   | `Index (t, i) -> Printf.sprintf "(index %s %s)" (string_of_expr t) (string_of_expr i)
   | `Index_assign (t, i, v) ->
     Printf.sprintf
@@ -168,6 +173,11 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
     | `Typeof e -> Printf.sprintf "(typeof %s)" (string_of_typed_expr e)
     | `Collection_lit items ->
       Printf.sprintf "[%s]" (String.concat " " (List.map string_of_typed_expr items))
+    | `Tuple items ->
+      Printf.sprintf
+        "(tuple %s)"
+        (String.concat " " (List.map string_of_typed_expr items))
+    | `Tuple_get (t, i) -> Printf.sprintf "(get %s %d)" (string_of_typed_expr t) i
     | `Index (t, i) ->
       Printf.sprintf "(index %s %s)" (string_of_typed_expr t) (string_of_typed_expr i)
     | `Index_assign (t, i, v) ->

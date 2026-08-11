@@ -2,6 +2,7 @@ type value =
   | Int of int
   (* Mutable and shared: `var ys = xs` aliases rather than copies. *)
   | Array of value array
+  | Tuple of value list
   | Float of float
   | Str of string
   | Bool of bool
@@ -42,6 +43,7 @@ let rec lookup env name =
 
 let type_name = function
   | Array _ -> "array"
+  | Tuple _ -> "tuple"
   | Int _ -> "int"
   | Float _ -> "float"
   | Str _ -> "string"
@@ -52,6 +54,7 @@ let type_name = function
 let rec string_of_value = function
   | Array items ->
     "[" ^ String.concat ", " (Array.to_list (Array.map string_of_value items)) ^ "]"
+  | Tuple items -> "(" ^ String.concat ", " (List.map string_of_value items) ^ ")"
   | Int n -> string_of_int n
   | Float n -> Token.float_to_string n
   | Str s -> s
@@ -67,10 +70,11 @@ let as_bool span = function
 
 (* Closures are never compared, so this avoids OCaml's structural comparison
    raising on functional values. *)
-let values_equal a b =
+let rec values_equal a b =
   match a, b with
   (* Arrays have identity, so equality is identity. *)
   | Array x, Array y -> x == y
+  | Tuple x, Tuple y -> List.length x = List.length y && List.for_all2 values_equal x y
   | Int x, Int y -> x = y
   | Float x, Float y -> x = y
   | Str x, Str y -> String.equal x y
@@ -142,6 +146,11 @@ let rec eval env (e : Ast.cps_expr) : value =
     let f = eval env callee in
     call span f (List.map (eval env) args)
   | `Array_lit items -> Array (Array.of_list (List.map (eval env) items))
+  | `Tuple items -> Tuple (List.map (eval env) items)
+  | `Tuple_get (target, index) ->
+    (match eval env target with
+     | Tuple items -> List.nth items index
+     | v -> fail span "Cannot take a field of %s." (type_name v))
   | `Index (target, index) ->
     (match eval env target, eval env index with
      | Array items, Int i ->
