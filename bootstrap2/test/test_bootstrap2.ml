@@ -115,7 +115,16 @@ let interpret source =
              Error
                (Printf.sprintf "cps error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
            | Ok converted ->
-             (match Interp.run ~out converted with
+             (match Verify.program converted with
+              | Error e ->
+                Error
+                  (Printf.sprintf
+                     "verify error [%d:%d] %s"
+                     e.span.Ast.line
+                     e.span.Ast.col
+                     e.message)
+              | Ok () ->
+             match Interp.run ~out converted with
               | Ok () -> Ok (Buffer.contents buf)
               | Error e ->
                 Error

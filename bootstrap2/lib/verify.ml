@@ -1,0 +1,113 @@
+(* Checks that a tree's type annotations agree with its structure.
+
+   Passes that only copy annotations cannot break this. Passes that construct
+   nodes invent annotations, and a wrong one is silent — a synthesized call
+   whose callee is not typed as a function still runs, and a synthesized call
+   carrying the wrong effect row makes CPS skip a conversion it needed to make.
+
+   This is a local check: it compares each node against its children and does
+   not carry an environment, so a `Var` is taken at its word. *)
+
+type error =
+  { span : Ast.span
+  ; message : string
+  }
+
+exception Failed of error
+
+let fail span fmt =
+  Printf.ksprintf (fun message -> raise (Failed { span; message })) fmt
+
+let expect span what expected actual =
+  if expected <> actual
+  then
+    fail
+      span
+      "%s should be %s but is annotated %s."
+      what
+      (Types.string_of_ty expected)
+      (Types.string_of_ty actual)
+
+let rec expr (e : Ast.cps_expr) : unit =
+  let span = e.Ast.span
+  and ann = e.Ast.ann in
+  match e.Ast.it with
+  | `Int _ -> expect span "An int literal" Types.Int ann
+  | `Float _ -> expect span "A float literal" Types.Float ann
+  | `Str _ -> expect span "A string literal" Types.Str ann
+  | `Bool _ -> expect span "A bool literal" Types.Bool ann
+  | `Var _ -> ()
+  | `Assign (_, v) ->
+    expr v;
+    expect span "An assignment" v.Ast.ann ann
+  | `Unop (Ast.Neg, a) ->
+    expr a;
+    expect span "A negation" a.Ast.ann ann
+  | `Unop (Ast.Not, a) ->
+    expr a;
+    expect a.Ast.span "The operand of '!'" Types.Bool a.Ast.ann;
+    expect span "A negation" Types.Bool ann
+  | `Binop (op, a, b) ->
+    expr a;
+    expr b;
+    expect b.Ast.span "Both operands" a.Ast.ann b.Ast.ann;
+    (match op with
+     | Ast.Add | Ast.Sub | Ast.Mul | Ast.Div ->
+       expect span "An arithmetic result" a.Ast.ann ann
+     | Ast.Equal | Ast.Not_equal | Ast.Less | Ast.Less_equal | Ast.Greater
+     | Ast.Greater_equal -> expect span "A comparison" Types.Bool ann)
+  | `And (a, b) | `Or (a, b) ->
+    expr a;
+    expr b;
+    expect a.Ast.span "The operand of a logical operator" Types.Bool a.Ast.ann;
+    expect b.Ast.span "The operand of a logical operator" Types.Bool b.Ast.ann;
+    expect span "A logical operator" Types.Bool ann
+  | `Call (callee, args) ->
+    expr callee;
+    List.iter expr args;
+    (match callee.Ast.ann with
+     | Types.Fn (params, ret, _) ->
+       if List.length params <> List.length args
+       then
+         fail
+           span
+           "A call passes %d argument(s) to a function of %d."
+           (List.length args)
+           (List.length params);
+       List.iter2
+         (fun param (a : Ast.cps_expr) ->
+           expect a.Ast.span "An argument" param a.Ast.ann)
+         params
+         args;
+       expect span "A call" ret ann
+     (* A generic callee has not been monomorphized; nothing to check yet. *)
+     | Types.Generic _ -> ()
+     | other ->
+       fail
+         callee.Ast.span
+         "A callee is annotated %s, which is not a function."
+         (Types.string_of_ty other))
+
+let rec stmt (s : Ast.cps_stmt) : unit =
+  match s.Ast.it with
+  | `Expr e -> expr e
+  | `Var_decl (_, _, init) -> Option.iter expr init
+  | `Block body -> List.iter stmt body
+  | `If (cond, then_branch, else_branch) ->
+    expr cond;
+    expect cond.Ast.span "A condition" Types.Bool cond.Ast.ann;
+    stmt then_branch;
+    Option.iter stmt else_branch
+  | `While (cond, body) ->
+    expr cond;
+    expect cond.Ast.span "A condition" Types.Bool cond.Ast.ann;
+    stmt body
+  | `Fn (_, _, _, body) -> List.iter stmt body
+  | `Return e -> Option.iter expr e
+
+let program (p : Ast.cps_stmt list) : (unit, error) result =
+  try
+    List.iter stmt p;
+    Ok ()
+  with
+  | Failed e -> Error e

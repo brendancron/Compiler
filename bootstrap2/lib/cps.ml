@@ -27,6 +27,7 @@ type effects =
   ; kind : (string, Ast.op_kind) Hashtbl.t
   ; operations : (string, string list) Hashtbl.t (* effect -> operations *)
   ; delimited : (string, unit) Hashtbl.t (* effects needing continuations *)
+  ; op_ty : (string, Types.ty) Hashtbl.t (* operation -> its function type *)
   }
 
 let evidence_name op = "__op_" ^ op
@@ -55,18 +56,40 @@ let row_of (t : Types.ty) =
 
 let is_effectful info (t : Types.ty) = evidence_of_row info (row_of t) <> []
 
+let evidence_ty info op =
+  match Hashtbl.find_opt info.op_ty op with
+  | Some t -> t
+  | None -> Types.Unit
+
+(* Evidence parameters are appended to a function, so its type gains them too.
+   Leaving the original type in place would describe a function of the wrong
+   arity. *)
+let widen info (t : Types.ty) =
+  match t with
+  | Types.Fn (params, ret, row) ->
+    Types.Fn (params @ List.map (evidence_ty info) (evidence_of_row info row), ret, row)
+  | other -> other
+
 (* Whether reaching this row can suspend, which forces the caller into
    continuation-passing form too. *)
 let is_delimited info (row : Types.row) = List.exists (Hashtbl.mem info.delimited) row
 
 let node span it : Ast.cps_stmt = { Ast.it; span; ann = Types.Unit }
-let var span name : Ast.cps_expr = { Ast.it = `Var name; span; ann = Types.Unit }
+let var span ty name : Ast.cps_expr = { Ast.it = `Var name; span; ann = ty }
 
 (* There is no unit literal, and the value is always discarded. *)
-let ignored span : Ast.cps_expr = { Ast.it = `Bool false; span; ann = Types.Unit }
+let ignored span : Ast.cps_expr = { Ast.it = `Bool false; span; ann = Types.Bool }
 
-let call span callee args =
-  node span (`Expr { Ast.it = `Call (var span callee, args); span; ann = Types.Unit })
+(* The callee's type is recovered from what it is being handed: a continuation
+   or an evidence function takes exactly these arguments and produces
+   [result]. *)
+let call ?(result = Types.Unit) span callee args =
+  let callee_ty =
+    Types.Fn (List.map (fun (a : Ast.cps_expr) -> a.Ast.ann) args, result, [])
+  in
+  node
+    span
+    (`Expr { Ast.it = `Call (var span callee_ty callee, args); span; ann = result })
 
 let fn_decl span name params body =
   node
@@ -140,15 +163,23 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
       let args = List.map (expr info) args in
       (match callee.Ast.it with
        | `Var name when Hashtbl.mem info.owner name ->
-         `Call (var callee.Ast.span (evidence_name name), args)
+         let ty =
+           Types.Fn
+             (List.map (fun (a : Ast.cps_expr) -> a.Ast.ann) args, e.Ast.ann, [])
+         in
+         `Call (var callee.Ast.span ty (evidence_name name), args)
        | _ ->
          let evidence =
            evidence_of_row info (row_of callee.Ast.ann)
-           |> List.map (fun op -> var e.Ast.span (evidence_name op))
+           |> List.map (fun op -> var e.Ast.span (evidence_ty info op) (evidence_name op))
          in
          let callee =
            match callee.Ast.it with
-           | `Var name -> { Ast.it = `Var name; span = callee.Ast.span; ann = callee.Ast.ann }
+           | `Var name ->
+             { Ast.it = `Var name
+             ; span = callee.Ast.span
+             ; ann = widen info callee.Ast.ann
+             }
            | _ -> expr info callee
          in
          `Call (callee, args @ evidence))
@@ -324,10 +355,10 @@ and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
       | `Var name ->
         ( name
         , evidence_of_row info (row_of callee.Ast.ann)
-          |> List.map (fun op -> var span (evidence_name op)) )
+          |> List.map (fun op -> var span (evidence_ty info op) (evidence_name op)) )
       | _ -> unsupported span "Only a named function may perform an effect here."
     in
-    [ call span target (args @ evidence @ [ var span next ]) ]
+    [ call span target (args @ evidence @ [ var span Types.Unit next ]) ]
   | _ -> unsupported span "This effect cannot be sequenced yet."
 
 (* `run { body } handle e { arms }` installs the arms and gives the body a
@@ -420,6 +451,7 @@ let collect (p : Ast.reflected_stmt list) =
     ; kind = Hashtbl.create 16
     ; operations = Hashtbl.create 8
     ; delimited = Hashtbl.create 8
+    ; op_ty = Hashtbl.create 16
     }
   in
   List.iter
@@ -466,6 +498,43 @@ let collect (p : Ast.reflected_stmt list) =
     | _ -> ()
   in
   List.iter scan p;
+  let rec harvest_expr (e : Ast.reflected_expr) =
+    match e.Ast.it with
+    | `Call (callee, args) ->
+      (match callee.Ast.it with
+       | `Var name when Hashtbl.mem info.owner name ->
+         Hashtbl.replace info.op_ty name callee.Ast.ann
+       | _ -> harvest_expr callee);
+      List.iter harvest_expr args
+    | `Assign (_, v) | `Unop (_, v) -> harvest_expr v
+    | `Binop (_, a, b) | `And (a, b) | `Or (a, b) ->
+      harvest_expr a;
+      harvest_expr b
+    | _ -> ()
+  in
+  let rec harvest (s : Ast.reflected_stmt) =
+    (match s.Ast.it with
+     | `Expr e | `Return (Some e) | `Var_decl (_, _, Some e) -> harvest_expr e
+     | `If (c, _, _) | `While (c, _) -> harvest_expr c
+     | `Resume (Some e) -> harvest_expr e
+     | _ -> ());
+    match s.Ast.it with
+    | `Block body | `Fn (_, _, _, body) -> List.iter harvest body
+    | `If (_, t, e) ->
+      harvest t;
+      Option.iter harvest e
+    | `While (_, body) -> harvest body
+    | `Run (body, handlers) ->
+      List.iter harvest body;
+      List.iter
+        (fun (h : Ast.reflected_stmt Ast.handler) ->
+          List.iter
+            (fun (a : Ast.reflected_stmt Ast.arm) -> List.iter harvest a.Ast.arm_body)
+            h.Ast.arms)
+        handlers
+    | _ -> ()
+  in
+  List.iter harvest p;
   info
 
 let program (p : Ast.reflected_stmt list) : (Ast.cps_stmt list, error) result =

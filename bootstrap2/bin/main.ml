@@ -116,6 +116,11 @@ let () =
              report e.span.line e.span.col "CPS" e.message;
              exit 70
            | Ok converted ->
+             (match Verify.program converted with
+              | Error e ->
+                report e.span.line e.span.col "Verify" e.message;
+                exit 70
+              | Ok () -> ());
              (match Interp.run converted with
               | Ok () -> ()
               | Error e ->
