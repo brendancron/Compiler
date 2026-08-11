@@ -5,6 +5,7 @@ let usage =
   \  --dump-source   echo the source before running\n\
   \  --dump-tokens   print the token stream\n\
   \  --dump-ast      print the parsed AST\n\
+  \  --dump-types    print the type-checked AST\n\
   \  -h, --help      show this message"
 
 type options =
@@ -12,6 +13,7 @@ type options =
   ; dump_source : bool
   ; dump_tokens : bool
   ; dump_ast : bool
+  ; dump_types : bool
   }
 
 let die message =
@@ -25,6 +27,7 @@ let parse_args argv =
   let dump_source = ref false in
   let dump_tokens = ref false in
   let dump_ast = ref false in
+  let dump_types = ref false in
   let set_path arg =
     match !path with
     | Some _ -> die ("unexpected extra argument: " ^ arg ^ "\n" ^ usage)
@@ -38,6 +41,7 @@ let parse_args argv =
         | "--dump-source" -> dump_source := true
         | "--dump-tokens" -> dump_tokens := true
         | "--dump-ast" -> dump_ast := true
+        | "--dump-types" -> dump_types := true
         | "-h" | "--help" ->
           print_endline usage;
           exit 0
@@ -52,6 +56,7 @@ let parse_args argv =
     ; dump_source = !dump_source
     ; dump_tokens = !dump_tokens
     ; dump_ast = !dump_ast
+    ; dump_types = !dump_types
     }
 
 let read_file path =
@@ -89,8 +94,20 @@ let () =
        then (
          print_endline "-- ast --";
          print_string (Printer.string_of_program program));
-       (match Interp.run (Desugar.program program) with
-        | Ok () -> ()
-        | Error e ->
-          report e.span.line e.span.col "Runtime" e.message;
-          exit 70))
+       (match Typecheck.check (Desugar.program program) with
+        | Error errors ->
+          List.iter
+            (fun (e : Typecheck.error) ->
+              report e.span.line e.span.col "Type" e.message)
+            errors;
+          exit 65
+        | Ok typed ->
+          if opts.dump_types
+          then (
+            print_endline "-- types --";
+            print_string (Printer.string_of_typed_program typed));
+          (match Interp.run typed with
+           | Ok () -> ()
+           | Error e ->
+             report e.span.line e.span.col "Runtime" e.message;
+             exit 70)))

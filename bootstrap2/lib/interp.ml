@@ -1,13 +1,12 @@
-(* Tree-walking evaluator over stage 1 — the [`For]-free tree. *)
-
 type value =
-  | Num of float
+  | Int of int
+  | Float of float
   | Str of string
   | Bool of bool
   | Unit
   | Closure of
       { params : string list
-      ; body : Ast.dstmt list
+      ; body : Ast.typed_stmt list
       ; env : env
       }
   | Native of string * int option * (value list -> value) (* None arity = variadic *)
@@ -40,14 +39,16 @@ let rec lookup env name =
      | None -> None)
 
 let type_name = function
-  | Num _ -> "num"
-  | Str _ -> "str"
+  | Int _ -> "int"
+  | Float _ -> "float"
+  | Str _ -> "string"
   | Bool _ -> "bool"
   | Unit -> "unit"
   | Closure _ | Native _ -> "fn"
 
 let string_of_value = function
-  | Num n -> if Float.is_integer n then Printf.sprintf "%.0f" n else Printf.sprintf "%g" n
+  | Int n -> string_of_int n
+  | Float n -> Token.float_to_string n
   | Str s -> s
   | Bool b -> string_of_bool b
   | Unit -> "()"
@@ -63,23 +64,35 @@ let as_bool span = function
    raising on functional values. *)
 let values_equal a b =
   match a, b with
-  | Num x, Num y -> x = y
+  | Int x, Int y -> x = y
+  | Float x, Float y -> x = y
   | Str x, Str y -> String.equal x y
   | Bool x, Bool y -> x = y
   | Unit, Unit -> true
   | _ -> false
 
+(* Mixed operands cannot reach here: the type checker rejects `int + float` and
+   there is no implicit widening. *)
 let eval_binop span (op : Ast.binop) a b =
   match op, a, b with
-  | Ast.Add, Num x, Num y -> Num (x +. y)
+  | Ast.Add, Int x, Int y -> Int (x + y)
+  | Ast.Add, Float x, Float y -> Float (x +. y)
   | Ast.Add, Str x, Str y -> Str (x ^ y)
-  | Ast.Sub, Num x, Num y -> Num (x -. y)
-  | Ast.Mul, Num x, Num y -> Num (x *. y)
-  | Ast.Div, Num x, Num y -> Num (x /. y)
-  | Ast.Less, Num x, Num y -> Bool (x < y)
-  | Ast.Less_equal, Num x, Num y -> Bool (x <= y)
-  | Ast.Greater, Num x, Num y -> Bool (x > y)
-  | Ast.Greater_equal, Num x, Num y -> Bool (x >= y)
+  | Ast.Sub, Int x, Int y -> Int (x - y)
+  | Ast.Sub, Float x, Float y -> Float (x -. y)
+  | Ast.Mul, Int x, Int y -> Int (x * y)
+  | Ast.Mul, Float x, Float y -> Float (x *. y)
+  | Ast.Div, Int _, Int 0 -> fail span "Division by zero."
+  | Ast.Div, Int x, Int y -> Int (x / y)
+  | Ast.Div, Float x, Float y -> Float (x /. y)
+  | Ast.Less, Int x, Int y -> Bool (x < y)
+  | Ast.Less, Float x, Float y -> Bool (x < y)
+  | Ast.Less_equal, Int x, Int y -> Bool (x <= y)
+  | Ast.Less_equal, Float x, Float y -> Bool (x <= y)
+  | Ast.Greater, Int x, Int y -> Bool (x > y)
+  | Ast.Greater, Float x, Float y -> Bool (x > y)
+  | Ast.Greater_equal, Int x, Int y -> Bool (x >= y)
+  | Ast.Greater_equal, Float x, Float y -> Bool (x >= y)
   | Ast.Equal, _, _ -> Bool (values_equal a b)
   | Ast.Not_equal, _, _ -> Bool (not (values_equal a b))
   | _ ->
@@ -89,10 +102,11 @@ let eval_binop span (op : Ast.binop) a b =
       (type_name a)
       (type_name b)
 
-let rec eval env (e : Ast.dexpr) : value =
+let rec eval env (e : Ast.typed_expr) : value =
   let span = e.Ast.span in
   match e.Ast.it with
-  | `Num n -> Num n
+  | `Int n -> Int n
+  | `Float n -> Float n
   | `Str s -> Str s
   | `Bool b -> Bool b
   | `Var name ->
@@ -108,7 +122,8 @@ let rec eval env (e : Ast.dexpr) : value =
      | None -> fail span "Undefined variable '%s'." name)
   | `Unop (Ast.Neg, a) ->
     (match eval env a with
-     | Num n -> Num (-.n)
+     | Int n -> Int (-n)
+     | Float n -> Float (-.n)
      | v -> fail span "Cannot negate %s." (type_name v))
   | `Unop (Ast.Not, a) -> Bool (not (as_bool span (eval env a)))
   | `Binop (op, a, b) -> eval_binop span op (eval env a) (eval env b)
@@ -142,11 +157,11 @@ and call span f args =
     fn args
   | v -> fail span "Cannot call %s." (type_name v)
 
-and exec env (s : Ast.dstmt) : unit =
+and exec env (s : Ast.typed_stmt) : unit =
   let span = s.Ast.span in
   match s.Ast.it with
   | `Expr e -> ignore (eval env e)
-  | `Var_decl (name, init) ->
+  | `Var_decl (name, _, init) ->
     let v =
       match init with
       | Some e -> eval env e
@@ -169,7 +184,8 @@ and exec env (s : Ast.dstmt) : unit =
     done
   (* The closure captures the env it is declared in, which is the same table the
      name lands in — so recursion works without a separate binding step. *)
-  | `Fn (name, params, body) -> define env name (Closure { params; body; env })
+  | `Fn (name, params, _, body) ->
+    define env name (Closure { params = List.map (fun p -> p.Ast.name) params; body; env })
   | `Return e ->
     let v =
       match e with
@@ -199,11 +215,11 @@ let globals out =
        , function
          | [ v ] -> Str (string_of_value v)
          | _ -> Unit ));
-  define env "clock" (Native ("clock", Some 0, fun _ -> Num (Sys.time ())));
+  define env "clock" (Native ("clock", Some 0, fun _ -> Float (Sys.time ())));
   env
 
 (* [out] is where `print` writes; tests capture it into a buffer. *)
-let run ?(out = print_string) (program : Ast.dstmt list) : (unit, error) result =
+let run ?(out = print_string) (program : Ast.typed_stmt list) : (unit, error) result =
   let env = globals out in
   try
     List.iter (exec env) program;

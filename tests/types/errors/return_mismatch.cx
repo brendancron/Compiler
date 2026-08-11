@@ -1,0 +1,3 @@
+fn label(n: int) -> string {
+  return n;
+}

@@ -1,10 +1,10 @@
-(* Integration tests against the shared fixtures in <repo>/tests: each case is a
-   .cx source paired with a .txt of its expected stdout, compared after
-   trimming (same rule as the Rust harness).
+(* Fixtures live in <repo>/tests. A run case pairs a .cx with a .txt of its
+   expected stdout; an error case pairs a .cx with a .err holding one
+   `[line:col] message` per diagnostic.
 
-   Cases are listed explicitly rather than globbed, so the list doubles as a
-   record of what this bootstrap actually supports. Most of <repo>/tests
-   exercises language features that do not exist here yet. *)
+   Cases are listed explicitly rather than globbed, so the lists double as a
+   record of what this bootstrap supports — most of <repo>/tests exercises
+   features that do not exist here yet. *)
 
 open Bootstrap2
 
@@ -25,6 +25,23 @@ let cases =
   ; "tests/core/functions/greeting"
   ; "tests/core/functions/return"
   ; "tests/core/functions/closure"
+  ; "tests/types/inference/annotations"
+  ; "tests/types/inference/numeric_defaulting"
+  ; "tests/types/inference/polymorphism"
+  ; "tests/types/inference/float_math"
+  ; "tests/types/inference/higher_order"
+  ]
+
+(* Programs that must be rejected, and the diagnostics they must produce. *)
+let error_cases =
+  [ "tests/types/errors/mixed_numeric"
+  ; "tests/types/errors/non_bool_condition"
+  ; "tests/types/errors/undefined_variable"
+  ; "tests/types/errors/arity"
+  ; "tests/types/errors/return_mismatch"
+  ; "tests/types/errors/assign_mismatch"
+  ; "tests/types/errors/unknown_type"
+  ; "tests/types/errors/string_comparison"
   ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)
@@ -63,15 +80,60 @@ let interpret source =
        Error (Printf.sprintf "parse error [%d:%d] %s" e.line e.col e.message)
      | Error [] -> Error "parse failed"
      | Ok program ->
-       (match Interp.run ~out (Desugar.program program) with
-        | Ok () -> Ok (Buffer.contents buf)
-        | Error e ->
+       (match Typecheck.check (Desugar.program program) with
+        | Error (e :: _) ->
           Error
-            (Printf.sprintf
-               "runtime error [%d:%d] %s"
-               e.span.Ast.line
-               e.span.Ast.col
-               e.message)))
+            (Printf.sprintf "type error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+        | Error [] -> Error "type check failed"
+        | Ok typed ->
+          (match Interp.run ~out typed with
+           | Ok () -> Ok (Buffer.contents buf)
+           | Error e ->
+             Error
+               (Printf.sprintf
+                  "runtime error [%d:%d] %s"
+                  e.span.Ast.line
+                  e.span.Ast.col
+                  e.message))))
+
+(* Formats diagnostics the way a .err file spells them. *)
+let type_errors source =
+  match Scanner.scan_tokens source with
+  | Error _ -> Error "scan failed"
+  | Ok tokens ->
+    (match Parser.parse tokens with
+     | Error _ -> Error "parse failed"
+     | Ok program ->
+       (match Typecheck.check (Desugar.program program) with
+        | Ok _ -> Error "expected a type error, but the program checked"
+        | Error errors ->
+          Ok
+            (String.concat
+               "\n"
+               (List.map
+                  (fun (e : Typecheck.error) ->
+                    Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+                  errors))))
+
+let run_error_case root name =
+  let path ext = Filename.concat root (name ^ ext) in
+  let expected = read_file (path ".err") in
+  match type_errors (read_file (path ".cx")) with
+  | Error message ->
+    Printf.printf "FAIL %s\n  %s\n" name message;
+    false
+  | Ok actual ->
+    if String.equal (normalize actual) (normalize expected)
+    then (
+      Printf.printf "ok   %s\n" name;
+      true)
+    else (
+      Printf.printf
+        "FAIL %s\n  --- expected ---\n%s\n  --- actual ---\n%s\n"
+        name
+        (normalize expected)
+        (normalize actual);
+      false)
 
 let run_case root name =
   let path ext = Filename.concat root (name ^ ext) in
@@ -99,7 +161,7 @@ let () =
     prerr_endline "could not locate the repo root (set CRONYX_REPO_ROOT)";
     exit 1
   | Some root ->
-    let results = List.map (run_case root) cases in
+    let results = List.map (run_case root) cases @ List.map (run_error_case root) error_cases in
     let failed = List.length (List.filter not results) in
     Printf.printf "\n%d/%d passed\n" (List.length results - failed) (List.length results);
     if failed > 0 then exit 1

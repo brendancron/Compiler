@@ -1,0 +1,8 @@
+// int and float are distinct: `/` truncates on int and does not on float.
+print(7 / 2);
+print(10.0 / 4.0);
+print(7.0 * 2.0);
+print(-3.5);
+
+var half = 1.0 / 2.0;
+print(half);

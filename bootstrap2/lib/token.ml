@@ -10,6 +10,7 @@ type token_type =
   | Semicolon
   | Slash
   | Star
+  | Colon
   (* One or two character tokens. *)
   | Bang
   | Bang_equal
@@ -25,10 +26,12 @@ type token_type =
   | Minus_equal
   | Star_equal
   | Slash_equal
+  | Arrow
   (* Literals. *)
   | Identifier of string
   | String of string
-  | Number of float
+  | Int of int
+  | Float of float
   (* Keywords. *)
   | And
   | Else
@@ -63,6 +66,7 @@ let token_type_to_string = function
   | Semicolon -> "SEMICOLON"
   | Slash -> "SLASH"
   | Star -> "STAR"
+  | Colon -> "COLON"
   | Bang -> "BANG"
   | Bang_equal -> "BANG_EQUAL"
   | Equal -> "EQUAL"
@@ -77,9 +81,11 @@ let token_type_to_string = function
   | Minus_equal -> "MINUS_EQUAL"
   | Star_equal -> "STAR_EQUAL"
   | Slash_equal -> "SLASH_EQUAL"
+  | Arrow -> "ARROW"
   | Identifier _ -> "IDENTIFIER"
   | String _ -> "STRING"
-  | Number _ -> "NUMBER"
+  | Int _ -> "INT"
+  | Float _ -> "FLOAT"
   | And -> "AND"
   | Else -> "ELSE"
   | False -> "FALSE"
@@ -93,14 +99,15 @@ let token_type_to_string = function
   | While -> "WHILE"
   | Eof -> "EOF"
 
-(* Numbers render like Java's Double.toString: integral values keep a ".0". *)
-let number_to_string n =
+(* Floats keep a visible fractional part so they never read as ints. *)
+let float_to_string n =
   if Float.is_integer n then Printf.sprintf "%.1f" n else Printf.sprintf "%g" n
 
 let literal_to_string = function
   | Identifier name -> name
   | String s -> s
-  | Number n -> number_to_string n
+  | Int n -> string_of_int n
+  | Float n -> float_to_string n
   | _ -> "null"
 
 let to_string { token_type; lexeme; line; col } =

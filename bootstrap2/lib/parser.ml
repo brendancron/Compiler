@@ -68,6 +68,49 @@ let synchronize s =
   in
   loop ()
 
+(* ---- type annotations ---- *)
+
+(* Annotations are optional everywhere; these only run once a ':' or '->' has
+   been seen, so a missing annotation is never an error here. *)
+let rec type_expr s : Ast.type_expr =
+  let tok = peek s in
+  let sp = Ast.span_of_token tok in
+  match tok.Token.token_type with
+  | Token.Identifier name ->
+    ignore (advance s);
+    Ast.at sp (Ast.Ty_name name)
+  (* `(int, string) -> bool` — a parenthesized list is only ever a function
+     type, since there are no tuples in the language yet. *)
+  | Token.Left_paren ->
+    ignore (advance s);
+    let params =
+      if check s Token.Right_paren
+      then []
+      else (
+        let rec loop acc =
+          let p = type_expr s in
+          match matches s [ Token.Comma ] with
+          | Some _ -> loop (p :: acc)
+          | None -> List.rev (p :: acc)
+        in
+        loop [])
+    in
+    ignore (consume s Token.Right_paren "Expected ')' after parameter types.");
+    ignore (consume s Token.Arrow "Expected '->' after parameter types.");
+    Ast.at sp (Ast.Ty_fn (params, type_expr s))
+  | _ -> raise (error s tok "Expected a type.")
+
+let type_annotation s : Ast.type_expr option =
+  match matches s [ Token.Colon ] with
+  | Some _ -> Some (type_expr s)
+  | None -> None
+
+(* Cronyx spells return types both ways: `fn f(): T` and `fn f() -> T`. *)
+let return_annotation s : Ast.type_expr option =
+  match matches s [ Token.Arrow; Token.Colon ] with
+  | Some _ -> Some (type_expr s)
+  | None -> None
+
 (* ---- expressions ---- *)
 
 (* A binary node takes the span of its left operand, so it points at where the
@@ -152,7 +195,7 @@ and postfix s : Ast.expr =
     let step op tok =
       match left.Ast.it with
       | `Var name ->
-        let one = Ast.at (Ast.span_of_token tok) (`Num 1.) in
+        let one = Ast.at (Ast.span_of_token tok) (`Int 1) in
         loop (Ast.at left.Ast.span (`Compound (op, name, one)))
       | _ ->
         ignore (error s tok "Invalid increment target.");
@@ -193,9 +236,12 @@ and primary s : Ast.expr =
   let tok = peek s in
   let sp = Ast.span_of_token tok in
   match tok.Token.token_type with
-  | Token.Number n ->
+  | Token.Int n ->
     ignore (advance s);
-    Ast.at sp (`Num n)
+    Ast.at sp (`Int n)
+  | Token.Float n ->
+    ignore (advance s);
+    Ast.at sp (`Float n)
   | Token.String str ->
     ignore (advance s);
     Ast.at sp (`Str str)
@@ -243,7 +289,8 @@ and fn_decl s sp : Ast.stmt =
     then []
     else (
       let rec loop acc =
-        let p = consume_identifier s "Expected parameter name." in
+        let param_name = consume_identifier s "Expected parameter name." in
+        let p = { Ast.name = param_name; ty = type_annotation s } in
         match matches s [ Token.Comma ] with
         | Some _ -> loop (p :: acc)
         | None -> List.rev (p :: acc)
@@ -251,18 +298,20 @@ and fn_decl s sp : Ast.stmt =
       loop [])
   in
   ignore (consume s Token.Right_paren "Expected ')' after parameters.");
+  let ret = return_annotation s in
   ignore (consume s Token.Left_brace "Expected '{' before function body.");
-  Ast.at sp (`Fn (name, params, block s))
+  Ast.at sp (`Fn (name, params, ret, block s))
 
 and var_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected variable name." in
+  let ty = type_annotation s in
   let init =
     match matches s [ Token.Equal ] with
     | Some _ -> Some (expression s)
     | None -> None
   in
   ignore (consume s Token.Semicolon "Expected ';' after variable declaration.");
-  Ast.at sp (`Var_decl (name, init))
+  Ast.at sp (`Var_decl (name, ty, init))
 
 (* Assumes the '{' has been consumed; consumes the closing '}'. *)
 and block s : Ast.stmt list =

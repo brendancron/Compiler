@@ -1,0 +1,4 @@
+// No truthiness — a condition must actually be a bool.
+if (1) {
+  print("never");
+}

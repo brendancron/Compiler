@@ -3,12 +3,17 @@ type span =
   ; col : int
   }
 
-type 'a node =
+(* ['ann] is [unit] until type checking, [Types.ty] after. The fragments below
+   are parameterized over their child node type, so each tree costs a few lines
+   rather than a re-declaration of every constructor. *)
+type ('a, 'ann) node =
   { it : 'a
   ; span : span
+  ; ann : 'ann
   }
 
-let at span it = { it; span }
+let at span it = { it; span; ann = () }
+let annotated span ann it = { it; span; ann }
 
 type unop =
   | Neg (* - *)
@@ -26,8 +31,22 @@ type binop =
   | Greater
   | Greater_equal
 
+(* What the parser records when an annotation is written. They are optional
+   everywhere; inference fills in the rest. *)
+type type_expr = (type_expr_kind, unit) node
+
+and type_expr_kind =
+  | Ty_name of string
+  | Ty_fn of type_expr list * type_expr
+
+type param =
+  { name : string
+  ; ty : type_expr option
+  }
+
 type lit =
-  [ `Num of float
+  [ `Int of int
+  | `Float of float
   | `Str of string
   | `Bool of bool
   ]
@@ -35,11 +54,6 @@ type lit =
 type 'e vars =
   [ `Var of string
   | `Assign of string * 'e
-  ]
-
-type 'e slots =
-  [ `Slot of int
-  | `Assign_slot of int * 'e
   ]
 
 type 'e ops =
@@ -57,18 +71,18 @@ type 'e compound = [ `Compound of binop * string * 'e ]
 
 type ('e, 's) stmts =
   [ `Expr of 'e
-  | `Var_decl of string * 'e option
+  | `Var_decl of string * type_expr option * 'e option
   | `Block of 's list
   | `If of 'e * 's * 's option
   | `While of 'e * 's
-  | `Fn of string * string list * 's list
+  | `Fn of string * param list * type_expr option * 's list
   | `Return of 'e option
   ]
 
 type ('e, 's) loops =
   [ `For of 's option * 'e option * 'e option * 's ]
 
-type expr = expr_kind node
+type expr = (expr_kind, unit) node
 
 and expr_kind =
   [ lit
@@ -78,22 +92,36 @@ and expr_kind =
   | expr compound
   ]
 
-type stmt = stmt_kind node
+type stmt = (stmt_kind, unit) node
 and stmt_kind = [ (expr, stmt) stmts | (expr, stmt) loops ]
 
 type program = stmt list
 
-type dexpr = dexpr_kind node
+(* No [`Compound], no [`For]. *)
+type desugared_expr = (desugared_expr_kind, unit) node
 
-and dexpr_kind =
+and desugared_expr_kind =
   [ lit
-  | dexpr vars
-  | dexpr ops
-  | dexpr logic
+  | desugared_expr vars
+  | desugared_expr ops
+  | desugared_expr logic
   ]
 
-type dstmt = dstmt_kind node
-and dstmt_kind = (dexpr, dstmt) stmts
+type desugared_stmt = (desugared_stmt_kind, unit) node
+and desugared_stmt_kind = (desugared_expr, desugared_stmt) stmts
+
+(* Same constructors, every node carrying a resolved type. *)
+type typed_expr = (typed_expr_kind, Types.ty) node
+
+and typed_expr_kind =
+  [ lit
+  | typed_expr vars
+  | typed_expr ops
+  | typed_expr logic
+  ]
+
+type typed_stmt = (typed_stmt_kind, Types.ty) node
+and typed_stmt_kind = (typed_expr, typed_stmt) stmts
 
 let map_vars (f : 'a -> 'b) (e : 'a vars) : 'b vars =
   match e with
@@ -120,11 +148,11 @@ let map_stmts (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) stmts)
   =
   match s with
   | `Expr e -> `Expr (fe e)
-  | `Var_decl (name, init) -> `Var_decl (name, Option.map fe init)
+  | `Var_decl (name, ty, init) -> `Var_decl (name, ty, Option.map fe init)
   | `Block body -> `Block (List.map fs body)
   | `If (c, t, e) -> `If (fe c, fs t, Option.map fs e)
   | `While (c, body) -> `While (fe c, fs body)
-  | `Fn (name, params, body) -> `Fn (name, params, List.map fs body)
+  | `Fn (name, params, ret, body) -> `Fn (name, params, ret, List.map fs body)
   | `Return e -> `Return (Option.map fe e)
 
 let map_loops (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) loops)

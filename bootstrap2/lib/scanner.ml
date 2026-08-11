@@ -95,14 +95,22 @@ let number s =
     ignore (advance s)
   done;
   (* Only consume the '.' if a digit follows it: `123.` is not a valid float, so
-     leave the dot for the caller to reject rather than building a bad lexeme. *)
-  if peek s = '.' && is_digit (peek_next s)
+     leave the dot for the caller to reject rather than building a bad lexeme.
+     The dot is also what tells int and float literals apart. *)
+  let is_float = peek s = '.' && is_digit (peek_next s) in
+  if is_float
   then (
     ignore (advance s);
     while is_digit (peek s) do
       ignore (advance s)
     done);
-  add_token s (Token.Number (float_of_string (lexeme s)))
+  let text = lexeme s in
+  if is_float
+  then add_token s (Token.Float (float_of_string text))
+  else (
+    match int_of_string_opt text with
+    | Some n -> add_token s (Token.Int n)
+    | None -> error s (Printf.sprintf "Integer literal '%s' is out of range." text))
 
 let identifier s =
   while is_alphanumeric (peek s) do
@@ -121,6 +129,7 @@ let scan_token s =
   | '}' -> add_token s Token.Right_brace
   | ',' -> add_token s Token.Comma
   | ';' -> add_token s Token.Semicolon
+  | ':' -> add_token s Token.Colon
   | '*' -> add_token s (if matches s '=' then Token.Star_equal else Token.Star)
   | '+' ->
     add_token
@@ -137,6 +146,8 @@ let scan_token s =
        then Token.Minus_minus
        else if matches s '='
        then Token.Minus_equal
+       else if matches s '>'
+       then Token.Arrow
        else Token.Minus)
   | '!' -> add_token s (if matches s '=' then Token.Bang_equal else Token.Bang)
   | '=' -> add_token s (if matches s '=' then Token.Equal_equal else Token.Equal)

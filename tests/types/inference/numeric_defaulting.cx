@@ -1,0 +1,11 @@
+// `x` is only ever constrained to be numeric, so it defaults to int.
+fn double(x) {
+  return x + x;
+}
+
+fn quadruple(x) {
+  return double(double(x));
+}
+
+print(double(21));
+print(quadruple(5));

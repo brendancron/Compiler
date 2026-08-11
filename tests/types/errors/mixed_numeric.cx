@@ -1,0 +1,2 @@
+// There is no implicit widening: int and float never mix.
+print(1 + 2.5);
