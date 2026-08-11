@@ -8,6 +8,7 @@ flowchart TD
     parser -->|"AST"| desugar["Desugar"]
     desugar -->|"desugared AST"| check["Typecheck"]
     check -->|"typed AST"| reflect["Reflect"]
-    reflect -->|"reflected AST"| interp["Interp"]
+    reflect -->|"reflected AST"| cps["CPS"]
+    cps -->|"CPS AST"| interp["Interp"]
     interp --> out["stdout"]
 ```

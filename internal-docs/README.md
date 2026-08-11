@@ -11,3 +11,4 @@ made over restating what the code does.
 |----------|---------|
 | [architecture.md](architecture.md) | `bootstrap2` pipeline diagram |
 | [type-system.md](type-system.md) | Type system and type checking for `bootstrap2` (OCaml) |
+| [effects.md](effects.md) | Effect rows and the selective CPS pass (design) |
