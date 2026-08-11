@@ -12,6 +12,7 @@ let rec expr (e : expr) : desugared_expr =
     | #vars as v -> (map_vars expr v :> desugared_expr_kind)
     | #ops as o -> (map_ops expr o :> desugared_expr_kind)
     | #logic as l -> (map_logic expr l :> desugared_expr_kind)
+    | #reflect as r -> (map_reflect expr r :> desugared_expr_kind)
   in
   { it; span = sp; ann = () }
 

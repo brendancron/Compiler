@@ -18,6 +18,7 @@ and checked_expr_kind =
   | checked_expr Ast.vars
   | checked_expr Ast.ops
   | checked_expr Ast.logic
+  | checked_expr Ast.reflect
   ]
 
 type checked_stmt = (checked_stmt_kind, Types.infer_ty) Ast.node
@@ -106,6 +107,7 @@ let rec assigned_in_expr (e : Ast.desugared_expr) acc =
     assigned_in_expr b (assigned_in_expr a acc)
   | `Call (callee, args) ->
     List.fold_left (fun acc a -> assigned_in_expr a acc) (assigned_in_expr callee acc) args
+  | `Typeof e -> assigned_in_expr e acc
 
 let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   let opt f o acc =
@@ -208,6 +210,8 @@ and infer_expr_impl env (e : Ast.desugared_expr) : checked_expr =
         ret
     in
     node result (`Call (callee_node, args))
+  (* The operand is checked for its type but never evaluated. *)
+  | `Typeof e -> node Types.IStr (`Typeof (infer_expr env e))
 
 (* Binding every function before any body is checked is what lets them call each
    other in any order. The binding stays monomorphic until its own declaration
@@ -334,6 +338,7 @@ let rec resolve_expr (e : checked_expr) : Ast.typed_expr =
     | #Ast.vars as v -> (Ast.map_vars resolve_expr v :> Ast.typed_expr_kind)
     | #Ast.ops as o -> (Ast.map_ops resolve_expr o :> Ast.typed_expr_kind)
     | #Ast.logic as l -> (Ast.map_logic resolve_expr l :> Ast.typed_expr_kind)
+    | #Ast.reflect as r -> (Ast.map_reflect resolve_expr r :> Ast.typed_expr_kind)
   in
   { Ast.it; span = e.Ast.span; ann = Types.resolve e.Ast.ann }
 

@@ -30,6 +30,9 @@ let cases =
   ; "tests/types/inference/polymorphism"
   ; "tests/types/inference/float_math"
   ; "tests/types/inference/higher_order"
+  ; "tests/types/inference/typeof_exprs"
+  ; "tests/types/typeof_primitives"
+  ; "tests/types/typeof_fn"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
@@ -86,7 +89,7 @@ let interpret source =
             (Printf.sprintf "type error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Error [] -> Error "type check failed"
         | Ok typed ->
-          (match Interp.run ~out typed with
+          (match Interp.run ~out (Reflect.program typed) with
            | Ok () -> Ok (Buffer.contents buf)
            | Error e ->
              Error

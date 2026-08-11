@@ -254,6 +254,12 @@ and primary s : Ast.expr =
   | Token.Identifier name ->
     ignore (advance s);
     Ast.at sp (`Var name)
+  | Token.Typeof ->
+    ignore (advance s);
+    ignore (consume s Token.Left_paren "Expected '(' after 'typeof'.");
+    let e = expression s in
+    ignore (consume s Token.Right_paren "Expected ')' after typeof operand.");
+    Ast.at sp (`Typeof e)
   | Token.Left_paren ->
     ignore (advance s);
     let e = expression s in

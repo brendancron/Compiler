@@ -68,6 +68,7 @@ let keyword = function
   | "or" -> Some Token.Or
   | "return" -> Some Token.Return
   | "true" -> Some Token.True
+  | "typeof" -> Some Token.Typeof
   | "var" -> Some Token.Var
   | "while" -> Some Token.While
   | _ -> None

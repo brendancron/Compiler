@@ -1,0 +1,10 @@
+// The operand is only inspected, never evaluated.
+var f = 1.5;
+print(typeof(f));
+print(typeof(1 + 2));
+print(typeof(1 < 2));
+print(typeof("a" + "b"));
+print(typeof(typeof(f)));
+
+fn apply(g: (int) -> int, v: int) -> int { return g(v); }
+print(typeof(apply));

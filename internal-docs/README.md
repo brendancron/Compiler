@@ -9,4 +9,5 @@ made over restating what the code does.
 
 | Document | Subject |
 |----------|---------|
+| [architecture.md](architecture.md) | `bootstrap2` pipeline diagram |
 | [type-system.md](type-system.md) | Type system and type checking for `bootstrap2` (OCaml) |

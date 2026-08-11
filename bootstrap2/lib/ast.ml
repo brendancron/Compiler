@@ -69,6 +69,9 @@ type 'e logic =
 
 type 'e compound = [ `Compound of binop * string * 'e ]
 
+(* Eliminated by [Reflect], which needs the checker's annotations to do it. *)
+type 'e reflect = [ `Typeof of 'e ]
+
 type ('e, 's) stmts =
   [ `Expr of 'e
   | `Var_decl of string * type_expr option * 'e option
@@ -90,6 +93,7 @@ and expr_kind =
   | expr ops
   | expr logic
   | expr compound
+  | expr reflect
   ]
 
 type stmt = (stmt_kind, unit) node
@@ -105,6 +109,7 @@ and desugared_expr_kind =
   | desugared_expr vars
   | desugared_expr ops
   | desugared_expr logic
+  | desugared_expr reflect
   ]
 
 type desugared_stmt = (desugared_stmt_kind, unit) node
@@ -118,10 +123,24 @@ and typed_expr_kind =
   | typed_expr vars
   | typed_expr ops
   | typed_expr logic
+  | typed_expr reflect
   ]
 
 type typed_stmt = (typed_stmt_kind, Types.ty) node
 and typed_stmt_kind = (typed_expr, typed_stmt) stmts
+
+(* No [`Typeof]: the interpreter cannot be handed one. *)
+type reflected_expr = (reflected_expr_kind, Types.ty) node
+
+and reflected_expr_kind =
+  [ lit
+  | reflected_expr vars
+  | reflected_expr ops
+  | reflected_expr logic
+  ]
+
+type reflected_stmt = (reflected_stmt_kind, Types.ty) node
+and reflected_stmt_kind = (reflected_expr, reflected_stmt) stmts
 
 let map_vars (f : 'a -> 'b) (e : 'a vars) : 'b vars =
   match e with
@@ -142,6 +161,10 @@ let map_logic (f : 'a -> 'b) (e : 'a logic) : 'b logic =
 let map_compound (f : 'a -> 'b) (e : 'a compound) : 'b compound =
   match e with
   | `Compound (op, name, v) -> `Compound (op, name, f v)
+
+let map_reflect (f : 'a -> 'b) (e : 'a reflect) : 'b reflect =
+  match e with
+  | `Typeof v -> `Typeof (f v)
 
 let map_stmts (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) stmts)
   : ('e2, 's2) stmts

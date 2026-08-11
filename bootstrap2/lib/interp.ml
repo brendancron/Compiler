@@ -6,7 +6,7 @@ type value =
   | Unit
   | Closure of
       { params : string list
-      ; body : Ast.typed_stmt list
+      ; body : Ast.reflected_stmt list
       ; env : env
       }
   | Native of string * int option * (value list -> value) (* None arity = variadic *)
@@ -102,7 +102,7 @@ let eval_binop span (op : Ast.binop) a b =
       (type_name a)
       (type_name b)
 
-let rec eval env (e : Ast.typed_expr) : value =
+let rec eval env (e : Ast.reflected_expr) : value =
   let span = e.Ast.span in
   match e.Ast.it with
   | `Int n -> Int n
@@ -157,7 +157,7 @@ and call span f args =
     fn args
   | v -> fail span "Cannot call %s." (type_name v)
 
-and exec env (s : Ast.typed_stmt) : unit =
+and exec env (s : Ast.reflected_stmt) : unit =
   let span = s.Ast.span in
   match s.Ast.it with
   | `Expr e -> ignore (eval env e)
@@ -219,7 +219,7 @@ let globals out =
   env
 
 (* [out] is where `print` writes; tests capture it into a buffer. *)
-let run ?(out = print_string) (program : Ast.typed_stmt list) : (unit, error) result =
+let run ?(out = print_string) (program : Ast.reflected_stmt list) : (unit, error) result =
   let env = globals out in
   try
     List.iter (exec env) program;

@@ -42,6 +42,7 @@ type token_type =
   | Or
   | Return
   | True
+  | Typeof
   | Var
   | While
   | Eof
@@ -95,6 +96,7 @@ let token_type_to_string = function
   | Or -> "OR"
   | Return -> "RETURN"
   | True -> "TRUE"
+  | Typeof -> "TYPEOF"
   | Var -> "VAR"
   | While -> "WHILE"
   | Eof -> "EOF"

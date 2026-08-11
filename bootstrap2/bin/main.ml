@@ -106,7 +106,7 @@ let () =
           then (
             print_endline "-- types --";
             print_string (Printer.string_of_typed_program typed));
-          (match Interp.run typed with
+          (match Interp.run (Reflect.program typed) with
            | Ok () -> ()
            | Error e ->
              report e.span.line e.span.col "Runtime" e.message;

@@ -55,6 +55,7 @@ let rec string_of_expr (e : Ast.expr) : string =
       (String.concat "" (List.map (fun a -> " " ^ string_of_expr a) args))
   | `And (a, b) -> Printf.sprintf "(and %s %s)" (string_of_expr a) (string_of_expr b)
   | `Or (a, b) -> Printf.sprintf "(or %s %s)" (string_of_expr a) (string_of_expr b)
+  | `Typeof e -> Printf.sprintf "(typeof %s)" (string_of_expr e)
 
 let opt_expr = function
   | None -> "_"
@@ -128,6 +129,7 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
       Printf.sprintf "(and %s %s)" (string_of_typed_expr a) (string_of_typed_expr b)
     | `Or (a, b) ->
       Printf.sprintf "(or %s %s)" (string_of_typed_expr a) (string_of_typed_expr b)
+    | `Typeof e -> Printf.sprintf "(typeof %s)" (string_of_typed_expr e)
   in
   Printf.sprintf "%s:%s" body ty
 
