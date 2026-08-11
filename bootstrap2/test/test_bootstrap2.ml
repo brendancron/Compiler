@@ -37,6 +37,10 @@ let cases =
   ; "tests/effects/log/log"
   ; "tests/effects/ask/ask"
   ; "tests/effects/multi_handle/multi_handle"
+  ; "tests/effects/exception/exception"
+  ; "tests/effects/delim/delim"
+  ; "tests/effects/flip/flip"
+  ; "tests/effects/recover/recover"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
