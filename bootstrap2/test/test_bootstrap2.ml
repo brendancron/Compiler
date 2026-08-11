@@ -41,6 +41,7 @@ let cases =
   ; "tests/effects/delim/delim"
   ; "tests/effects/flip/flip"
   ; "tests/effects/recover/recover"
+  ; "tests/effects/handler/handler"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
@@ -58,6 +59,7 @@ let error_cases =
   ; "tests/effects/errors/no_such_operation"
   ; "tests/effects/errors/unknown_effect"
   ; "tests/effects/errors/purity_violated"
+  ; "tests/effects/errors/unknown_handler"
   ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)
@@ -96,7 +98,12 @@ let interpret source =
        Error (Printf.sprintf "parse error [%d:%d] %s" e.line e.col e.message)
      | Error [] -> Error "parse failed"
      | Ok program ->
-       (match Typecheck.check (Desugar.program program) with
+       (match Desugar.program program with
+        | Error e ->
+          Error
+            (Printf.sprintf "desugar error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+        | Ok desugared ->
+        match Typecheck.check desugared with
         | Error (e :: _) ->
           Error
             (Printf.sprintf "type error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
@@ -118,15 +125,19 @@ let interpret source =
                      e.message)))))
 
 (* Formats diagnostics the way a .err file spells them. *)
-let type_errors source =
+let rejections source =
   match Scanner.scan_tokens source with
   | Error _ -> Error "scan failed"
   | Ok tokens ->
     (match Parser.parse tokens with
      | Error _ -> Error "parse failed"
      | Ok program ->
-       (match Typecheck.check (Desugar.program program) with
-        | Ok _ -> Error "expected a type error, but the program checked"
+       (match Desugar.program program with
+        | Error e ->
+          Ok (Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+        | Ok desugared ->
+        match Typecheck.check desugared with
+        | Ok _ -> Error "expected an error, but the program checked"
         | Error errors ->
           Ok
             (String.concat
@@ -139,7 +150,7 @@ let type_errors source =
 let run_error_case root name =
   let path ext = Filename.concat root (name ^ ext) in
   let expected = read_file (path ".err") in
-  match type_errors (read_file (path ".cx")) with
+  match rejections (read_file (path ".cx")) with
   | Error message ->
     Printf.printf "FAIL %s\n  %s\n" name message;
     false

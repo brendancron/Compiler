@@ -109,12 +109,24 @@ let rec write_stmt buf indent (s : Ast.stmt) =
       name
       (String.concat "" (List.map (fun (o : Ast.op_decl) -> " " ^ o.Ast.op_name) ops))
   | `Run (body, handlers) ->
+    let label (c : Ast.stmt Ast.handler_clause) =
+      match c with
+      | Ast.Inline h -> " handle " ^ h.Ast.handled
+      | Ast.Named name -> " with " ^ name
+    in
+    let arms (c : Ast.stmt Ast.handler_clause) =
+      match c with
+      | Ast.Inline h -> List.concat_map (fun a -> a.Ast.arm_body) h.Ast.arms
+      | Ast.Named _ -> []
+    in
     nested
-      (Printf.sprintf
-         "run%s"
-         (String.concat "" (List.map (fun h -> " handle " ^ h.Ast.handled) handlers)))
-      (body @ List.concat_map (fun h -> List.concat_map (fun a -> a.Ast.arm_body) h.Ast.arms) handlers)
+      (Printf.sprintf "run%s" (String.concat "" (List.map label handlers)))
+      (body @ List.concat_map arms handlers)
   | `Resume value -> line "%s(resume %s)\n" pad (opt_expr value)
+  | `Handler_decl (name, h) ->
+    nested
+      (Printf.sprintf "handler %s : %s" name h.Ast.handled)
+      (List.concat_map (fun a -> a.Ast.arm_body) h.Ast.arms)
 
 let string_of_program (program : Ast.program) : string =
   let buf = Buffer.create 256 in

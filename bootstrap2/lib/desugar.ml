@@ -1,5 +1,16 @@
 open Ast
 
+type error =
+  { span : span
+  ; message : string
+  }
+
+exception Error of error
+
+(* Handlers declared with `handler name : effect { ... }`, inlined into the
+   `run` blocks that name them. *)
+let declared : (string, stmt handler) Hashtbl.t = Hashtbl.create 8
+
 let rec expr (e : expr) : desugared_expr =
   let sp = e.span in
   let it : desugared_expr_kind =
@@ -47,8 +58,28 @@ let rec stmt (s : stmt) : desugared_stmt =
          | Some i -> [ stmt i; loop ]
          | None -> [ loop ])
     | #stmts as s -> (map_stmts expr stmt s :> desugared_stmt_kind)
-    | #effects as e -> (map_effects expr stmt e :> desugared_stmt_kind)
+    | #effects as e -> (map_effects expr stmt (clause sp) e :> desugared_stmt_kind)
+    (* Declarations vanish; only the inlined copies survive. *)
+    | `Handler_decl _ -> `Block []
   in
   { it; span = sp; ann = () }
 
-let program (p : program) : desugared_stmt list = List.map stmt p
+and clause span (c : stmt handler_clause) : desugared_stmt handler =
+  match c with
+  | Inline h -> map_handler stmt h
+  | Named name ->
+    (match Hashtbl.find_opt declared name with
+     | Some h -> map_handler stmt h
+     | None ->
+       raise (Error { span; message = Printf.sprintf "Unknown handler '%s'." name }))
+
+let program (p : program) : (desugared_stmt list, error) result =
+  Hashtbl.reset declared;
+  List.iter
+    (fun (s : stmt) ->
+      match s.it with
+      | `Handler_decl (name, h) -> Hashtbl.replace declared name h
+      | _ -> ())
+    p;
+  try Ok (List.map stmt p) with
+  | Error e -> Result.Error e

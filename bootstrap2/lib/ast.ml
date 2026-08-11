@@ -101,9 +101,18 @@ type 'e compound = [ `Compound of binop * string * 'e ]
 
 (* Eliminated by the CPS pass, which is why the interpreter has no handler
    stack: by the time it runs, these are ordinary closures and calls. *)
-type ('e, 's) effects =
+(* A `run` may name a handler declared elsewhere. Both forms exist in the parsed
+   tree; desugaring resolves the named ones, so later trees carry only
+   [handler]. *)
+type 's handler_clause =
+  | Inline of 's handler
+  | Named of string
+
+type 's handler_defs = [ `Handler_decl of string * 's handler ]
+
+type ('e, 's, 'h) effects =
   [ `Effect_decl of string * op_decl list
-  | `Run of 's list * 's handler list
+  | `Run of 's list * 'h list
   | `Resume of 'e option
   ]
 
@@ -139,7 +148,8 @@ type stmt = (stmt_kind, unit) node
 and stmt_kind =
   [ (expr, stmt) stmts
   | (expr, stmt) loops
-  | (expr, stmt) effects
+  | (expr, stmt, stmt handler_clause) effects
+  | stmt handler_defs
   ]
 
 type program = stmt list
@@ -159,7 +169,7 @@ type desugared_stmt = (desugared_stmt_kind, unit) node
 
 and desugared_stmt_kind =
   [ (desugared_expr, desugared_stmt) stmts
-  | (desugared_expr, desugared_stmt) effects
+  | (desugared_expr, desugared_stmt, desugared_stmt handler) effects
   ]
 
 (* Same constructors, every node carrying a resolved type. *)
@@ -177,7 +187,7 @@ type typed_stmt = (typed_stmt_kind, Types.ty) node
 
 and typed_stmt_kind =
   [ (typed_expr, typed_stmt) stmts
-  | (typed_expr, typed_stmt) effects
+  | (typed_expr, typed_stmt, typed_stmt handler) effects
   ]
 
 (* No [`Typeof]: the interpreter cannot be handed one. *)
@@ -194,7 +204,7 @@ type reflected_stmt = (reflected_stmt_kind, Types.ty) node
 
 and reflected_stmt_kind =
   [ (reflected_expr, reflected_stmt) stmts
-  | (reflected_expr, reflected_stmt) effects
+  | (reflected_expr, reflected_stmt, reflected_stmt handler) effects
   ]
 
 (* No effect constructs: the CPS pass has turned them into closures and calls. *)
@@ -254,22 +264,26 @@ let map_loops (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) loops)
   | `For (init, cond, step, body) ->
     `For (Option.map fs init, Option.map fe cond, Option.map fe step, fs body)
 
-let map_effects (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) effects)
-  : ('e2, 's2) effects
+let map_arm (fs : 's1 -> 's2) (a : 's1 arm) : 's2 arm =
+  { arm_name = a.arm_name
+  ; arm_kind = a.arm_kind
+  ; arm_params = a.arm_params
+  ; arm_body = List.map fs a.arm_body
+  }
+
+let map_handler (fs : 's1 -> 's2) (h : 's1 handler) : 's2 handler =
+  { handled = h.handled; arms = List.map (map_arm fs) h.arms }
+
+let map_effects
+      (fe : 'e1 -> 'e2)
+      (fs : 's1 -> 's2)
+      (fh : 'h1 -> 'h2)
+      (s : ('e1, 's1, 'h1) effects)
+  : ('e2, 's2, 'h2) effects
   =
-  let arm (a : 's1 arm) : 's2 arm =
-    { arm_name = a.arm_name
-    ; arm_kind = a.arm_kind
-    ; arm_params = a.arm_params
-    ; arm_body = List.map fs a.arm_body
-    }
-  in
   match s with
   | `Effect_decl (name, ops) -> `Effect_decl (name, ops)
-  | `Run (body, handlers) ->
-    `Run
-      ( List.map fs body
-      , List.map (fun h -> { handled = h.handled; arms = List.map arm h.arms }) handlers )
+  | `Run (body, handlers) -> `Run (List.map fs body, List.map fh handlers)
   | `Resume e -> `Resume (Option.map fe e)
 
 let binop_of_token : Token.token_type -> binop option = function

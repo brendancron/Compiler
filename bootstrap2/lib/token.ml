@@ -43,11 +43,13 @@ type token_type =
   | If
   | Or
   | Handle
+  | Handler
   | Resume
   | Return
   | Run
   | True
   | Typeof
+  | With
   | Var
   | While
   | Eof
@@ -102,11 +104,13 @@ let token_type_to_string = function
   | If -> "IF"
   | Or -> "OR"
   | Handle -> "HANDLE"
+  | Handler -> "HANDLER"
   | Resume -> "RESUME"
   | Return -> "RETURN"
   | Run -> "RUN"
   | True -> "TRUE"
   | Typeof -> "TYPEOF"
+  | With -> "WITH"
   | Var -> "VAR"
   | While -> "WHILE"
   | Eof -> "EOF"

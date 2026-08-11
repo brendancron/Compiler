@@ -309,6 +309,9 @@ let rec declaration s : Ast.stmt option =
     | Token.Effect ->
       ignore (advance s);
       Some (effect_decl s sp)
+    | Token.Handler ->
+      ignore (advance s);
+      Some (handler_decl s sp)
     | _ -> Some (statement s)
   with
   | Parse_error ->
@@ -476,8 +479,13 @@ and effect_decl s sp : Ast.stmt =
   ignore (consume s Token.Right_brace "Expected '}' after effect operations.");
   Ast.at sp (`Effect_decl (name, ops))
 
+and handler_decl s sp : Ast.stmt =
+  let name = consume_identifier s "Expected handler name." in
+  ignore (consume s Token.Colon "Expected ':' after handler name.");
+  Ast.at sp (`Handler_decl (name, handler s))
+
 and handler s : Ast.stmt Ast.handler =
-  let handled = consume_identifier s "Expected an effect name after 'handle'." in
+  let handled = consume_identifier s "Expected an effect name." in
   ignore (consume s Token.Left_brace "Expected '{' after effect name.");
   let rec loop acc =
     if check s Token.Right_brace || is_at_end s
@@ -514,12 +522,21 @@ and run_stmt s sp : Ast.stmt =
   ignore (consume s Token.Left_brace "Expected '{' after 'run'.");
   let body = block s in
   let rec loop acc =
-    match matches s [ Token.Handle ] with
-    | Some _ -> loop (handler s :: acc)
-    | None -> List.rev acc
+    match (peek s).Token.token_type with
+    | Token.Handle ->
+      ignore (advance s);
+      loop (Ast.Inline (handler s) :: acc)
+    | Token.With ->
+      ignore (advance s);
+      loop (Ast.Named (consume_identifier s "Expected a handler name.") :: acc)
+    | _ -> List.rev acc
   in
   let handlers = loop [] in
-  if handlers = [] then ignore (error s (peek s) "Expected 'handle' after a run block.");
+  if handlers = []
+  then ignore (error s (peek s) "Expected 'handle' or 'with' after a run block.");
+  (* `with` reads as an expression and takes a terminator; `handle` closes with
+     its own brace and does not. *)
+  ignore (matches s [ Token.Semicolon ]);
   Ast.at sp (`Run (body, handlers))
 
 and resume_stmt s sp : Ast.stmt =

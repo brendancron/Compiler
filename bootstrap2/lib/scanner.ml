@@ -68,6 +68,7 @@ let keyword = function
   | "for" -> Some Token.For
   | "if" -> Some Token.If
   | "handle" -> Some Token.Handle
+  | "handler" -> Some Token.Handler
   | "or" -> Some Token.Or
   | "resume" -> Some Token.Resume
   | "return" -> Some Token.Return
@@ -76,6 +77,7 @@ let keyword = function
   | "typeof" -> Some Token.Typeof
   | "var" -> Some Token.Var
   | "while" -> Some Token.While
+  | "with" -> Some Token.With
   | _ -> None
 
 let line_comment s =

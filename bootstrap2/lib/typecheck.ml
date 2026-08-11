@@ -25,7 +25,7 @@ type checked_stmt = (checked_stmt_kind, Types.infer_ty) Ast.node
 
 and checked_stmt_kind =
   [ (checked_expr, checked_stmt) Ast.stmts
-  | (checked_expr, checked_stmt) Ast.effects
+  | (checked_expr, checked_stmt, checked_stmt Ast.handler) Ast.effects
   ]
 
 type env =
@@ -568,7 +568,8 @@ let rec resolve_stmt (s : checked_stmt) : Ast.typed_stmt =
     match s.Ast.it with
     | #Ast.stmts as st -> (Ast.map_stmts resolve_expr resolve_stmt st :> Ast.typed_stmt_kind)
     | #Ast.effects as e ->
-      (Ast.map_effects resolve_expr resolve_stmt e :> Ast.typed_stmt_kind)
+      (Ast.map_effects resolve_expr resolve_stmt (Ast.map_handler resolve_stmt) e
+       :> Ast.typed_stmt_kind)
   in
   { Ast.it; span = s.Ast.span; ann = Types.resolve s.Ast.ann }
 

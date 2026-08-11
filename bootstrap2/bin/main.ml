@@ -94,7 +94,12 @@ let () =
        then (
          print_endline "-- ast --";
          print_string (Printer.string_of_program program));
-       (match Typecheck.check (Desugar.program program) with
+       (match Desugar.program program with
+        | Error e ->
+          report e.span.line e.span.col "Desugar" e.message;
+          exit 65
+        | Ok desugared ->
+        match Typecheck.check desugared with
         | Error errors ->
           List.iter
             (fun (e : Typecheck.error) ->
