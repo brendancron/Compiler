@@ -42,6 +42,7 @@ let cases =
   ; "tests/effects/flip/flip"
   ; "tests/effects/recover/recover"
   ; "tests/effects/handler/handler"
+  ; "tests/effects/stream/stream"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
