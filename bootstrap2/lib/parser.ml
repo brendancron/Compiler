@@ -76,6 +76,24 @@ let rec type_expr s : Ast.type_expr =
   let tok = peek s in
   let sp = Ast.span_of_token tok in
   match tok.Token.token_type with
+  | Token.Left_brace ->
+    ignore (advance s);
+    let fields =
+      if check s Token.Right_brace
+      then []
+      else (
+        let rec loop acc =
+          let label = consume_identifier s "Expected a field name." in
+          ignore (consume s Token.Colon "Expected ':' after field name.");
+          let ty = type_expr s in
+          match matches s [ Token.Comma ] with
+          | Some _ -> loop ((label, ty) :: acc)
+          | None -> List.rev ((label, ty) :: acc)
+        in
+        loop [])
+    in
+    ignore (consume s Token.Right_brace "Expected '}' after record fields.");
+    Ast.at sp (Ast.Ty_record fields)
   | Token.Identifier name ->
     ignore (advance s);
     if check s Token.Less
@@ -168,6 +186,8 @@ and assignment s : Ast.expr =
     | `Var name, Some binop -> Ast.at left.Ast.span (`Compound (binop, name, value))
     | `Index (target, i), None ->
       Ast.at left.Ast.span (`Index_assign (target, i, value))
+    | `Field (target, label), None ->
+      Ast.at left.Ast.span (`Field_assign (target, label, value))
     | _ ->
       (* Recorded, not raised: the parse is still well-formed from here. *)
       ignore (error s tok "Invalid assignment target.");
@@ -269,7 +289,10 @@ and call s : Ast.expr =
        | Token.Int n ->
          ignore (advance s);
          loop (Ast.at callee.Ast.span (`Tuple_get (callee, n)))
-       | _ -> raise (error s (peek s) "Expected a tuple field number after '.'."))
+       | Token.Identifier label ->
+         ignore (advance s);
+         loop (Ast.at callee.Ast.span (`Field (callee, label)))
+       | _ -> raise (error s (peek s) "Expected a field after '.'."))
     | _ -> callee
   in
   loop (primary s)
@@ -318,6 +341,24 @@ and primary s : Ast.expr =
     let e = expression s in
     ignore (consume s Token.Right_paren "Expected ')' after typeof operand.");
     Ast.at sp (`Typeof e)
+  | Token.Left_brace ->
+    ignore (advance s);
+    let fields =
+      if check s Token.Right_brace
+      then []
+      else (
+        let rec loop acc =
+          let label = consume_identifier s "Expected a field name." in
+          ignore (consume s Token.Colon "Expected ':' after field name.");
+          let value = expression s in
+          match matches s [ Token.Comma ] with
+          | Some _ -> loop ((label, value) :: acc)
+          | None -> List.rev ((label, value) :: acc)
+        in
+        loop [])
+    in
+    ignore (consume s Token.Right_brace "Expected '}' after record fields.");
+    Ast.at sp (`Record_lit fields)
   | Token.Left_bracket ->
     ignore (advance s);
     let items =

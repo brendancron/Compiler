@@ -22,6 +22,7 @@ let rec expr (e : expr) : desugared_expr =
     | #compound as c -> (map_compound expr c :> desugared_expr_kind)
     | #indexing as i -> (map_indexing expr i :> desugared_expr_kind)
     | #tuple as t -> (map_tuple expr t :> desugared_expr_kind)
+    | #record as r -> (map_record expr r :> desugared_expr_kind)
     | #collection as c -> (map_collection expr c :> desugared_expr_kind)
     | #reflect as r -> (map_reflect expr r :> desugared_expr_kind)
   in

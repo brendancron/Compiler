@@ -7,7 +7,11 @@
    being two occurrences, and each `handle` peels one. *)
 type row = string list
 
-type ty =
+(* Field name to type, sorted, so two records with the same fields are the same
+   type however they were written. *)
+type fields = (string * ty) list
+
+and ty =
   | Int
   | Float
   | Str
@@ -15,6 +19,7 @@ type ty =
   | Unit
   | Array of ty
   | Tuple of ty list
+  | Record of fields
   | Fn of ty list * ty * row
   (* Quantified, not unresolved. Reaching codegen means the call site was never
      monomorphized. *)
@@ -34,6 +39,7 @@ type infer_ty =
   | IUnit
   | IArray of infer_ty
   | ITuple of infer_ty list
+  | IRecord of infer_fields
   | IFn of infer_ty list * infer_ty * infer_row
   | IVar of tv ref
 
@@ -53,11 +59,23 @@ and rv =
   | RUnbound of int
   | RLink of infer_row
 
+(* The same shape as an effect row, carrying a type per label. An open tail is
+   what lets a function accept any record that has the field it reads. *)
+and infer_fields =
+  | FEmpty
+  | FCons of string * infer_ty * infer_fields
+  | FVar of fv ref
+
+and fv =
+  | FUnbound of int
+  | FLink of infer_fields
+
 (* Variables listed here are copied by [instantiate]; every other variable in
    [body] stays shared with the enclosing scope. *)
 type scheme =
   { quantified : int list
   ; quantified_rows : int list
+  ; quantified_fields : int list
   ; body : infer_ty
   }
 
@@ -77,6 +95,10 @@ let fresh_row () =
   incr counter;
   RVar (ref (RUnbound !counter))
 
+let fresh_fields () =
+  incr counter;
+  FVar (ref (FUnbound !counter))
+
 let reset () = counter := 0
 
 let rec repr (t : infer_ty) : infer_ty =
@@ -94,6 +116,14 @@ let rec repr_row (r : infer_row) : infer_row =
     v := RLink target;
     target
   | r -> r
+
+let rec repr_fields (f : infer_fields) : infer_fields =
+  match f with
+  | FVar ({ contents = FLink inner } as v) ->
+    let target = repr_fields inner in
+    v := FLink target;
+    target
+  | f -> f
 
 let string_of_kind = function
   | Any -> "any"
@@ -129,6 +159,15 @@ let rec string_of_infer_ty (t : infer_ty) : string =
   | IArray elem -> Printf.sprintf "Array<%s>" (string_of_infer_ty elem)
   | ITuple items ->
     Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_infer_ty items))
+  | IRecord f ->
+    let rec fields f =
+      match repr_fields f with
+      | FEmpty -> []
+      | FVar _ -> [ "..." ]
+      | FCons (label, ty, rest) ->
+        Printf.sprintf "%s: %s" label (string_of_infer_ty ty) :: fields rest
+    in
+    Printf.sprintf "{ %s }" (String.concat ", " (List.sort compare (fields f)))
   | IFn (params, ret, row) ->
     Printf.sprintf
       "(%s) ->%s %s"
@@ -148,6 +187,12 @@ let rec string_of_ty (t : ty) : string =
   | Array elem -> Printf.sprintf "Array<%s>" (string_of_ty elem)
   | Tuple items ->
     Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_ty items))
+  | Record fields ->
+    Printf.sprintf
+      "{ %s }"
+      (String.concat
+         ", "
+         (List.map (fun (l, t) -> Printf.sprintf "%s: %s" l (string_of_ty t)) fields))
   | Fn (params, ret, row) ->
     Printf.sprintf
       "(%s) ->%s %s"
@@ -194,6 +239,32 @@ let rec unify_row (a : infer_row) (b : infer_row) : unit =
     error "This code does not handle the effect '%s'." label
   | RVar { contents = RLink _ }, _ | _, RVar { contents = RLink _ } -> assert false
 
+(* ---- field rows ---- *)
+
+let rec fields_occurs id (f : infer_fields) =
+  match repr_fields f with
+  | FEmpty -> false
+  | FVar { contents = FUnbound id' } -> id = id'
+  | FVar { contents = FLink _ } -> assert false
+  | FCons (_, _, rest) -> fields_occurs id rest
+
+(* What remains of [f] after removing [label], along with the type it had. An
+   open tail grows the field rather than failing, which is what lets a function
+   read a field from any record that has one. *)
+let rec rewrite_fields label (f : infer_fields) : infer_ty * infer_fields =
+  match repr_fields f with
+  | FCons (l, ty, rest) when String.equal l label -> ty, rest
+  | FCons (l, ty, rest) ->
+    let found, rest = rewrite_fields label rest in
+    found, FCons (l, ty, rest)
+  | FVar ({ contents = FUnbound _ } as v) ->
+    let ty = fresh () in
+    let tail = fresh_fields () in
+    v := FLink (FCons (label, ty, tail));
+    ty, tail
+  | FVar { contents = FLink _ } -> assert false
+  | FEmpty -> error "This value has no field '%s'." label
+
 (* ---- unification ---- *)
 
 (* A variable used by both `+` and `-` must end up Numeric, not Addable. *)
@@ -215,10 +286,33 @@ let rec occurs id (t : infer_ty) =
   | IVar { contents = Unbound (id', _) } -> id = id'
   | IArray elem -> occurs id elem
   | ITuple items -> List.exists (occurs id) items
+  | IRecord f ->
+    let rec walk f =
+      match repr_fields f with
+      | FEmpty | FVar _ -> false
+      | FCons (_, ty, rest) -> occurs id ty || walk rest
+    in
+    walk f
   | IFn (params, ret, _) -> List.exists (occurs id) params || occurs id ret
   | _ -> false
 
-let rec unify (a : infer_ty) (b : infer_ty) : unit =
+let rec unify_fields (a : infer_fields) (b : infer_fields) : unit =
+  match repr_fields a, repr_fields b with
+  | FEmpty, FEmpty -> ()
+  | FVar v1, FVar v2 when v1 == v2 -> ()
+  | FVar ({ contents = FUnbound id } as v), other
+  | other, FVar ({ contents = FUnbound id } as v) ->
+    if fields_occurs id other then error "This record type is recursive.";
+    v := FLink other
+  | FCons (label, ty, rest_a), (FCons _ as b) ->
+    let found, rest_b = rewrite_fields label b in
+    unify ty found;
+    unify_fields rest_a rest_b
+  | FEmpty, FCons (label, _, _) | FCons (label, _, _), FEmpty ->
+    error "This value has no field '%s'." label
+  | FVar { contents = FLink _ }, _ | _, FVar { contents = FLink _ } -> assert false
+
+and unify (a : infer_ty) (b : infer_ty) : unit =
   let a = repr a
   and b = repr b in
   match a, b with
@@ -236,6 +330,7 @@ let rec unify (a : infer_ty) (b : infer_ty) : unit =
     r := Link t
   | IInt, IInt | IFloat, IFloat | IStr, IStr | IBool, IBool | IUnit, IUnit -> ()
   | IArray a, IArray b -> unify a b
+  | IRecord a, IRecord b -> unify_fields a b
   | ITuple a, ITuple b ->
     if List.length a <> List.length b
     then
@@ -258,6 +353,13 @@ let rec unify (a : infer_ty) (b : infer_ty) : unit =
 
 (* ---- schemes ---- *)
 
+let rec walk_fields walk f =
+  match repr_fields f with
+  | FEmpty | FVar _ -> ()
+  | FCons (_, ty, rest) ->
+    walk ty;
+    walk_fields walk rest
+
 let free_vars (t : infer_ty) : (int * kind) list =
   let acc = ref [] in
   let rec walk t =
@@ -266,6 +368,7 @@ let free_vars (t : infer_ty) : (int * kind) list =
       if not (List.mem_assoc id !acc) then acc := (id, kind) :: !acc
     | IArray elem -> walk elem
     | ITuple items -> List.iter walk items
+    | IRecord f -> walk_fields walk f
     | IFn (params, ret, _) ->
       List.iter walk params;
       walk ret
@@ -287,6 +390,7 @@ let free_row_vars (t : infer_ty) : int list =
     match repr t with
     | IArray elem -> walk elem
     | ITuple items -> List.iter walk items
+    | IRecord f -> walk_fields walk f
     | IFn (params, ret, row) ->
       List.iter walk params;
       walk ret;
@@ -296,23 +400,49 @@ let free_row_vars (t : infer_ty) : int list =
   walk t;
   !acc
 
-let mono body = { quantified = []; quantified_rows = []; body }
+let mono body = { quantified = []; quantified_rows = []; quantified_fields = []; body }
+
+let free_field_vars (t : infer_ty) : int list =
+  let acc = ref [] in
+  let rec walk_fields f =
+    match repr_fields f with
+    | FEmpty -> ()
+    | FVar { contents = FUnbound id } -> if not (List.mem id !acc) then acc := id :: !acc
+    | FVar { contents = FLink _ } -> assert false
+    | FCons (_, ty, rest) ->
+      walk ty;
+      walk_fields rest
+  and walk t =
+    match repr t with
+    | IArray elem -> walk elem
+    | ITuple items -> List.iter walk items
+    | IRecord f -> walk_fields f
+    | IFn (params, ret, _) ->
+      List.iter walk params;
+      walk ret
+    | _ -> ()
+  in
+  walk t;
+  !acc
 
 (* [env_vars] and [env_rows] are the enclosing scope's free sets: anything in
    them stays shared. *)
-let generalize ~env_vars ~env_rows body =
+let generalize ~env_vars ~env_rows ~env_fields body =
   { quantified =
       free_vars body |> List.map fst |> List.filter (fun id -> not (List.mem id env_vars))
   ; quantified_rows = free_row_vars body |> List.filter (fun id -> not (List.mem id env_rows))
+  ; quantified_fields =
+      free_field_vars body |> List.filter (fun id -> not (List.mem id env_fields))
   ; body
   }
 
 let instantiate (s : scheme) : infer_ty =
-  if s.quantified = [] && s.quantified_rows = []
+  if s.quantified = [] && s.quantified_rows = [] && s.quantified_fields = []
   then s.body
   else (
     let types = Hashtbl.create 8
-    and rows = Hashtbl.create 8 in
+    and rows = Hashtbl.create 8
+    and fields = Hashtbl.create 8 in
     let rec walk_row r =
       match repr_row r with
       | REmpty -> REmpty
@@ -343,6 +473,24 @@ let instantiate (s : scheme) : infer_ty =
         else original
       | IArray elem -> IArray (walk elem)
       | ITuple items -> ITuple (List.map walk items)
+      | IRecord f ->
+        let rec copy f =
+          match repr_fields f with
+          | FEmpty -> FEmpty
+          | FVar { contents = FUnbound id } as original ->
+            if List.mem id s.quantified_fields
+            then (
+              match Hashtbl.find_opt fields id with
+              | Some copy -> copy
+              | None ->
+                let copy = fresh_fields () in
+                Hashtbl.add fields id copy;
+                copy)
+            else original
+          | FVar { contents = FLink _ } -> assert false
+          | FCons (label, ty, rest) -> FCons (label, walk ty, copy rest)
+        in
+        IRecord (copy f)
       | IFn (params, ret, row) -> IFn (List.map walk params, walk ret, walk_row row)
       | concrete -> concrete
     in
@@ -361,6 +509,18 @@ let rec concrete (t : infer_ty) : ty option =
   | IArray elem ->
     let* elem = concrete elem in
     Some (Array elem)
+  | IRecord f ->
+    let rec collect f =
+      match repr_fields f with
+      | FEmpty -> Some []
+      | FVar _ -> Some []
+      | FCons (label, ty, rest) ->
+        let* ty = concrete ty in
+        let* rest = collect rest in
+        Some ((label, ty) :: rest)
+    in
+    let* fields = collect f in
+    Some (Record (List.sort compare fields))
   | ITuple items ->
     let* items =
       List.fold_right
@@ -397,6 +557,9 @@ let rec of_ty (t : ty) : infer_ty =
   | Unit -> IUnit
   | Array elem -> IArray (of_ty elem)
   | Tuple items -> ITuple (List.map of_ty items)
+  | Record fields ->
+    IRecord
+      (List.fold_right (fun (l, t) rest -> FCons (l, of_ty t, rest)) fields FEmpty)
   | Fn (params, ret, row) ->
     IFn
       ( List.map of_ty params
@@ -423,6 +586,15 @@ let rec resolve (t : infer_ty) : ty =
   | IUnit -> Unit
   | IArray elem -> Array (resolve elem)
   | ITuple items -> Tuple (List.map resolve items)
+  | IRecord f ->
+    let rec collect f =
+      match repr_fields f with
+      (* An unconstrained tail closes, the way an unconstrained effect row
+         does. *)
+      | FEmpty | FVar _ -> []
+      | FCons (label, ty, rest) -> (label, resolve ty) :: collect rest
+    in
+    Record (List.sort compare (collect f))
   | IFn (params, ret, row) -> Fn (List.map resolve params, resolve ret, resolve_row row)
   | IVar { contents = Unbound (id, kind) } ->
     (match kind with

@@ -21,6 +21,7 @@ and checked_expr_kind =
   | checked_expr Ast.compound
   | checked_expr Ast.indexing
   | checked_expr Ast.tuple
+  | checked_expr Ast.record
   | checked_expr Ast.collection
   | checked_expr Ast.reflect
   ]
@@ -108,6 +109,23 @@ let env_free_row_vars env =
   walk env;
   !acc
 
+let env_free_field_vars env =
+  let acc = ref [] in
+  let rec walk env =
+    Hashtbl.iter
+      (fun _ (scheme : Types.scheme) ->
+        Types.free_field_vars scheme.body
+        |> List.iter (fun id ->
+          if (not (List.mem id scheme.quantified_fields)) && not (List.mem id !acc)
+          then acc := id :: !acc))
+      env.bindings;
+    match env.parent with
+    | Some p -> walk p
+    | None -> ()
+  in
+  walk env;
+  !acc
+
 let fail span fmt =
   Printf.ksprintf (fun message -> raise (Located { span; message })) fmt
 
@@ -126,6 +144,12 @@ let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
   | Ast.Ty_name "bool" -> Types.IBool
   | Ast.Ty_name "unit" -> Types.IUnit
   | Ast.Ty_tuple items -> Types.ITuple (List.map infer_ty_of_annotation items)
+  | Ast.Ty_record fields ->
+    Types.IRecord
+      (List.fold_right
+         (fun (l, t) rest -> Types.FCons (l, infer_ty_of_annotation t, rest))
+         fields
+         Types.FEmpty)
   | Ast.Ty_app ("Array", [ elem ]) -> Types.IArray (infer_ty_of_annotation elem)
   | Ast.Ty_app (name, args) ->
     fail
@@ -173,7 +197,10 @@ let rec assigned_in_expr (e : Ast.desugared_expr) acc =
     assigned_in_expr c (assigned_in_expr b (assigned_in_expr a acc))
   | `Collection_lit items | `Tuple items ->
     List.fold_left (fun acc i -> assigned_in_expr i acc) acc items
-  | `Tuple_get (t, _) -> assigned_in_expr t acc
+  | `Tuple_get (t, _) | `Field (t, _) -> assigned_in_expr t acc
+  | `Record_lit fields ->
+    List.fold_left (fun acc (_, v) -> assigned_in_expr v acc) acc fields
+  | `Field_assign (r, _, v) -> assigned_in_expr v (assigned_in_expr r acc)
 
 let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   let opt f o acc =
@@ -338,6 +365,35 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       (fun (i : checked_expr) -> unify_at i.Ast.span elem i.Ast.ann)
       items;
     node (Types.IArray elem) (`Collection_lit items)
+  | `Record_lit fields ->
+    let fields = List.map (fun (l, v) -> l, infer_expr env ctx v) fields in
+    node
+      (Types.IRecord
+         (List.fold_right
+            (fun (l, (v : checked_expr)) rest -> Types.FCons (l, v.Ast.ann, rest))
+            fields
+            Types.FEmpty))
+      (`Record_lit fields)
+  (* Unifying against an open row rather than a known type is what lets a
+     function read a field from any record that has one. *)
+  | `Field (target, label) ->
+    let target = infer_expr env ctx target in
+    let ty = Types.fresh () in
+    unify_at
+      target.Ast.span
+      (Types.IRecord (Types.FCons (label, ty, Types.fresh_fields ())))
+      target.Ast.ann;
+    node ty (`Field (target, label))
+  | `Field_assign (target, label, v) ->
+    let target = infer_expr env ctx target in
+    let v = infer_expr env ctx v in
+    let ty = Types.fresh () in
+    unify_at
+      target.Ast.span
+      (Types.IRecord (Types.FCons (label, ty, Types.fresh_fields ())))
+      target.Ast.ann;
+    unify_at v.Ast.span ty v.Ast.ann;
+    node v.Ast.ann (`Field_assign (target, label, v))
   | `Tuple items ->
     let items = List.map (infer_expr env ctx) items in
     node
@@ -441,6 +497,7 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
          Types.generalize
            ~env_vars:(env_free_vars env)
            ~env_rows:(env_free_row_vars env)
+           ~env_fields:(env_free_field_vars env)
            declared
        else Types.mono declared);
     node (`Var_decl (name, annotation, init))
@@ -499,6 +556,7 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
       (Types.generalize
          ~env_vars:(env_free_vars env)
          ~env_rows:(env_free_row_vars env)
+         ~env_fields:(env_free_field_vars env)
          fn_type);
     Ast.annotated span fn_type (`Fn (name, params, signature, body))
   | `Effect_decl (name, ops) ->
@@ -520,6 +578,7 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
           o.Ast.op_name
           { Types.quantified = []
           ; quantified_rows = Types.free_row_vars op_type
+          ; quantified_fields = []
           ; body = op_type
           })
       ops;
@@ -665,6 +724,7 @@ let rec resolve_expr (e : checked_expr) : Ast.typed_expr =
     | #Ast.compound as c -> (Ast.map_compound resolve_expr c :> Ast.typed_expr_kind)
     | #Ast.indexing as i -> (Ast.map_indexing resolve_expr i :> Ast.typed_expr_kind)
     | #Ast.tuple as t -> (Ast.map_tuple resolve_expr t :> Ast.typed_expr_kind)
+    | #Ast.record as r -> (Ast.map_record resolve_expr r :> Ast.typed_expr_kind)
     | #Ast.collection as c ->
       (Ast.map_collection resolve_expr c :> Ast.typed_expr_kind)
     | #Ast.reflect as r -> (Ast.map_reflect resolve_expr r :> Ast.typed_expr_kind)
@@ -692,6 +752,7 @@ let globals () =
     "str"
     { Types.quantified
     ; quantified_rows = []
+    ; quantified_fields = []
     ; body = Types.IFn ([ alpha ], Types.IStr, Types.REmpty)
     };
   bind env "clock" (Types.mono (Types.IFn ([], Types.IFloat, Types.REmpty)));
@@ -702,6 +763,7 @@ let globals () =
     "print"
     { Types.quantified = List.map fst (Types.free_vars beta)
     ; quantified_rows = []
+    ; quantified_fields = []
     ; body = beta
     };
   env

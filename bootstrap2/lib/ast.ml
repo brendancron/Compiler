@@ -39,6 +39,7 @@ and type_expr_kind =
   | Ty_name of string
   | Ty_app of string * type_expr list
   | Ty_tuple of type_expr list
+  | Ty_record of (string * type_expr) list
   (* The row is the written one, so an omitted `<...>` means pure. *)
   | Ty_fn of type_expr list * type_expr * string list
 
@@ -114,6 +115,13 @@ type 'e tuple =
   | `Tuple_get of 'e * int
   ]
 
+(* A record literal and the two ways to reach a field. All primitives. *)
+type 'e record =
+  [ `Record_lit of (string * 'e) list
+  | `Field of 'e * string
+  | `Field_assign of 'e * string * 'e
+  ]
+
 (* What the container is comes from context, so this cannot be lowered until
    the checker has run. [Resolve] turns it into an [`Array_lit] or a call. *)
 type 'e collection = [ `Collection_lit of 'e list ]
@@ -164,6 +172,7 @@ and expr_kind =
   | expr compound
   | expr indexing
   | expr tuple
+  | expr record
   | expr collection
   | expr reflect
   ]
@@ -191,6 +200,7 @@ and desugared_expr_kind =
   | desugared_expr compound
   | desugared_expr indexing
   | desugared_expr tuple
+  | desugared_expr record
   | desugared_expr collection
   | desugared_expr reflect
   ]
@@ -213,6 +223,7 @@ and typed_expr_kind =
   | typed_expr compound
   | typed_expr indexing
   | typed_expr tuple
+  | typed_expr record
   | typed_expr collection
   | typed_expr reflect
   ]
@@ -234,6 +245,7 @@ and resolved_expr_kind =
   | resolved_expr logic
   | resolved_expr indexing
   | resolved_expr tuple
+  | resolved_expr record
   | resolved_expr array_lit
   | resolved_expr reflect
   ]
@@ -255,6 +267,7 @@ and reflected_expr_kind =
   | reflected_expr logic
   | reflected_expr indexing
   | reflected_expr tuple
+  | reflected_expr record
   | reflected_expr array_lit
   ]
 
@@ -275,6 +288,7 @@ and cps_expr_kind =
   | cps_expr logic
   | cps_expr indexing
   | cps_expr tuple
+  | cps_expr record
   | cps_expr array_lit
   ]
 
@@ -310,6 +324,12 @@ let map_tuple (f : 'a -> 'b) (e : 'a tuple) : 'b tuple =
   match e with
   | `Tuple items -> `Tuple (List.map f items)
   | `Tuple_get (t, i) -> `Tuple_get (f t, i)
+
+let map_record (f : 'a -> 'b) (e : 'a record) : 'b record =
+  match e with
+  | `Record_lit fields -> `Record_lit (List.map (fun (l, v) -> l, f v) fields)
+  | `Field (r, label) -> `Field (f r, label)
+  | `Field_assign (r, label, v) -> `Field_assign (f r, label, f v)
 
 let map_collection (f : 'a -> 'b) (e : 'a collection) : 'b collection =
   match e with

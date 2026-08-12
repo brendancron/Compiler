@@ -78,6 +78,35 @@ let rec expr (e : Ast.cps_expr) : unit =
       "A tuple"
       (Types.Tuple (List.map (fun (i : Ast.cps_expr) -> i.Ast.ann) items))
       ann
+  | `Record_lit fields ->
+    List.iter (fun (_, v) -> expr v) fields;
+    expect
+      span
+      "A record"
+      (Types.Record
+         (List.sort compare (List.map (fun (l, (v : Ast.cps_expr)) -> l, v.Ast.ann) fields)))
+      ann
+  | `Field (target, label) ->
+    expr target;
+    (match target.Ast.ann with
+     | Types.Record fields ->
+       (match List.assoc_opt label fields with
+        | Some ty -> expect span "A field" ty ann
+        | None -> fail span "A record has no field '%s'." label)
+     | other ->
+       fail target.Ast.span "Taking a field of %s." (Types.string_of_ty other))
+  | `Field_assign (target, label, v) ->
+    expr target;
+    expr v;
+    (match target.Ast.ann with
+     | Types.Record fields ->
+       (match List.assoc_opt label fields with
+        | Some ty ->
+          expect v.Ast.span "An assigned field" ty v.Ast.ann;
+          expect span "A field assignment" ty ann
+        | None -> fail span "A record has no field '%s'." label)
+     | other ->
+       fail target.Ast.span "Taking a field of %s." (Types.string_of_ty other))
   | `Tuple_get (target, index) ->
     expr target;
     (match target.Ast.ann with

@@ -17,6 +17,12 @@ let rec string_of_type_expr (t : Ast.type_expr) : string =
     Printf.sprintf "%s<%s>" name (String.concat ", " (List.map string_of_type_expr args))
   | Ast.Ty_tuple items ->
     Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_type_expr items))
+  | Ast.Ty_record fields ->
+    Printf.sprintf
+      "{ %s }"
+      (String.concat
+         ", "
+         (List.map (fun (l, t) -> l ^ ": " ^ string_of_type_expr t) fields))
   | Ast.Ty_fn (params, ret, row) ->
     Printf.sprintf
       "(%s) -> %s%s"
@@ -60,6 +66,13 @@ let rec string_of_expr (e : Ast.expr) : string =
   | `Tuple items ->
     Printf.sprintf "(tuple %s)" (String.concat " " (List.map string_of_expr items))
   | `Tuple_get (t, i) -> Printf.sprintf "(get %s %d)" (string_of_expr t) i
+  | `Record_lit fields ->
+    Printf.sprintf
+      "{%s}"
+      (String.concat " " (List.map (fun (l, v) -> l ^ ":" ^ string_of_expr v) fields))
+  | `Field (r, label) -> Printf.sprintf "(field %s %s)" (string_of_expr r) label
+  | `Field_assign (r, label, v) ->
+    Printf.sprintf "(field-set %s %s %s)" (string_of_expr r) label (string_of_expr v)
   | `Index (t, i) -> Printf.sprintf "(index %s %s)" (string_of_expr t) (string_of_expr i)
   | `Index_assign (t, i, v) ->
     Printf.sprintf
@@ -178,6 +191,20 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
         "(tuple %s)"
         (String.concat " " (List.map string_of_typed_expr items))
     | `Tuple_get (t, i) -> Printf.sprintf "(get %s %d)" (string_of_typed_expr t) i
+    | `Record_lit fields ->
+      Printf.sprintf
+        "{%s}"
+        (String.concat
+           " "
+           (List.map (fun (l, v) -> l ^ ":" ^ string_of_typed_expr v) fields))
+    | `Field (r, label) ->
+      Printf.sprintf "(field %s %s)" (string_of_typed_expr r) label
+    | `Field_assign (r, label, v) ->
+      Printf.sprintf
+        "(field-set %s %s %s)"
+        (string_of_typed_expr r)
+        label
+        (string_of_typed_expr v)
     | `Index (t, i) ->
       Printf.sprintf "(index %s %s)" (string_of_typed_expr t) (string_of_typed_expr i)
     | `Index_assign (t, i, v) ->

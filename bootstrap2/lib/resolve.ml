@@ -43,6 +43,8 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
     | #Ast.indexing as i ->
       (Ast.map_indexing (expr registry) i :> Ast.resolved_expr_kind)
     | #Ast.tuple as t -> (Ast.map_tuple (expr registry) t :> Ast.resolved_expr_kind)
+    | #Ast.record as r ->
+      (Ast.map_record (expr registry) r :> Ast.resolved_expr_kind)
     | #Ast.reflect as r ->
       (Ast.map_reflect (expr registry) r :> Ast.resolved_expr_kind)
   in

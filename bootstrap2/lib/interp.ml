@@ -3,6 +3,8 @@ type value =
   (* Mutable and shared: `var ys = xs` aliases rather than copies. *)
   | Array of value array
   | Tuple of value list
+  (* Fields are mutable, so a record has identity like an array. *)
+  | Record of (string * value ref) list
   | Float of float
   | Str of string
   | Bool of bool
@@ -44,6 +46,7 @@ let rec lookup env name =
 let type_name = function
   | Array _ -> "array"
   | Tuple _ -> "tuple"
+  | Record _ -> "record"
   | Int _ -> "int"
   | Float _ -> "float"
   | Str _ -> "string"
@@ -55,6 +58,12 @@ let rec string_of_value = function
   | Array items ->
     "[" ^ String.concat ", " (Array.to_list (Array.map string_of_value items)) ^ "]"
   | Tuple items -> "(" ^ String.concat ", " (List.map string_of_value items) ^ ")"
+  | Record fields ->
+    "{ "
+    ^ String.concat
+        ", "
+        (List.map (fun (l, v) -> l ^ ": " ^ string_of_value !v) fields)
+    ^ " }"
   | Int n -> string_of_int n
   | Float n -> Token.float_to_string n
   | Str s -> s
@@ -75,6 +84,7 @@ let rec values_equal a b =
   (* Arrays have identity, so equality is identity. *)
   | Array x, Array y -> x == y
   | Tuple x, Tuple y -> List.length x = List.length y && List.for_all2 values_equal x y
+  | Record x, Record y -> x == y
   | Int x, Int y -> x = y
   | Float x, Float y -> x = y
   | Str x, Str y -> String.equal x y
@@ -147,6 +157,25 @@ let rec eval env (e : Ast.cps_expr) : value =
     call span f (List.map (eval env) args)
   | `Array_lit items -> Array (Array.of_list (List.map (eval env) items))
   | `Tuple items -> Tuple (List.map (eval env) items)
+  | `Record_lit fields ->
+    Record (List.map (fun (l, v) -> l, ref (eval env v)) fields)
+  | `Field (target, label) ->
+    (match eval env target with
+     | Record fields ->
+       (match List.assoc_opt label fields with
+        | Some v -> !v
+        | None -> fail span "No field '%s'." label)
+     | v -> fail span "Cannot take a field of %s." (type_name v))
+  | `Field_assign (target, label, v) ->
+    let value = eval env v in
+    (match eval env target with
+     | Record fields ->
+       (match List.assoc_opt label fields with
+        | Some cell ->
+          cell := value;
+          value
+        | None -> fail span "No field '%s'." label)
+     | v -> fail span "Cannot take a field of %s." (type_name v))
   | `Tuple_get (target, index) ->
     (match eval env target with
      | Tuple items -> List.nth items index

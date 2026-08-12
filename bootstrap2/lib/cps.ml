@@ -188,6 +188,7 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
     | #Ast.logic as l -> (Ast.map_logic (expr info) l :> Ast.cps_expr_kind)
     | #Ast.indexing as i -> (Ast.map_indexing (expr info) i :> Ast.cps_expr_kind)
     | #Ast.tuple as t -> (Ast.map_tuple (expr info) t :> Ast.cps_expr_kind)
+    | #Ast.record as r -> (Ast.map_record (expr info) r :> Ast.cps_expr_kind)
     | #Ast.array_lit as a -> (Ast.map_array_lit (expr info) a :> Ast.cps_expr_kind)
   in
   { Ast.it; span = e.Ast.span; ann = e.Ast.ann }
@@ -207,7 +208,9 @@ let rec suspends info (e : Ast.reflected_expr) =
   | `Index_assign (a, b, c) ->
     suspends info a || suspends info b || suspends info c
   | `Array_lit items | `Tuple items -> List.exists (suspends info) items
-  | `Tuple_get (t, _) -> suspends info t
+  | `Tuple_get (t, _) | `Field (t, _) -> suspends info t
+  | `Record_lit fields -> List.exists (fun (_, v) -> suspends info v) fields
+  | `Field_assign (r, _, v) -> suspends info r || suspends info v
 
 let rec suspends_stmt info (s : Ast.reflected_stmt) =
   match s.Ast.it with
@@ -248,6 +251,12 @@ let rec extract info (e : Ast.reflected_expr)
   | `Tuple items -> extract_list info items (fun items -> rebuild (`Tuple items))
   | `Tuple_get (t, i) ->
     extract info t |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Tuple_get (f n, i)))
+  | `Field (t, label) ->
+    extract info t |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Field (f n, label)))
+  | `Record_lit _ | `Field_assign _ ->
+    if suspends info e
+    then unsupported e.Ast.span "An effect inside a record is not supported yet."
+    else None
   | `Assign (name, v) ->
     extract info v |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Assign (name, f n)))
   | `Unop (op, v) ->
