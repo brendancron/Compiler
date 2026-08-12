@@ -55,6 +55,11 @@ let cases =
   ; "tests/core/records/nominal"
   ; "tests/core/enums/tuple_variants"
   ; "tests/core/enums/struct_variants"
+  ; "tests/operators/vec2_add"
+  ; "tests/operators/operator_mul"
+  ; "tests/operators/operator_eq"
+  ; "tests/operators/operator_chain"
+  ; "tests/operators/operator_in_fn"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
@@ -86,6 +91,9 @@ let error_cases =
   ; "tests/core/enums/errors/no_such_variant"
   ; "tests/core/enums/errors/payload_mismatch"
   ; "tests/core/enums/errors/not_a_sum"
+  ; "tests/operators/errors/duplicate"
+  ; "tests/operators/errors/undeclared"
+  ; "tests/operators/errors/unannotated"
   ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)

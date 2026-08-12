@@ -71,6 +71,7 @@ let keyword = function
   | "handler" -> Some Token.Handler
   | "match" -> Some Token.Match
   | "new" -> Some Token.New
+  | "op" -> Some Token.Op
   | "or" -> Some Token.Or
   | "resume" -> Some Token.Resume
   | "return" -> Some Token.Return

@@ -1,1 +1,1 @@
-[2:7] Expected int, got float.
+[2:7] No operator + for int and float.

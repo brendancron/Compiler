@@ -34,6 +34,7 @@ and checked_stmt_kind =
   | (checked_expr, checked_stmt, checked_stmt Ast.handler) Ast.effects
   | Ast.type_defs
   | (checked_expr, checked_stmt) Ast.matching
+  | checked_stmt Ast.op_defs
   ]
 
 type env =
@@ -240,6 +241,8 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   | `While (cond, body) -> assigned_in_stmt body (assigned_in_expr cond acc)
   | `Return e -> opt assigned_in_expr e acc
   | `Effect_decl _ | `Type_decl _ -> acc
+  | `Op_decl (_, _, _, body) ->
+    List.fold_left (fun acc st -> assigned_in_stmt st acc) acc body
   | `Match (scrutinee, cases) ->
     List.fold_left
       (fun acc (_, body) ->
@@ -307,18 +310,10 @@ let element_of (target : checked_expr) =
    if both are known, and a constraint stands in for the answer if they are
    not. *)
 let binop_result registry (op : Ast.binop) a b =
-  Types.unify a b;
   match Types.concrete a, Types.concrete b with
   | Some lhs, Some rhs ->
     (match Registry.find registry op lhs rhs with
-     | Some entry ->
-       (match Registry.result_of entry lhs with
-        | Types.Int -> Types.IInt
-        | Types.Float -> Types.IFloat
-        | Types.Str -> Types.IStr
-        | Types.Bool -> Types.IBool
-        | Types.Unit -> Types.IUnit
-        | _ -> Types.fresh ())
+     | Some entry -> Types.of_ty (Registry.result_of entry lhs)
      | None ->
        Types.error
          "No operator %s for %s and %s."
@@ -326,6 +321,10 @@ let binop_result registry (op : Ast.binop) a b =
          (Types.string_of_ty lhs)
          (Types.string_of_ty rhs))
   | _ ->
+    (* Nothing to look up, so fall back to the rule every builtin follows:
+       operands agree and the operator constrains them. An asymmetric operator
+       can only be found once both types are known. *)
+    Types.unify a b;
     Types.unify a (Types.fresh_with (Registry.constraint_of op));
     Registry.unresolved_result op a
 
@@ -534,6 +533,57 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     unify_at v.Ast.span (element_of target) v.Ast.ann;
     node v.Ast.ann (`Index_assign (target, index, v))
 
+(* Operators are registered before anything is checked, so a use may precede
+   the declaration and the checker can answer from the table. *)
+and declare_ops registry (body : Ast.desugared_stmt list) =
+  List.iter
+    (fun (s : Ast.desugared_stmt) ->
+      match s.Ast.it with
+      | `Op_decl (op, params, signature, _) ->
+        (match params with
+         | [ lhs; rhs ] ->
+           let operand (p : Ast.param) =
+             match p.Ast.ty with
+             | Some t ->
+               (match Types.concrete (infer_ty_of_annotation t) with
+                | Some ty -> ty
+                | None -> fail s.Ast.span "An operator's operands must be concrete types.")
+             | None -> fail s.Ast.span "An operator's operands must be annotated."
+           in
+           let lhs_ty = operand lhs
+           and rhs_ty = operand rhs in
+           let result =
+             match signature.Ast.ret with
+             | Some t ->
+               (match Types.concrete (infer_ty_of_annotation t) with
+                | Some ty -> ty
+                | None -> fail s.Ast.span "An operator's result must be a concrete type.")
+             | None -> fail s.Ast.span "An operator must declare its result type."
+           in
+           if Registry.find_exact registry op lhs_ty rhs_ty <> None
+           then
+             fail
+               s.Ast.span
+               "Operator %s is already defined for %s and %s."
+               (Ast.string_of_binop op)
+               (Types.string_of_ty lhs_ty)
+               (Types.string_of_ty rhs_ty);
+           let name =
+             Ast.op_name
+               op
+               (Types.string_of_ty lhs_ty)
+               (Types.string_of_ty rhs_ty)
+           in
+           Registry.register
+             registry
+             op
+             lhs_ty
+             rhs_ty
+             { Registry.result = Some result; emit = Registry.Call name }
+         | _ -> fail s.Ast.span "An operator takes exactly two operands.")
+      | _ -> ())
+    body
+
 (* Type declarations are registered before anything is hoisted, because a
    function's signature may name one and hoisting reads signatures. *)
 and declare_types (body : Ast.desugared_stmt list) =
@@ -569,6 +619,26 @@ and hoist env (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
+      | `Op_decl (op, params, signature, _) ->
+        let operand (p : Ast.param) =
+          match p.Ast.ty with
+          | Some t -> Types.string_of_ty (Option.get (Types.concrete (infer_ty_of_annotation t)))
+          | None -> "_"
+        in
+        (match params with
+         | [ lhs; rhs ] ->
+           let param_types =
+             List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) params
+           in
+           bind
+             env
+             (Ast.op_name op (operand lhs) (operand rhs))
+             (Types.mono
+                (Types.IFn
+                   ( param_types
+                   , annotated_or_fresh signature.Ast.ret
+                   , Types.fresh_row () )))
+         | _ -> ())
       | `Fn (name, params, signature, _) ->
         let param_types = List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) params in
         let row =
@@ -689,6 +759,24 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     Ast.annotated span fn_type (`Fn (name, params, signature, body))
   (* Registered by [declare_types] before anything was hoisted. *)
   | `Type_decl (name, body) -> node (`Type_decl (name, body))
+  (* Checked as the function it becomes; the registry entry was made by
+     [declare_ops]. *)
+  | `Op_decl (op, params, signature, body) ->
+    let scope = new_env (Some env) in
+    List.iter
+      (fun (p : Ast.param) ->
+        bind scope p.Ast.name (Types.mono (annotated_or_fresh p.Ast.ty)))
+      params;
+    let declared_ret = annotated_or_fresh signature.Ast.ret in
+    let saved_return = ctx.return_type
+    and saved_saw = ctx.saw_return in
+    ctx.return_type <- Some declared_ret;
+    ctx.saw_return <- false;
+    let body = infer_block scope ctx body in
+    if not ctx.saw_return then Types.unify declared_ret Types.IUnit;
+    ctx.return_type <- saved_return;
+    ctx.saw_return <- saved_saw;
+    node (`Op_decl (op, params, signature, body))
   | `Match (scrutinee, cases) ->
     let scrutinee = infer_expr env ctx scrutinee in
     let sum =
@@ -927,6 +1015,7 @@ let rec resolve_stmt (s : checked_stmt) : Ast.typed_stmt =
     | #Ast.type_defs as t -> t
     | #Ast.matching as m ->
       (Ast.map_matching resolve_expr resolve_stmt m :> Ast.typed_stmt_kind)
+    | #Ast.op_defs as o -> (Ast.map_op_defs resolve_stmt o :> Ast.typed_stmt_kind)
   in
   { Ast.it; span = s.Ast.span; ann = Types.resolve s.Ast.ann }
 
@@ -976,6 +1065,7 @@ let check ~registry (program : Ast.desugared_stmt list)
      with the rest. *)
   (try
      declare_types program;
+     declare_ops registry program;
      hoist env program
    with
    | Located e -> errors := [ e ]);

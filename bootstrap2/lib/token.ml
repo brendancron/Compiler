@@ -45,6 +45,7 @@ type token_type =
   | Fn
   | For
   | If
+  | Op
   | Or
   | Handle
   | Handler
@@ -113,6 +114,7 @@ let token_type_to_string = function
   | Fn -> "FN"
   | For -> "FOR"
   | If -> "IF"
+  | Op -> "OP"
   | Or -> "OR"
   | Handle -> "HANDLE"
   | Handler -> "HANDLER"

@@ -456,6 +456,9 @@ let rec declaration s : Ast.stmt option =
     | Token.Type ->
       ignore (advance s);
       Some (type_decl s sp)
+    | Token.Op ->
+      ignore (advance s);
+      Some (op_decl s sp)
     | _ -> Some (statement s)
   with
   | Parse_error ->
@@ -628,6 +631,32 @@ and effect_decl s sp : Ast.stmt =
 
 (* Entries written `name: T` are fields and the type is a product; bare entries
    are variants and it is a sum. A declaration may not mix them. *)
+and op_decl s sp : Ast.stmt =
+  let tok = advance s in
+  let op =
+    match Ast.binop_of_token tok.Token.token_type with
+    | Some op -> op
+    | None -> raise (error s tok "Expected an operator after 'op'.")
+  in
+  ignore (consume s Token.Left_paren "Expected '(' after the operator.");
+  let params =
+    if check s Token.Right_paren
+    then []
+    else (
+      let rec loop acc =
+        let name = consume_identifier s "Expected a parameter name." in
+        let p = { Ast.name; ty = type_annotation s } in
+        match matches s [ Token.Comma ] with
+        | Some _ -> loop (p :: acc)
+        | None -> List.rev (p :: acc)
+      in
+      loop [])
+  in
+  ignore (consume s Token.Right_paren "Expected ')' after operands.");
+  let signature = signature s in
+  ignore (consume s Token.Left_brace "Expected '{' before the operator body.");
+  Ast.at sp (`Op_decl (op, params, signature, block s))
+
 and type_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected a type name." in
   ignore (consume s Token.Left_brace "Expected '{' after type name.");

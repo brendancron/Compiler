@@ -63,6 +63,7 @@ let rec stmt (s : stmt) : desugared_stmt =
     | #effects as e -> (map_effects expr stmt (clause sp) e :> desugared_stmt_kind)
     | #type_defs as t -> t
     | #matching as m -> (map_matching expr stmt m :> desugared_stmt_kind)
+    | #op_defs as o -> (map_op_defs stmt o :> desugared_stmt_kind)
     (* Declarations vanish; only the inlined copies survive. *)
     | `Handler_decl _ -> `Block []
   in

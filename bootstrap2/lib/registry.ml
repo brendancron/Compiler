@@ -30,6 +30,10 @@ let register t op lhs rhs entry = Hashtbl.replace t.exact (op, lhs, rhs) entry
 
 let register_homogeneous t op entry = Hashtbl.replace t.homogeneous op entry
 
+(* Only entries written for these exact operands. The homogeneous fallback is a
+   default, so a declaration may override it. *)
+let find_exact t op lhs rhs = Hashtbl.find_opt t.exact (op, lhs, rhs)
+
 let find t op lhs rhs =
   match Hashtbl.find_opt t.exact (op, lhs, rhs) with
   | Some entry -> Some entry

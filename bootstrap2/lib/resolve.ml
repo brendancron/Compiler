@@ -68,6 +68,22 @@ let rec stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt =
          (Ast.map_handler (stmt registry))
          e
        :> Ast.resolved_stmt_kind)
+    (* An operator is an ordinary function under a derived name. *)
+    | `Op_decl (op, params, signature, body) ->
+      let operand (p : Ast.param) =
+        match p.Ast.ty with
+        | Some { Ast.it = Ast.Ty_name n; _ } -> n
+        | Some { Ast.it = Ast.Ty_app (n, _); _ } -> n
+        | _ -> "_"
+      in
+      (match params with
+       | [ lhs; rhs ] ->
+         `Fn
+           ( Ast.op_name op (operand lhs) (operand rhs)
+           , params
+           , signature
+           , List.map (stmt registry) body )
+       | _ -> `Block [])
     | #Ast.type_defs as t -> t
     | #Ast.matching as m ->
       (Ast.map_matching (expr registry) (stmt registry) m :> Ast.resolved_stmt_kind)

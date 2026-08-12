@@ -149,6 +149,10 @@ type type_body =
 
 type type_defs = [ `Type_decl of string * type_body ]
 
+(* An operator declaration is an ordinary function under a name derived from
+   the operator and its operand types; [Resolve] turns it into one. *)
+type 's op_defs = [ `Op_decl of binop * param list * signature * 's list ]
+
 (* A pattern names a variant and binds what it carries. *)
 type pattern =
   | Pat_variant of string * string * string payload
@@ -225,6 +229,7 @@ and stmt_kind =
   | (expr, stmt, stmt handler_clause) effects
   | stmt handler_defs
   | type_defs
+  | stmt op_defs
   | (expr, stmt) matching
   ]
 
@@ -254,6 +259,7 @@ and desugared_stmt_kind =
   [ (desugared_expr, desugared_stmt) stmts
   | (desugared_expr, desugared_stmt, desugared_stmt handler) effects
   | type_defs
+  | desugared_stmt op_defs
   | (desugared_expr, desugared_stmt) matching
   ]
 
@@ -280,6 +286,7 @@ and typed_stmt_kind =
   [ (typed_expr, typed_stmt) stmts
   | (typed_expr, typed_stmt, typed_stmt handler) effects
   | type_defs
+  | typed_stmt op_defs
   | (typed_expr, typed_stmt) matching
   ]
 
@@ -401,6 +408,28 @@ let map_nominal (f : 'a -> 'b) (e : 'a nominal) : 'b nominal =
   | `New (name, fields) -> `New (name, List.map (fun (l, v) -> l, f v) fields)
   | `New_variant (ty, variant, payload) ->
     `New_variant (ty, variant, map_payload f payload)
+
+let map_op_defs (fs : 's1 -> 's2) (o : 's1 op_defs) : 's2 op_defs =
+  match o with
+  | `Op_decl (op, params, signature, body) ->
+    `Op_decl (op, params, signature, List.map fs body)
+
+(* The name an operator is compiled under. *)
+let op_name op lhs rhs =
+  let symbol =
+    match op with
+    | Add -> "add"
+    | Sub -> "sub"
+    | Mul -> "mul"
+    | Div -> "div"
+    | Equal -> "eq"
+    | Not_equal -> "ne"
+    | Less -> "lt"
+    | Less_equal -> "le"
+    | Greater -> "gt"
+    | Greater_equal -> "ge"
+  in
+  Printf.sprintf "__op_%s_%s_%s" symbol lhs rhs
 
 let map_matching (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (m : ('e1, 's1) matching)
   : ('e2, 's2) matching

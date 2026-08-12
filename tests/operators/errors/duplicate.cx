@@ -1,0 +1,3 @@
+type Vec2 { x: int, y: int }
+op +(a: Vec2, b: Vec2) -> Vec2 { return a; }
+op +(a: Vec2, b: Vec2) -> Vec2 { return b; }
