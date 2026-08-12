@@ -1,14 +1,6 @@
-(* A copy of each generic function per concrete type it is called at.
 
-   An operator or a method inside a generic body cannot be selected while the
-   body is generic: `a + b` at `T` matches no entry, and `x.len()` has no
-   receiver to dispatch on. Substituting the call site's types into a copy makes
-   both ordinary, so [Resolve] needs no notion of a generic anything.
-
-   Only functions that contain such a construct are copied. A generic function
-   that merely moves values around is left alone, since generalization already
-   serves every call from one copy. *)
-
+(* An operator or method inside a generic body cannot be selected while the body
+   is generic, so it is copied per concrete type its call sites use. *)
 type state =
   { generic : (string, Ast.typed_stmt) Hashtbl.t
   ; copies : (string * string, string) Hashtbl.t

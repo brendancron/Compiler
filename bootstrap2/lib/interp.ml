@@ -2,7 +2,6 @@ type value =
   | Int of int
   (* Mutable and shared: `var ys = xs` aliases rather than copies. *)
   | Array of value array
-  (* Grows, so the backing array is replaced rather than updated. *)
   | List of value array ref
   | Tuple of value list
   (* Fields are mutable, so a record has identity like an array. *)
@@ -86,8 +85,6 @@ let as_bool span = function
   | Bool b -> b
   | v -> fail span "Expected a bool condition, got %s." (type_name v)
 
-(* The backing array of either container. A list's is replaced when it grows,
-   so this is only valid until the next push. *)
 let contents = function
   | Array items -> items
   | List items -> !items
@@ -96,7 +93,6 @@ let contents = function
 (* OCaml's structural comparison raises on functional values. *)
 let rec values_equal a b =
   match a, b with
-  (* Arrays have identity, so equality is identity. *)
   | Array x, Array y -> x == y
   | List x, List y -> x == y
   | Tuple x, Tuple y -> List.length x = List.length y && List.for_all2 values_equal x y
@@ -325,8 +321,6 @@ let globals out =
          | [ v ] -> Str (string_of_value v)
          | _ -> Unit ));
   define env "clock" (Native ("clock", Some 0, fun _ -> Float (Sys.time ())));
-  (* Methods the compiler supplies, under the same derived name a declared one
-     gets, so nothing here distinguishes them from a method written in Cronyx. *)
   let method_ owner name arity fn =
     let derived = Ast.method_name owner name in
     define env derived (Native (derived, Some arity, fn))

@@ -9,8 +9,6 @@ type error =
 
 exception Located of error
 
-(* A method call whose receiver is only known once the enclosing function is
-   specialized. *)
 exception Deferred
 
 type checked_expr = (checked_expr_kind, Types.infer_ty) Ast.node
@@ -62,6 +60,7 @@ type effect_info =
 let ctx_effects = { ops = Hashtbl.create 16; declared = Hashtbl.create 8 }
 
 type decl =
+  | Opaque of Types.infer_ty list
   | Product of Types.infer_ty list * Types.infer_fields
   | Sum of Types.infer_ty list * (string * Types.infer_ty Ast.payload) list
 
@@ -70,7 +69,7 @@ let ctx_types : (string, decl) Hashtbl.t = Hashtbl.create 16
 let ctx_type_params : (string, Types.infer_ty) Hashtbl.t = Hashtbl.create 8
 
 let decl_params = function
-  | Product (vars, _) | Sum (vars, _) -> vars
+  | Opaque vars | Product (vars, _) | Sum (vars, _) -> vars
 
 let params_of_decl name =
   match Hashtbl.find_opt ctx_types name with
@@ -79,8 +78,6 @@ let params_of_decl name =
 
 let instance vars args = List.map2 (fun v a -> Types.var_id v, a) vars args
 
-(* Keyed by compiled name, so the body and a call that writes the parameters out
-   get the same variables rather than two sets that never meet. *)
 let ctx_fn_params : (string, (string * Types.infer_ty) list) Hashtbl.t =
   Hashtbl.create 16
 
@@ -181,8 +178,6 @@ let unify_at span expected actual =
   try Types.unify expected actual with
   | Types.Type_error message -> raise (Located { span; message })
 
-(* ---- annotations ---- *)
-
 let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
   match t.Ast.it with
   | Ast.Ty_name "int" -> Types.IInt
@@ -197,7 +192,6 @@ let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
          (fun (l, t) rest -> Types.FCons (l, infer_ty_of_annotation t, rest))
          fields
          Types.FEmpty)
-  | Ast.Ty_app ("Array", [ elem ]) -> Types.IArray (infer_ty_of_annotation elem)
   | Ast.Ty_app (name, args) ->
     named_type t.Ast.span name (List.map infer_ty_of_annotation args)
   | Ast.Ty_name other ->
@@ -224,6 +218,7 @@ and named_type span name args =
         (List.length vars)
         (List.length args);
     (match decl with
+     | Opaque _ -> Types.INamed (name, args, Types.FEmpty)
      | Product (_, fields) ->
        Types.INamed (name, args, Types.substitute_fields (instance vars args) fields)
      | Sum _ -> Types.ISum (name, args))
@@ -249,8 +244,6 @@ let type_params_of span (comptime : Ast.comptime_param list) =
 let annotated_or_fresh = function
   | Some t -> infer_ty_of_annotation t
   | None -> Types.fresh ()
-
-(* ---- the value restriction ---- *)
 
 (* Generalizing a binding that is later assigned is unsound: every use
    instantiates fresh, so `var f = someGenericFn; f = otherFn;` would check. *)
@@ -337,8 +330,6 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
 let assigned_names body =
   List.fold_left (fun acc s -> assigned_in_stmt s acc) [] body
 
-(* ---- inference ---- *)
-
 let variadic_builtins = [ "print" ]
 
 let field_of (target : checked_expr) label =
@@ -361,11 +352,12 @@ let field_of (target : checked_expr) label =
       target.Ast.ann;
     ty
 
-let element_of (target : checked_expr) =
+let element_of registry (target : checked_expr) =
   match Types.concrete target.Ast.ann with
-  | Some (Types.Array elem) | Some (Types.List elem) -> Types.of_ty elem
   | Some other ->
-    fail target.Ast.span "Cannot index %s." (Types.string_of_ty other)
+    (match Types.container_element (Types.of_ty other) with
+     | Some (name, elem) when Registry.indexed registry name <> None -> elem
+     | _ -> fail target.Ast.span "Cannot index %s." (Types.string_of_ty other))
   | None ->
     let elem = Types.fresh () in
     unify_at target.Ast.span (Types.fresh_with (Types.Collection elem)) target.Ast.ann;
@@ -482,8 +474,6 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
         name
         (List.length declared)
         (List.length comptime_args);
-    (* Monomorphization consumed the value arguments; anything left is one that
-       could not be evaluated. *)
     let type_args =
       List.map
         (function
@@ -492,7 +482,6 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
             fail span "A comptime argument to '%s' is not known at compile time." name)
         comptime_args
     in
-    (* A parameter the body already pinned is no longer a variable to bind. *)
     let bound, pinned =
       List.fold_left2
         (fun (bound, pinned) (_, var) written ->
@@ -520,18 +509,12 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     let receiver = infer_expr env ctx receiver in
     let args = List.map (infer_expr env ctx) args in
     (try
-    (* A receiver that is still a variable is one the enclosing function is
-       generic in. Specialization gives it a type; all that can be checked here
-       is that the method exists somewhere, so a typo still fails early. *)
     let owner =
       match Types.infer_type_name receiver.Ast.ann with
       | Some owner -> owner
       | None ->
         (match Types.repr receiver.Ast.ann with
          | Types.IVar _ ->
-           (* One owner decides the receiver, which is what makes `xs.push(v)`
-              turn a literal into a list. Several and there is nothing to
-              choose, so it waits for specialization. *)
            let owners =
              Hashtbl.fold
                (fun (owner, declared) _ acc ->
@@ -557,7 +540,6 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       | Some scheme -> Types.instantiate scheme
       | None -> missing ()
     in
-    (* Unification would report this as a mismatch on a function nobody wrote. *)
     (match Types.repr fn with
      | Types.IFn (params, _, _) when List.length params <> List.length args + 1 ->
        fail
@@ -590,6 +572,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     node container (`Collection_lit items)
   | `New (name, fields) ->
     (match Hashtbl.find_opt ctx_types name with
+     | Some (Opaque _) -> fail span "'%s' cannot be constructed with 'new'." name
      | None | Some (Sum _) -> fail span "Unknown record type '%s'." name
      | Some (Product (vars, declared)) ->
        let args = List.map (fun _ -> Types.fresh ()) vars in
@@ -618,7 +601,8 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
        node (Types.INamed (name, args, declared)) (`New (name, fields)))
   | `New_variant (ty, variant, payload) ->
     (match Hashtbl.find_opt ctx_types ty with
-     | None | Some (Product _) -> fail span "Unknown sum type '%s'." ty
+     | None | Some (Product _) | Some (Opaque _) ->
+       fail span "Unknown sum type '%s'." ty
      | Some (Sum (vars, variants)) ->
        (match List.assoc_opt variant variants with
         | None -> fail span "Type '%s' has no variant '%s'." ty variant
@@ -676,7 +660,6 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       (`Tuple items)
   | `Tuple_get (target, index) ->
     let target = infer_expr env ctx target in
-    (* Arity is all the lookup needs, and the elements may still be variables. *)
     (match Types.repr target.Ast.ann with
      | Types.ITuple items ->
        (match List.nth_opt items index with
@@ -701,13 +684,13 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     let target = infer_expr env ctx target in
     let index = infer_expr env ctx index in
     unify_at index.Ast.span Types.IInt index.Ast.ann;
-    node (element_of target) (`Index (target, index))
+    node (element_of ctx.registry target) (`Index (target, index))
   | `Index_assign (target, index, v) ->
     let target = infer_expr env ctx target in
     let index = infer_expr env ctx index in
     let v = infer_expr env ctx v in
     unify_at index.Ast.span Types.IInt index.Ast.ann;
-    unify_at v.Ast.span (element_of target) v.Ast.ann;
+    unify_at v.Ast.span (element_of ctx.registry target) v.Ast.ann;
     node v.Ast.ann (`Index_assign (target, index, v))
 
 and declare_ops registry (body : Ast.desugared_stmt list) =
@@ -824,7 +807,7 @@ and declare_impls (body : Ast.desugared_stmt list) =
 
 and self_ty span type_name params =
   if String.equal type_name "Array"
-  then Types.IArray (Types.fresh ())
+  then Types.iopaque "Array" [ Types.fresh () ]
   else if params = []
   then infer_ty_of_annotation (Ast.at span (Ast.Ty_name type_name))
   else
@@ -847,8 +830,6 @@ and declare_types (body : Ast.desugared_stmt list) =
         then fail s.Ast.span "Type '%s' is already declared." name;
         let type_params = List.map (fun name -> name, Types.fresh ()) params in
         let vars = List.map snd type_params in
-        (* Registered before the body is converted, so a declaration may refer
-           to itself. *)
         Hashtbl.replace ctx_types name (Product (vars, Types.FEmpty));
         let declared =
           with_type_params type_params (fun () ->
@@ -1342,8 +1323,6 @@ and infer_handler env ctx assigned (h : Ast.desugared_stmt Ast.handler)
   in
   { Ast.handled = h.Ast.handled; arms = List.map arm h.Ast.arms }
 
-(* ---- resolve ---- *)
-
 let rec resolve_expr (e : checked_expr) : Ast.typed_expr =
   let it : Ast.typed_expr_kind =
     match e.Ast.it with
@@ -1380,8 +1359,6 @@ let rec resolve_stmt (s : checked_stmt) : Ast.typed_stmt =
   in
   { Ast.it; span = s.Ast.span; ann = Types.resolve s.Ast.ann }
 
-(* ---- entry point ---- *)
-
 (* A closed row here would close the caller's, since a call unifies the two.
    Quantifying gives every call site its own, as generalization does for a pure
    function written in Cronyx. *)
@@ -1413,8 +1390,6 @@ let globals () =
 
 let admits registry kind (t : Types.infer_ty) =
   match kind with
-  (* A candidate is one the registry knows how to build, and its element is
-     whatever it was written to hold. *)
   | Types.Collection elem ->
     (match Types.container_element t with
      | Some (name, held) when Registry.container registry name <> None ->
@@ -1431,11 +1406,12 @@ let admits registry kind (t : Types.infer_ty) =
         | Types.Addable -> has Ast.Add
         | _ -> List.exists has [ Ast.Sub; Ast.Mul; Ast.Div; Ast.Less; Ast.Greater ]))
 
-(* The same shape a declared method gets: registered so a call can find it, and
-   bound under the derived name so [Resolve] emits an ordinary call. *)
-(* What a literal becomes when it is a list: the array is built first and copied
-   out of, which is what [Collection Literals] calls the two-allocation cost. *)
 let list_of = "List__of"
+
+let declare_builtin_types () =
+  List.iter
+    (fun name -> Hashtbl.replace ctx_types name (Opaque [ Types.fresh () ]))
+    [ "Array"; "List" ]
 
 let declare_builtin_methods env =
   let method_ owner name params ret =
@@ -1443,19 +1419,19 @@ let declare_builtin_methods env =
     bind env (Ast.method_name owner name) (pure params ret)
   in
   let elem = Types.fresh () in
-  method_ "Array" "len" [ Types.IArray elem ] Types.IInt;
+  method_ "Array" "len" [ Types.iopaque "Array" [ elem ] ] Types.IInt;
   method_ "string" "len" [ Types.IStr ] Types.IInt;
   method_ "string" "trim" [ Types.IStr ] Types.IStr;
   method_ "string" "contains" [ Types.IStr; Types.IStr ] Types.IBool;
-  method_ "string" "split" [ Types.IStr; Types.IStr ] (Types.IArray Types.IStr);
-  method_ "string" "chars" [ Types.IStr ] (Types.IArray Types.IStr);
+  method_ "string" "split" [ Types.IStr; Types.IStr ] (Types.iopaque "Array" [ Types.IStr ]);
+  method_ "string" "chars" [ Types.IStr ] (Types.iopaque "Array" [ Types.IStr ]);
   let item = Types.fresh () in
-  method_ "List" "len" [ Types.IList item ] Types.IInt;
-  method_ "List" "push" [ Types.IList item; item ] Types.IUnit;
-  method_ "List" "pop" [ Types.IList item ] item;
-  method_ "List" "contains" [ Types.IList item; item ] Types.IBool;
-  method_ "Array" "contains" [ Types.IArray item; item ] Types.IBool;
-  bind env list_of (pure [ Types.IArray item ] (Types.IList item))
+  method_ "List" "len" [ Types.iopaque "List" [ item ] ] Types.IInt;
+  method_ "List" "push" [ Types.iopaque "List" [ item ]; item ] Types.IUnit;
+  method_ "List" "pop" [ Types.iopaque "List" [ item ] ] item;
+  method_ "List" "contains" [ Types.iopaque "List" [ item ]; item ] Types.IBool;
+  method_ "Array" "contains" [ Types.iopaque "Array" [ item ]; item ] Types.IBool;
+  bind env list_of (pure [ Types.iopaque "Array" [ item ] ] (Types.iopaque "List" [ item ]))
 
 let check ~registry (program : Ast.desugared_stmt list)
   : (Ast.typed_stmt list, error list) result
@@ -1464,6 +1440,7 @@ let check ~registry (program : Ast.desugared_stmt list)
   Types.extra_admits := admits registry;
   reset_effects ();
   let env = globals () in
+  declare_builtin_types ();
   declare_builtin_methods env;
   let ctx =
     { registry

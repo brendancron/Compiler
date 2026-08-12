@@ -1,11 +1,6 @@
-(* [infer_ty] may hold unresolved variables; [ty] cannot, and [resolve] is the
-   only way across. *)
 
-(* A multiset, following Koka: two nested handlers for one effect are two
-   occurrences, and each `handle` peels one. *)
 type row = string list
 
-(* Sorted, so two records with the same fields are the same type. *)
 type fields = (string * ty) list
 
 and ty =
@@ -14,9 +9,6 @@ and ty =
   | Str
   | Bool
   | Unit
-  | Array of ty
-  (* Grows; [Array] does not. Otherwise the same shape. *)
-  | List of ty
   | Tuple of ty list
   | Record of fields
   | Named of string * ty list * fields
@@ -31,8 +23,6 @@ type infer_ty =
   | IStr
   | IBool
   | IUnit
-  | IArray of infer_ty
-  | IList of infer_ty
   | ITuple of infer_ty list
   | IRecord of infer_fields
   | INamed of string * infer_ty list * infer_fields
@@ -40,13 +30,10 @@ type infer_ty =
   | IFn of infer_ty list * infer_ty * infer_row
   | IVar of tv ref
 
-(* Ordered by strength: [Any] admits everything, [Numeric] the least. *)
 and kind =
   | Any
   | Addable (* int, float, str — the operand type of `+` *)
   | Numeric (* int, float *)
-  (* Any container over this element. What a collection literal carries until
-     something says which container it is. *)
   | Collection of infer_ty
 
 and tv =
@@ -73,7 +60,6 @@ and fv =
   | FUnbound of int
   | FLink of infer_fields
 
-(* Copied by [instantiate]; every other variable in [body] stays shared. *)
 type scheme =
   { quantified : int list
   ; quantified_rows : int list
@@ -133,6 +119,11 @@ let rec repr_fields (f : infer_fields) : infer_fields =
     target
   | f -> f
 
+let default_container = "Array"
+
+let opaque name args = Named (name, args, [])
+let iopaque name args = INamed (name, args, FEmpty)
+
 let string_of_kind = function
   | Any -> "any"
   | Collection _ -> "a collection"
@@ -170,8 +161,6 @@ and string_of_infer_ty (t : infer_ty) : string =
   | IStr -> "string"
   | IBool -> "bool"
   | IUnit -> "unit"
-  | IArray elem -> Printf.sprintf "Array<%s>" (string_of_infer_ty elem)
-  | IList elem -> Printf.sprintf "List<%s>" (string_of_infer_ty elem)
   | ITuple items ->
     Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_infer_ty items))
   | INamed (name, args, _) | ISum (name, args) ->
@@ -206,8 +195,6 @@ and string_of_ty (t : ty) : string =
   | Str -> "string"
   | Bool -> "bool"
   | Unit -> "unit"
-  | Array elem -> Printf.sprintf "Array<%s>" (string_of_ty elem)
-  | List elem -> Printf.sprintf "List<%s>" (string_of_ty elem)
   | Tuple items ->
     Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_ty items))
   | Named (name, args, _) | Sum (name, args) -> name ^ string_of_args args
@@ -232,8 +219,6 @@ let type_name (t : ty) : string option =
   | Str -> Some "string"
   | Bool -> Some "bool"
   | Unit -> Some "unit"
-  | Array _ -> Some "Array"
-  | List _ -> Some "List"
   | Named (name, _, _) | Sum (name, _) -> Some name
   | Tuple _ | Record _ | Fn _ | Generic _ -> None
 
@@ -243,8 +228,6 @@ let rec subst_generic mapping (t : ty) : ty =
     (match List.assoc_opt id mapping with
      | Some replacement -> replacement
      | None -> t)
-  | Array elem -> Array (subst_generic mapping elem)
-  | List elem -> List (subst_generic mapping elem)
   | Tuple items -> Tuple (List.map (subst_generic mapping) items)
   | Record fields -> Record (List.map (fun (l, t) -> l, subst_generic mapping t) fields)
   | Named (name, args, fields) ->
@@ -257,11 +240,9 @@ let rec subst_generic mapping (t : ty) : ty =
     Fn (List.map (subst_generic mapping) params, subst_generic mapping ret, row)
   | scalar -> scalar
 
-(* What a concrete type says each [Generic] in a general one stands for. *)
 let rec match_generic (general : ty) (concrete : ty) acc =
   match general, concrete with
   | Generic id, _ -> if List.mem_assoc id acc then acc else (id, concrete) :: acc
-  | Array a, Array b | List a, List b -> match_generic a b acc
   | Tuple a, Tuple b when List.length a = List.length b ->
     List.fold_left2 (fun acc a b -> match_generic a b acc) acc a b
   | Record a, Record b | Named (_, _, a), Named (_, _, b) ->
@@ -281,7 +262,6 @@ let rec match_generic (general : ty) (concrete : ty) acc =
 let rec has_generic (t : ty) =
   match t with
   | Generic _ -> true
-  | Array elem | List elem -> has_generic elem
   | Tuple items -> List.exists has_generic items
   | Record fields | Named (_, _, fields) ->
     List.exists (fun (_, t) -> has_generic t) fields
@@ -289,12 +269,8 @@ let rec has_generic (t : ty) =
   | Fn (params, ret, _) -> List.exists has_generic params || has_generic ret
   | _ -> false
 
-(* A container and what it holds. A declared one holds its sole type argument,
-   which is how a collection written in Cronyx can be a candidate for `[…]`. *)
 let container_element (t : infer_ty) : (string * infer_ty) option =
   match repr t with
-  | IArray elem -> Some ("Array", elem)
-  | IList elem -> Some ("List", elem)
   | INamed (name, [ elem ], _) -> Some (name, elem)
   | _ -> None
 
@@ -305,8 +281,6 @@ let infer_type_name (t : infer_ty) : string option =
   | IStr -> Some "string"
   | IBool -> Some "bool"
   | IUnit -> Some "unit"
-  | IArray _ -> Some "Array"
-  | IList _ -> Some "List"
   | INamed (name, _, _) | ISum (name, _) -> Some name
   | ITuple _ | IRecord _ | IFn _ | IVar _ -> None
 
@@ -319,8 +293,6 @@ let rec row_occurs id (r : infer_row) =
   | RVar { contents = RLink _ } -> assert false
   | RCons (_, rest) -> row_occurs id rest
 
-(* What remains of [r] after removing one [label]. An open tail grows a link
-   rather than failing, which is how a row comes to admit a new effect. *)
 let rec rewrite_row label (r : infer_row) : infer_row =
   match repr_row r with
   | RCons (l, rest) when String.equal l label -> rest
@@ -373,15 +345,11 @@ let rec rewrite_fields label (f : infer_fields) : infer_ty * infer_fields =
 (* ---- unification ---- *)
 
 (* A variable used by both `+` and `-` must end up Numeric, not Addable. *)
-(* Consulted when the lattice rejects a type: a declared operator makes a type
-   admissible that no builtin kind covers. Set by the checker, which is the only
-   thing that knows what has been declared. *)
 let extra_admits : (kind -> infer_ty -> bool) ref = ref (fun _ _ -> false)
 
 let rec occurs id (t : infer_ty) =
   match repr t with
   | IVar { contents = Unbound (id', _) } -> id = id'
-  | IArray elem | IList elem -> occurs id elem
   | ITuple items -> List.exists (occurs id) items
   | IRecord f | INamed (_, _, f) ->
     let rec walk f =
@@ -427,8 +395,6 @@ and kind_admits kind (t : infer_ty) =
   | Any, _ -> true
   | Numeric, (IInt | IFloat) -> true
   | Addable, (IInt | IFloat | IStr) -> true
-  (* Which containers exist is the registry's business, so the answer comes back
-     through the hook rather than being written in here. *)
   | (Numeric | Addable | Collection _), _ -> !extra_admits kind t
 
 and unify (a : infer_ty) (b : infer_ty) : unit =
@@ -451,9 +417,7 @@ and unify (a : infer_ty) (b : infer_ty) : unit =
     then error "Expected %s, got %s." (string_of_kind kind) (string_of_infer_ty t);
     r := Link t
   | IInt, IInt | IFloat, IFloat | IStr, IStr | IBool, IBool | IUnit, IUnit -> ()
-  | IArray a, IArray b | IList a, IList b -> unify a b
   | IRecord a, IRecord b -> unify_fields a b
-  (* The fields follow from the arguments, so only those are unified. *)
   | INamed (a, xs, _), INamed (b, ys, _)
     when String.equal a b && List.length xs = List.length ys -> List.iter2 unify xs ys
   | ISum (a, xs), ISum (b, ys)
@@ -493,7 +457,6 @@ let free_vars (t : infer_ty) : (int * kind) list =
     match repr t with
     | IVar { contents = Unbound (id, kind) } ->
       if not (List.mem_assoc id !acc) then acc := (id, kind) :: !acc
-    | IArray elem | IList elem -> walk elem
     | ITuple items -> List.iter walk items
     | IRecord f -> walk_fields walk f
     | INamed (_, args, f) ->
@@ -519,7 +482,6 @@ let free_row_vars (t : infer_ty) : int list =
   in
   let rec walk t =
     match repr t with
-    | IArray elem -> walk elem
     | ITuple items -> List.iter walk items
     | IRecord f -> walk_fields walk f
     | INamed (_, args, f) ->
@@ -549,7 +511,6 @@ let free_field_vars (t : infer_ty) : int list =
       walk_fields rest
   and walk t =
     match repr t with
-    | IArray elem -> walk elem
     | ITuple items -> List.iter walk items
     | IRecord f -> walk_fields f
     | INamed (_, args, f) ->
@@ -564,7 +525,6 @@ let free_field_vars (t : infer_ty) : int list =
   walk t;
   !acc
 
-(* Anything free in the enclosing scope stays shared. *)
 let generalize ~env_vars ~env_rows ~env_fields body =
   { quantified =
       free_vars body |> List.map fst |> List.filter (fun id -> not (List.mem id env_vars))
@@ -574,7 +534,6 @@ let generalize ~env_vars ~env_rows ~env_fields body =
   ; body
   }
 
-(* [bound] pins variables in advance, which is what `f<int>(x)` does. *)
 let instantiate ?(bound = []) (s : scheme) : infer_ty =
   if s.quantified = [] && s.quantified_rows = [] && s.quantified_fields = []
   then s.body
@@ -618,8 +577,6 @@ let instantiate ?(bound = []) (s : scheme) : infer_ty =
             Hashtbl.add types id copy;
             copy)
         else original
-      | IArray elem -> IArray (walk elem)
-      | IList elem -> IList (walk elem)
       | ITuple items -> ITuple (List.map walk items)
       | ISum (name, args) -> ISum (name, List.map walk args)
       | (IRecord _ | INamed _) as r ->
@@ -668,8 +625,6 @@ let rec substitute mapping (t : infer_ty) : infer_ty =
     (match List.assoc_opt id mapping with
      | Some replacement -> replacement
      | None -> original)
-  | IArray elem -> IArray (substitute mapping elem)
-  | IList elem -> IList (substitute mapping elem)
   | ITuple items -> ITuple (List.map (substitute mapping) items)
   | IRecord f -> IRecord (substitute_fields mapping f)
   | INamed (name, args, f) ->
@@ -700,12 +655,6 @@ and concrete (t : infer_ty) : ty option =
   | IStr -> Some Str
   | IBool -> Some Bool
   | IUnit -> Some Unit
-  | IList elem ->
-    let* elem = concrete elem in
-    Some (List elem)
-  | IArray elem ->
-    let* elem = concrete elem in
-    Some (Array elem)
   | ISum (name, args) ->
     let* args = concrete_all args in
     Some (Sum (name, args))
@@ -765,8 +714,6 @@ let rec of_ty (t : ty) : infer_ty =
   | Str -> IStr
   | Bool -> IBool
   | Unit -> IUnit
-  | Array elem -> IArray (of_ty elem)
-  | List elem -> IList (of_ty elem)
   | Tuple items -> ITuple (List.map of_ty items)
   | Record fields ->
     IRecord
@@ -786,7 +733,6 @@ let rec of_ty (t : ty) : infer_ty =
 
 (* ---- resolve ---- *)
 
-(* An unconstrained row closes, so a pure function does not print its row. *)
 let resolve_row (r : infer_row) : row =
   let labels, _ = labels_of_infer_row r in
   List.sort String.compare labels
@@ -799,8 +745,6 @@ let rec resolve (t : infer_ty) : ty =
   | IStr -> Str
   | IBool -> Bool
   | IUnit -> Unit
-  | IArray elem -> Array (resolve elem)
-  | IList elem -> List (resolve elem)
   | ITuple items -> Tuple (List.map resolve items)
   | ISum (name, args) -> Sum (name, List.map resolve args)
   | IRecord f | INamed (_, _, f) ->
@@ -820,8 +764,6 @@ let rec resolve (t : infer_ty) : ty =
     else (
       match kind with
       | Numeric | Addable -> Int
-      (* Array is the primitive the others are built from, so it is what a
-         literal nothing narrowed becomes. *)
-      | Collection elem -> Array (resolve elem)
+      | Collection elem -> Named (default_container, [ resolve elem ], [])
       | Any -> Generic id)
   | IVar { contents = Link _ } -> assert false (* repr collapsed these *)

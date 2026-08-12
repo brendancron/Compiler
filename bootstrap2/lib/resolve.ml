@@ -63,13 +63,6 @@ exception Failed of error
 let fail span fmt =
   Printf.ksprintf (fun message -> raise (Failed { span; message })) fmt
 
-(* What the array handed to a container's constructor holds. *)
-let element_of_container (t : Types.ty) =
-  match t with
-  | Types.Array elem | Types.List elem -> elem
-  | Types.Named (_, [ elem ], _) -> elem
-  | other -> other
-
 let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
   let span = e.Ast.span
   and ann = e.Ast.ann in
@@ -117,7 +110,12 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
          let elements : Ast.resolved_expr =
            { Ast.it = `Array_lit items
            ; span
-           ; ann = Types.Array (element_of_container ann)
+           ; ann =
+               Types.opaque
+                 Types.default_container
+                 (match ann with
+                  | Types.Named (_, args, _) -> args
+                  | other -> [ other ])
            }
          in
          `Call (fn_ref span name [ elements ] ann, [ elements ])

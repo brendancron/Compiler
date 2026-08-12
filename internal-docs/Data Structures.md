@@ -2,6 +2,8 @@
 
 The datatypes the language has, and what each looks like in use.
 
+Every one of these is a declared type. `Array` and `List` are supplied by the compiler rather than written in Cronyx, but they are declared the same way anything else is — a name, its parameters, and no fields — so nothing downstream can tell them from a type a program declares. What makes a type a container is an entry saying how to build one from a literal and whether it can be indexed, not a case in the compiler.
+
 ## Array
 
 `Array<T>` — length fixed at creation. Elements can be reassigned; the array cannot grow.
