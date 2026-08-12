@@ -23,6 +23,7 @@ let rec expr (e : expr) : desugared_expr =
     | #indexing as i -> (map_indexing expr i :> desugared_expr_kind)
     | #tuple as t -> (map_tuple expr t :> desugared_expr_kind)
     | #record as r -> (map_record expr r :> desugared_expr_kind)
+    | #nominal as n -> (map_nominal expr n :> desugared_expr_kind)
     | #collection as c -> (map_collection expr c :> desugared_expr_kind)
     | #reflect as r -> (map_reflect expr r :> desugared_expr_kind)
   in
@@ -60,6 +61,7 @@ let rec stmt (s : stmt) : desugared_stmt =
          | None -> [ loop ])
     | #stmts as s -> (map_stmts expr stmt s :> desugared_stmt_kind)
     | #effects as e -> (map_effects expr stmt (clause sp) e :> desugared_stmt_kind)
+    | #type_defs as t -> t
     (* Declarations vanish; only the inlined copies survive. *)
     | `Handler_decl _ -> `Block []
   in

@@ -313,6 +313,25 @@ and finish_call s callee : Ast.expr =
   ignore (consume s Token.Right_paren "Expected ')' after arguments.");
   Ast.at callee.Ast.span (`Call (callee, args))
 
+(* Assumes the '{' has been consumed; consumes the closing '}'. *)
+and record_fields s : (string * Ast.expr) list =
+  let fields =
+    if check s Token.Right_brace
+    then []
+    else (
+      let rec loop acc =
+        let label = consume_identifier s "Expected a field name." in
+        ignore (consume s Token.Colon "Expected ':' after field name.");
+        let value = expression s in
+        match matches s [ Token.Comma ] with
+        | Some _ -> loop ((label, value) :: acc)
+        | None -> List.rev ((label, value) :: acc)
+      in
+      loop [])
+  in
+  ignore (consume s Token.Right_brace "Expected '}' after fields.");
+  fields
+
 and primary s : Ast.expr =
   let tok = peek s in
   let sp = Ast.span_of_token tok in
@@ -341,24 +360,14 @@ and primary s : Ast.expr =
     let e = expression s in
     ignore (consume s Token.Right_paren "Expected ')' after typeof operand.");
     Ast.at sp (`Typeof e)
+  | Token.New ->
+    ignore (advance s);
+    let name = consume_identifier s "Expected a type name after 'new'." in
+    ignore (consume s Token.Left_brace "Expected '{' after type name.");
+    Ast.at sp (`New (name, record_fields s))
   | Token.Left_brace ->
     ignore (advance s);
-    let fields =
-      if check s Token.Right_brace
-      then []
-      else (
-        let rec loop acc =
-          let label = consume_identifier s "Expected a field name." in
-          ignore (consume s Token.Colon "Expected ':' after field name.");
-          let value = expression s in
-          match matches s [ Token.Comma ] with
-          | Some _ -> loop ((label, value) :: acc)
-          | None -> List.rev ((label, value) :: acc)
-        in
-        loop [])
-    in
-    ignore (consume s Token.Right_brace "Expected '}' after record fields.");
-    Ast.at sp (`Record_lit fields)
+    Ast.at sp (`Record_lit (record_fields s))
   | Token.Left_bracket ->
     ignore (advance s);
     let items =
@@ -414,6 +423,9 @@ let rec declaration s : Ast.stmt option =
     | Token.Handler ->
       ignore (advance s);
       Some (handler_decl s sp)
+    | Token.Type ->
+      ignore (advance s);
+      Some (type_decl s sp)
     | _ -> Some (statement s)
   with
   | Parse_error ->
@@ -580,6 +592,23 @@ and effect_decl s sp : Ast.stmt =
   let ops = loop [] in
   ignore (consume s Token.Right_brace "Expected '}' after effect operations.");
   Ast.at sp (`Effect_decl (name, ops))
+
+and type_decl s sp : Ast.stmt =
+  let name = consume_identifier s "Expected a type name." in
+  ignore (consume s Token.Left_brace "Expected '{' after type name.");
+  let rec loop acc =
+    if check s Token.Right_brace || is_at_end s
+    then List.rev acc
+    else (
+      let label = consume_identifier s "Expected a field name." in
+      ignore (consume s Token.Colon "Expected ':' after field name. Sum types are not supported yet.");
+      let ty = type_expr s in
+      ignore (matches s [ Token.Comma ]);
+      loop ((label, ty) :: acc))
+  in
+  let fields = loop [] in
+  ignore (consume s Token.Right_brace "Expected '}' after type fields.");
+  Ast.at sp (`Type_decl (name, fields))
 
 and handler_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected handler name." in

@@ -22,6 +22,7 @@ let rec stmt (s : Ast.resolved_stmt) : Ast.reflected_stmt =
     match s.Ast.it with
     | #Ast.stmts as st -> (Ast.map_stmts expr stmt st :> Ast.reflected_stmt_kind)
     | #Ast.effects as e -> (Ast.map_effects expr stmt (Ast.map_handler stmt) e :> Ast.reflected_stmt_kind)
+    | #Ast.type_defs as t -> t
   in
   { Ast.it; span = s.Ast.span; ann = s.Ast.ann }
 

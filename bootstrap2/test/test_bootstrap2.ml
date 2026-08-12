@@ -52,6 +52,7 @@ let cases =
   ; "tests/core/tuples/typed"
   ; "tests/core/records/structural"
   ; "tests/reflection/typeof_record"
+  ; "tests/core/records/nominal"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
@@ -77,6 +78,8 @@ let error_cases =
   ; "tests/core/tuples/errors/unknown_arity"
   ; "tests/core/records/errors/no_such_field"
   ; "tests/core/records/errors/field_mismatch"
+  ; "tests/core/records/errors/missing_field"
+  ; "tests/core/records/errors/nominal_mismatch"
   ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)

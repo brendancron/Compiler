@@ -122,6 +122,14 @@ type 'e record =
   | `Field_assign of 'e * string * 'e
   ]
 
+(* Lowered by [Resolve] into a plain record literal: nominal identity is a
+   compile-time notion, and the value is a record either way. *)
+type 'e nominal = [ `New of string * (string * 'e) list ]
+
+(* A declaration binds a name to a set of fields. It has no runtime meaning, so
+   the CPS pass erases it alongside effect declarations. *)
+type type_defs = [ `Type_decl of string * (string * type_expr) list ]
+
 (* What the container is comes from context, so this cannot be lowered until
    the checker has run. [Resolve] turns it into an [`Array_lit] or a call. *)
 type 'e collection = [ `Collection_lit of 'e list ]
@@ -173,6 +181,7 @@ and expr_kind =
   | expr indexing
   | expr tuple
   | expr record
+  | expr nominal
   | expr collection
   | expr reflect
   ]
@@ -184,6 +193,7 @@ and stmt_kind =
   | (expr, stmt) loops
   | (expr, stmt, stmt handler_clause) effects
   | stmt handler_defs
+  | type_defs
   ]
 
 type program = stmt list
@@ -201,6 +211,7 @@ and desugared_expr_kind =
   | desugared_expr indexing
   | desugared_expr tuple
   | desugared_expr record
+  | desugared_expr nominal
   | desugared_expr collection
   | desugared_expr reflect
   ]
@@ -210,6 +221,7 @@ type desugared_stmt = (desugared_stmt_kind, unit) node
 and desugared_stmt_kind =
   [ (desugared_expr, desugared_stmt) stmts
   | (desugared_expr, desugared_stmt, desugared_stmt handler) effects
+  | type_defs
   ]
 
 (* Same constructors, every node carrying a resolved type. *)
@@ -224,6 +236,7 @@ and typed_expr_kind =
   | typed_expr indexing
   | typed_expr tuple
   | typed_expr record
+  | typed_expr nominal
   | typed_expr collection
   | typed_expr reflect
   ]
@@ -233,6 +246,7 @@ type typed_stmt = (typed_stmt_kind, Types.ty) node
 and typed_stmt_kind =
   [ (typed_expr, typed_stmt) stmts
   | (typed_expr, typed_stmt, typed_stmt handler) effects
+  | type_defs
   ]
 
 (* No [`Compound]: every operator is now a primitive or a call. *)
@@ -255,6 +269,7 @@ type resolved_stmt = (resolved_stmt_kind, Types.ty) node
 and resolved_stmt_kind =
   [ (resolved_expr, resolved_stmt) stmts
   | (resolved_expr, resolved_stmt, resolved_stmt handler) effects
+  | type_defs
   ]
 
 (* No [`Typeof]: the interpreter cannot be handed one. *)
@@ -276,6 +291,7 @@ type reflected_stmt = (reflected_stmt_kind, Types.ty) node
 and reflected_stmt_kind =
   [ (reflected_expr, reflected_stmt) stmts
   | (reflected_expr, reflected_stmt, reflected_stmt handler) effects
+  | type_defs
   ]
 
 (* No effect constructs: the CPS pass has turned them into closures and calls. *)
@@ -330,6 +346,10 @@ let map_record (f : 'a -> 'b) (e : 'a record) : 'b record =
   | `Record_lit fields -> `Record_lit (List.map (fun (l, v) -> l, f v) fields)
   | `Field (r, label) -> `Field (f r, label)
   | `Field_assign (r, label, v) -> `Field_assign (f r, label, f v)
+
+let map_nominal (f : 'a -> 'b) (e : 'a nominal) : 'b nominal =
+  match e with
+  | `New (name, fields) -> `New (name, List.map (fun (l, v) -> l, f v) fields)
 
 let map_collection (f : 'a -> 'b) (e : 'a collection) : 'b collection =
   match e with

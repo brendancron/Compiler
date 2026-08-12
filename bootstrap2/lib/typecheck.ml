@@ -22,6 +22,7 @@ and checked_expr_kind =
   | checked_expr Ast.indexing
   | checked_expr Ast.tuple
   | checked_expr Ast.record
+  | checked_expr Ast.nominal
   | checked_expr Ast.collection
   | checked_expr Ast.reflect
   ]
@@ -31,6 +32,7 @@ type checked_stmt = (checked_stmt_kind, Types.infer_ty) Ast.node
 and checked_stmt_kind =
   [ (checked_expr, checked_stmt) Ast.stmts
   | (checked_expr, checked_stmt, checked_stmt Ast.handler) Ast.effects
+  | Ast.type_defs
   ]
 
 type env =
@@ -59,9 +61,13 @@ type effect_info =
 
 let ctx_effects = { ops = Hashtbl.create 16; declared = Hashtbl.create 8 }
 
+(* Declared nominal types, by name. *)
+let ctx_types : (string, Types.infer_fields) Hashtbl.t = Hashtbl.create 16
+
 let reset_effects () =
   Hashtbl.reset ctx_effects.ops;
-  Hashtbl.reset ctx_effects.declared
+  Hashtbl.reset ctx_effects.declared;
+  Hashtbl.reset ctx_types
 
 let new_env parent = { bindings = Hashtbl.create 16; parent }
 let bind env name scheme = Hashtbl.replace env.bindings name scheme
@@ -157,7 +163,10 @@ let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
       "Unknown type '%s' with %d argument(s)."
       name
       (List.length args)
-  | Ast.Ty_name other -> fail t.Ast.span "Unknown type '%s'." other
+  | Ast.Ty_name other ->
+    (match Hashtbl.find_opt ctx_types other with
+     | Some fields -> Types.INamed (other, fields)
+     | None -> fail t.Ast.span "Unknown type '%s'." other)
   | Ast.Ty_fn (params, ret, row) ->
     Types.IFn
       ( List.map infer_ty_of_annotation params
@@ -201,6 +210,8 @@ let rec assigned_in_expr (e : Ast.desugared_expr) acc =
   | `Record_lit fields ->
     List.fold_left (fun acc (_, v) -> assigned_in_expr v acc) acc fields
   | `Field_assign (r, _, v) -> assigned_in_expr v (assigned_in_expr r acc)
+  | `New (_, fields) ->
+    List.fold_left (fun acc (_, v) -> assigned_in_expr v acc) acc fields
 
 let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   let opt f o acc =
@@ -217,7 +228,7 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
     opt assigned_in_stmt else_branch (assigned_in_stmt then_branch (assigned_in_expr cond acc))
   | `While (cond, body) -> assigned_in_stmt body (assigned_in_expr cond acc)
   | `Return e -> opt assigned_in_expr e acc
-  | `Effect_decl _ -> acc
+  | `Effect_decl _ | `Type_decl _ -> acc
   | `Resume e -> opt assigned_in_expr e acc
   | `Run (body, handlers) ->
     let acc = List.fold_left (fun acc st -> assigned_in_stmt st acc) acc body in
@@ -239,6 +250,29 @@ let assigned_names body =
 (* No HM type describes "any number of arguments of any type", so calls to these
    are checked structurally and a bare reference gets an unconstrained type. *)
 let variadic_builtins = [ "print" ]
+
+(* A nominal type carries its fields, so the label is looked up rather than
+   unified into place. Anything else unifies against an open row, which is what
+   makes a field read work on any record that has one. *)
+let field_of (target : checked_expr) label =
+  match Types.repr target.Ast.ann with
+  | Types.INamed (name, fields) ->
+    let rec find f =
+      match Types.repr_fields f with
+      | Types.FCons (l, ty, _) when String.equal l label -> Some ty
+      | Types.FCons (_, _, rest) -> find rest
+      | _ -> None
+    in
+    (match find fields with
+     | Some ty -> ty
+     | None -> fail target.Ast.span "Type '%s' has no field '%s'." name label)
+  | _ ->
+    let ty = Types.fresh () in
+    unify_at
+      target.Ast.span
+      (Types.IRecord (Types.FCons (label, ty, Types.fresh_fields ())))
+      target.Ast.ann;
+    ty
 
 (* The element type of something being indexed, with a message that names the
    type rather than showing a bare variable. *)
@@ -365,6 +399,32 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       (fun (i : checked_expr) -> unify_at i.Ast.span elem i.Ast.ann)
       items;
     node (Types.IArray elem) (`Collection_lit items)
+  | `New (name, fields) ->
+    (match Hashtbl.find_opt ctx_types name with
+     | None -> fail span "Unknown type '%s'." name
+     | Some declared ->
+       let rec labels f =
+         match Types.repr_fields f with
+         | Types.FEmpty | Types.FVar _ -> []
+         | Types.FCons (l, ty, rest) -> (l, ty) :: labels rest
+       in
+       let expected = labels declared in
+       let fields = List.map (fun (l, v) -> l, infer_expr env ctx v) fields in
+       List.iter
+         (fun (l, _) ->
+           if not (List.mem_assoc l expected)
+           then fail span "Type '%s' has no field '%s'." name l)
+         fields;
+       List.iter
+         (fun (l, _) ->
+           if not (List.mem_assoc l fields)
+           then fail span "Field '%s' is missing." l)
+         expected;
+       List.iter
+         (fun (l, (v : checked_expr)) ->
+           unify_at v.Ast.span (List.assoc l expected) v.Ast.ann)
+         fields;
+       node (Types.INamed (name, declared)) (`New (name, fields)))
   | `Record_lit fields ->
     let fields = List.map (fun (l, v) -> l, infer_expr env ctx v) fields in
     node
@@ -378,21 +438,11 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
      function read a field from any record that has one. *)
   | `Field (target, label) ->
     let target = infer_expr env ctx target in
-    let ty = Types.fresh () in
-    unify_at
-      target.Ast.span
-      (Types.IRecord (Types.FCons (label, ty, Types.fresh_fields ())))
-      target.Ast.ann;
-    node ty (`Field (target, label))
+    node (field_of target label) (`Field (target, label))
   | `Field_assign (target, label, v) ->
     let target = infer_expr env ctx target in
     let v = infer_expr env ctx v in
-    let ty = Types.fresh () in
-    unify_at
-      target.Ast.span
-      (Types.IRecord (Types.FCons (label, ty, Types.fresh_fields ())))
-      target.Ast.ann;
-    unify_at v.Ast.span ty v.Ast.ann;
+    unify_at v.Ast.span (field_of target label) v.Ast.ann;
     node v.Ast.ann (`Field_assign (target, label, v))
   | `Tuple items ->
     let items = List.map (infer_expr env ctx) items in
@@ -435,6 +485,25 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     unify_at v.Ast.span (element_of target) v.Ast.ann;
     node v.Ast.ann (`Index_assign (target, index, v))
 
+(* Type declarations are registered before anything is hoisted, because a
+   function's signature may name one and hoisting reads signatures. *)
+and declare_types (body : Ast.desugared_stmt list) =
+  List.iter
+    (fun (s : Ast.desugared_stmt) ->
+      match s.Ast.it with
+      | `Type_decl (name, fields) ->
+        if Hashtbl.mem ctx_types name
+        then fail s.Ast.span "Type '%s' is already declared." name;
+        Hashtbl.replace
+          ctx_types
+          name
+          (List.fold_right
+             (fun (l, t) rest -> Types.FCons (l, infer_ty_of_annotation t, rest))
+             fields
+             Types.FEmpty)
+      | _ -> ())
+    body
+
 (* Binding every function before any body is checked is what lets them call each
    other in any order. The binding stays monomorphic until its own declaration
    is reached. *)
@@ -457,6 +526,7 @@ and hoist env (body : Ast.desugared_stmt list) =
     body
 
 and infer_block env ctx (body : Ast.desugared_stmt list) : checked_stmt list =
+  declare_types body;
   hoist env body;
   let assigned = assigned_names body in
   List.map (fun s -> infer_stmt env ctx assigned s) body
@@ -559,6 +629,8 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
          ~env_fields:(env_free_field_vars env)
          fn_type);
     Ast.annotated span fn_type (`Fn (name, params, signature, body))
+  (* Registered by [declare_types] before anything was hoisted. *)
+  | `Type_decl (name, fields) -> node (`Type_decl (name, fields))
   | `Effect_decl (name, ops) ->
     Hashtbl.replace ctx_effects.declared name ops;
     List.iter
@@ -725,6 +797,7 @@ let rec resolve_expr (e : checked_expr) : Ast.typed_expr =
     | #Ast.indexing as i -> (Ast.map_indexing resolve_expr i :> Ast.typed_expr_kind)
     | #Ast.tuple as t -> (Ast.map_tuple resolve_expr t :> Ast.typed_expr_kind)
     | #Ast.record as r -> (Ast.map_record resolve_expr r :> Ast.typed_expr_kind)
+    | #Ast.nominal as n -> (Ast.map_nominal resolve_expr n :> Ast.typed_expr_kind)
     | #Ast.collection as c ->
       (Ast.map_collection resolve_expr c :> Ast.typed_expr_kind)
     | #Ast.reflect as r -> (Ast.map_reflect resolve_expr r :> Ast.typed_expr_kind)
@@ -738,6 +811,7 @@ let rec resolve_stmt (s : checked_stmt) : Ast.typed_stmt =
     | #Ast.effects as e ->
       (Ast.map_effects resolve_expr resolve_stmt (Ast.map_handler resolve_stmt) e
        :> Ast.typed_stmt_kind)
+    | #Ast.type_defs as t -> t
   in
   { Ast.it; span = s.Ast.span; ann = Types.resolve s.Ast.ann }
 
@@ -782,9 +856,15 @@ let check ~registry (program : Ast.desugared_stmt list)
     ; resume_type = None
     }
   in
-  hoist env program;
-  let assigned = assigned_names program in
   let errors = ref [] in
+  (* A failure here escapes the per-statement handler below, so it is caught
+     with the rest. *)
+  (try
+     declare_types program;
+     hoist env program
+   with
+   | Located e -> errors := [ e ]);
+  let assigned = assigned_names program in
   let checked =
     List.filter_map
       (fun s ->

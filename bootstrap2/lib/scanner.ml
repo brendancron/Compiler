@@ -69,11 +69,13 @@ let keyword = function
   | "if" -> Some Token.If
   | "handle" -> Some Token.Handle
   | "handler" -> Some Token.Handler
+  | "new" -> Some Token.New
   | "or" -> Some Token.Or
   | "resume" -> Some Token.Resume
   | "return" -> Some Token.Return
   | "run" -> Some Token.Run
   | "true" -> Some Token.True
+  | "type" -> Some Token.Type
   | "typeof" -> Some Token.Typeof
   | "var" -> Some Token.Var
   | "while" -> Some Token.While

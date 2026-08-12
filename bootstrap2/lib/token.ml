@@ -50,7 +50,9 @@ type token_type =
   | Resume
   | Return
   | Run
+  | New
   | True
+  | Type
   | Typeof
   | With
   | Var
@@ -114,7 +116,9 @@ let token_type_to_string = function
   | Resume -> "RESUME"
   | Return -> "RETURN"
   | Run -> "RUN"
+  | New -> "NEW"
   | True -> "TRUE"
+  | Type -> "TYPE"
   | Typeof -> "TYPEOF"
   | With -> "WITH"
   | Var -> "VAR"

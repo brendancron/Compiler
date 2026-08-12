@@ -78,18 +78,27 @@ let rec expr (e : Ast.cps_expr) : unit =
       "A tuple"
       (Types.Tuple (List.map (fun (i : Ast.cps_expr) -> i.Ast.ann) items))
       ann
+  (* A nominal type is a record at run time, so a literal may carry either. *)
   | `Record_lit fields ->
     List.iter (fun (_, v) -> expr v) fields;
-    expect
-      span
-      "A record"
-      (Types.Record
-         (List.sort compare (List.map (fun (l, (v : Ast.cps_expr)) -> l, v.Ast.ann) fields)))
-      ann
+    let actual =
+      List.sort compare (List.map (fun (l, (v : Ast.cps_expr)) -> l, v.Ast.ann) fields)
+    in
+    (match ann with
+     | Types.Record declared | Types.Named (_, declared) ->
+       if declared <> actual
+       then
+         fail
+           span
+           "A record literal is annotated %s but its fields are %s."
+           (Types.string_of_ty ann)
+           (Types.string_of_ty (Types.Record actual))
+     | other ->
+       fail span "A record literal is annotated %s." (Types.string_of_ty other))
   | `Field (target, label) ->
     expr target;
     (match target.Ast.ann with
-     | Types.Record fields ->
+     | Types.Record fields | Types.Named (_, fields) ->
        (match List.assoc_opt label fields with
         | Some ty -> expect span "A field" ty ann
         | None -> fail span "A record has no field '%s'." label)
@@ -99,7 +108,7 @@ let rec expr (e : Ast.cps_expr) : unit =
     expr target;
     expr v;
     (match target.Ast.ann with
-     | Types.Record fields ->
+     | Types.Record fields | Types.Named (_, fields) ->
        (match List.assoc_opt label fields with
         | Some ty ->
           expect v.Ast.span "An assigned field" ty v.Ast.ann;

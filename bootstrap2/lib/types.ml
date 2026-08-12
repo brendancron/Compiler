@@ -20,6 +20,9 @@ and ty =
   | Array of ty
   | Tuple of ty list
   | Record of fields
+  (* Nominal: two declarations with identical fields are different types. The
+     fields ride along so a field access needs no lookup. *)
+  | Named of string * fields
   | Fn of ty list * ty * row
   (* Quantified, not unresolved. Reaching codegen means the call site was never
      monomorphized. *)
@@ -40,6 +43,7 @@ type infer_ty =
   | IArray of infer_ty
   | ITuple of infer_ty list
   | IRecord of infer_fields
+  | INamed of string * infer_fields
   | IFn of infer_ty list * infer_ty * infer_row
   | IVar of tv ref
 
@@ -159,6 +163,7 @@ let rec string_of_infer_ty (t : infer_ty) : string =
   | IArray elem -> Printf.sprintf "Array<%s>" (string_of_infer_ty elem)
   | ITuple items ->
     Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_infer_ty items))
+  | INamed (name, _) -> name
   | IRecord f ->
     let rec fields f =
       match repr_fields f with
@@ -187,6 +192,7 @@ let rec string_of_ty (t : ty) : string =
   | Array elem -> Printf.sprintf "Array<%s>" (string_of_ty elem)
   | Tuple items ->
     Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_ty items))
+  | Named (name, _) -> name
   | Record fields ->
     Printf.sprintf
       "{ %s }"
@@ -286,7 +292,7 @@ let rec occurs id (t : infer_ty) =
   | IVar { contents = Unbound (id', _) } -> id = id'
   | IArray elem -> occurs id elem
   | ITuple items -> List.exists (occurs id) items
-  | IRecord f ->
+  | IRecord f | INamed (_, f) ->
     let rec walk f =
       match repr_fields f with
       | FEmpty | FVar _ -> false
@@ -331,6 +337,8 @@ and unify (a : infer_ty) (b : infer_ty) : unit =
   | IInt, IInt | IFloat, IFloat | IStr, IStr | IBool, IBool | IUnit, IUnit -> ()
   | IArray a, IArray b -> unify a b
   | IRecord a, IRecord b -> unify_fields a b
+  (* Nominal, so the name decides and the fields follow from it. *)
+  | INamed (a, _), INamed (b, _) when String.equal a b -> ()
   | ITuple a, ITuple b ->
     if List.length a <> List.length b
     then
@@ -368,7 +376,7 @@ let free_vars (t : infer_ty) : (int * kind) list =
       if not (List.mem_assoc id !acc) then acc := (id, kind) :: !acc
     | IArray elem -> walk elem
     | ITuple items -> List.iter walk items
-    | IRecord f -> walk_fields walk f
+    | IRecord f | INamed (_, f) -> walk_fields walk f
     | IFn (params, ret, _) ->
       List.iter walk params;
       walk ret
@@ -390,7 +398,7 @@ let free_row_vars (t : infer_ty) : int list =
     match repr t with
     | IArray elem -> walk elem
     | ITuple items -> List.iter walk items
-    | IRecord f -> walk_fields walk f
+    | IRecord f | INamed (_, f) -> walk_fields walk f
     | IFn (params, ret, row) ->
       List.iter walk params;
       walk ret;
@@ -416,7 +424,7 @@ let free_field_vars (t : infer_ty) : int list =
     match repr t with
     | IArray elem -> walk elem
     | ITuple items -> List.iter walk items
-    | IRecord f -> walk_fields f
+    | IRecord f | INamed (_, f) -> walk_fields f
     | IFn (params, ret, _) ->
       List.iter walk params;
       walk ret
@@ -473,7 +481,8 @@ let instantiate (s : scheme) : infer_ty =
         else original
       | IArray elem -> IArray (walk elem)
       | ITuple items -> ITuple (List.map walk items)
-      | IRecord f ->
+      | (IRecord _ | INamed _) as r ->
+        let f = (match r with IRecord f | INamed (_, f) -> f | _ -> assert false) in
         let rec copy f =
           match repr_fields f with
           | FEmpty -> FEmpty
@@ -490,7 +499,9 @@ let instantiate (s : scheme) : infer_ty =
           | FVar { contents = FLink _ } -> assert false
           | FCons (label, ty, rest) -> FCons (label, walk ty, copy rest)
         in
-        IRecord (copy f)
+        (match r with
+         | INamed (name, _) -> INamed (name, copy f)
+         | _ -> IRecord (copy f))
       | IFn (params, ret, row) -> IFn (List.map walk params, walk ret, walk_row row)
       | concrete -> concrete
     in
@@ -509,6 +520,17 @@ let rec concrete (t : infer_ty) : ty option =
   | IArray elem ->
     let* elem = concrete elem in
     Some (Array elem)
+  | INamed (name, f) ->
+    let rec collect f =
+      match repr_fields f with
+      | FEmpty | FVar _ -> Some []
+      | FCons (label, ty, rest) ->
+        let* ty = concrete ty in
+        let* rest = collect rest in
+        Some ((label, ty) :: rest)
+    in
+    let* fields = collect f in
+    Some (Named (name, List.sort compare fields))
   | IRecord f ->
     let rec collect f =
       match repr_fields f with
@@ -560,6 +582,9 @@ let rec of_ty (t : ty) : infer_ty =
   | Record fields ->
     IRecord
       (List.fold_right (fun (l, t) rest -> FCons (l, of_ty t, rest)) fields FEmpty)
+  | Named (name, fields) ->
+    INamed
+      (name, List.fold_right (fun (l, t) rest -> FCons (l, of_ty t, rest)) fields FEmpty)
   | Fn (params, ret, row) ->
     IFn
       ( List.map of_ty params
@@ -586,15 +611,18 @@ let rec resolve (t : infer_ty) : ty =
   | IUnit -> Unit
   | IArray elem -> Array (resolve elem)
   | ITuple items -> Tuple (List.map resolve items)
-  | IRecord f ->
+  | IRecord f | INamed (_, f) ->
     let rec collect f =
-      match repr_fields f with
       (* An unconstrained tail closes, the way an unconstrained effect row
          does. *)
+      match repr_fields f with
       | FEmpty | FVar _ -> []
       | FCons (label, ty, rest) -> (label, resolve ty) :: collect rest
     in
-    Record (List.sort compare (collect f))
+    let fields = List.sort compare (collect f) in
+    (match repr t with
+     | INamed (name, _) -> Named (name, fields)
+     | _ -> Record fields)
   | IFn (params, ret, row) -> Fn (List.map resolve params, resolve ret, resolve_row row)
   | IVar { contents = Unbound (id, kind) } ->
     (match kind with

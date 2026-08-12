@@ -418,7 +418,7 @@ and run info span k handlers body rest : Ast.cps_stmt list =
 and stmt info (s : Ast.reflected_stmt) : Ast.cps_stmt option =
   let keep it = Some { Ast.it; span = s.Ast.span; ann = s.Ast.ann } in
   match s.Ast.it with
-  | `Effect_decl _ -> None
+  | `Effect_decl _ | `Type_decl _ -> None
   | `Resume _ -> unsupported s.Ast.span "'resume' outside a handler."
   | `Fn (name, params, signature, body) ->
     let row = row_of s.Ast.ann in
