@@ -190,6 +190,8 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
     | #Ast.tuple as t -> (Ast.map_tuple (expr info) t :> Ast.cps_expr_kind)
     | #Ast.record as r -> (Ast.map_record (expr info) r :> Ast.cps_expr_kind)
     | #Ast.array_lit as a -> (Ast.map_array_lit (expr info) a :> Ast.cps_expr_kind)
+    | #Ast.variant_lit as v ->
+      (Ast.map_variant_lit (expr info) v :> Ast.cps_expr_kind)
   in
   { Ast.it; span = e.Ast.span; ann = e.Ast.ann }
 
@@ -209,7 +211,8 @@ let rec suspends info (e : Ast.reflected_expr) =
     suspends info a || suspends info b || suspends info c
   | `Array_lit items | `Tuple items -> List.exists (suspends info) items
   | `Tuple_get (t, _) | `Field (t, _) -> suspends info t
-  | `Record_lit fields -> List.exists (fun (_, v) -> suspends info v) fields
+  | `Record_lit fields | `Variant (_, fields) ->
+    List.exists (fun (_, v) -> suspends info v) fields
   | `Field_assign (r, _, v) -> suspends info r || suspends info v
 
 let rec suspends_stmt info (s : Ast.reflected_stmt) =
@@ -225,6 +228,9 @@ let rec suspends_stmt info (s : Ast.reflected_stmt) =
   | `While (c, body) -> suspends info c || suspends_stmt info body
   | `Resume _ -> true
   | `Run (_, handlers) -> not (handlers_are_tail_resumptive handlers)
+  | `Match (scrutinee, cases) ->
+    suspends info scrutinee
+    || List.exists (fun (_, body) -> List.exists (suspends_stmt info) body) cases
   | _ -> false
 
 (* Pull the first suspending call out of [e], with a rebuild that puts a
@@ -253,7 +259,7 @@ let rec extract info (e : Ast.reflected_expr)
     extract info t |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Tuple_get (f n, i)))
   | `Field (t, label) ->
     extract info t |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Field (f n, label)))
-  | `Record_lit _ | `Field_assign _ ->
+  | `Record_lit _ | `Field_assign _ | `Variant _ ->
     if suspends info e
     then unsupported e.Ast.span "An effect inside a record is not supported yet."
     else None
@@ -419,6 +425,11 @@ and stmt info (s : Ast.reflected_stmt) : Ast.cps_stmt option =
   let keep it = Some { Ast.it; span = s.Ast.span; ann = s.Ast.ann } in
   match s.Ast.it with
   | `Effect_decl _ | `Type_decl _ -> None
+  | `Match (scrutinee, cases) ->
+    keep
+      (`Match
+        ( expr info scrutinee
+        , List.map (fun (p, body) -> p, List.map (block info) body) cases ))
   | `Resume _ -> unsupported s.Ast.span "'resume' outside a handler."
   | `Fn (name, params, signature, body) ->
     let row = row_of s.Ast.ann in
@@ -450,7 +461,8 @@ and stmt info (s : Ast.reflected_stmt) : Ast.cps_stmt option =
         handlers
     in
     keep (`Block (arms @ sequence_body info body))
-  | #Ast.stmts as st -> keep (Ast.map_stmts (expr info) (block info) st)
+  | #Ast.stmts as st ->
+    keep (Ast.map_stmts (expr info) (block info) st :> Ast.cps_stmt_kind)
 
 and block info (s : Ast.reflected_stmt) : Ast.cps_stmt =
   match stmt info s with

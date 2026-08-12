@@ -144,6 +144,13 @@ let rec expr (e : Ast.cps_expr) : unit =
        expect span "An index assignment" elem ann
      | other ->
        fail target.Ast.span "Indexing a %s." (Types.string_of_ty other))
+  (* The payload's types are the declaration's business; only the tag survives
+     here, so there is nothing local to check beyond the parts. *)
+  | `Variant (_, fields) ->
+    List.iter (fun (_, v) -> expr v) fields;
+    (match ann with
+     | Types.Sum _ -> ()
+     | other -> fail span "A variant is annotated %s." (Types.string_of_ty other))
   | `Call (callee, args) ->
     expr callee;
     List.iter expr args;
@@ -186,6 +193,9 @@ let rec stmt (s : Ast.cps_stmt) : unit =
     stmt body
   | `Fn (_, _, _, body) -> List.iter stmt body
   | `Return e -> Option.iter expr e
+  | `Match (scrutinee, cases) ->
+    expr scrutinee;
+    List.iter (fun (_, body) -> List.iter stmt body) cases
 
 let program (p : Ast.cps_stmt list) : (unit, error) result =
   try

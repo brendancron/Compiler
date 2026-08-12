@@ -23,6 +23,9 @@ and ty =
   (* Nominal: two declarations with identical fields are different types. The
      fields ride along so a field access needs no lookup. *)
   | Named of string * fields
+  (* Nominal, and its variants live in the declaration table rather than in the
+     type: nothing reaches a variant except by matching. *)
+  | Sum of string
   | Fn of ty list * ty * row
   (* Quantified, not unresolved. Reaching codegen means the call site was never
      monomorphized. *)
@@ -44,6 +47,7 @@ type infer_ty =
   | ITuple of infer_ty list
   | IRecord of infer_fields
   | INamed of string * infer_fields
+  | ISum of string
   | IFn of infer_ty list * infer_ty * infer_row
   | IVar of tv ref
 
@@ -163,7 +167,7 @@ let rec string_of_infer_ty (t : infer_ty) : string =
   | IArray elem -> Printf.sprintf "Array<%s>" (string_of_infer_ty elem)
   | ITuple items ->
     Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_infer_ty items))
-  | INamed (name, _) -> name
+  | INamed (name, _) | ISum name -> name
   | IRecord f ->
     let rec fields f =
       match repr_fields f with
@@ -192,7 +196,7 @@ let rec string_of_ty (t : ty) : string =
   | Array elem -> Printf.sprintf "Array<%s>" (string_of_ty elem)
   | Tuple items ->
     Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_ty items))
-  | Named (name, _) -> name
+  | Named (name, _) | Sum name -> name
   | Record fields ->
     Printf.sprintf
       "{ %s }"
@@ -339,6 +343,7 @@ and unify (a : infer_ty) (b : infer_ty) : unit =
   | IRecord a, IRecord b -> unify_fields a b
   (* Nominal, so the name decides and the fields follow from it. *)
   | INamed (a, _), INamed (b, _) when String.equal a b -> ()
+  | ISum a, ISum b when String.equal a b -> ()
   | ITuple a, ITuple b ->
     if List.length a <> List.length b
     then
@@ -520,6 +525,7 @@ let rec concrete (t : infer_ty) : ty option =
   | IArray elem ->
     let* elem = concrete elem in
     Some (Array elem)
+  | ISum name -> Some (Sum name)
   | INamed (name, f) ->
     let rec collect f =
       match repr_fields f with
@@ -585,6 +591,7 @@ let rec of_ty (t : ty) : infer_ty =
   | Named (name, fields) ->
     INamed
       (name, List.fold_right (fun (l, t) rest -> FCons (l, of_ty t, rest)) fields FEmpty)
+  | Sum name -> ISum name
   | Fn (params, ret, row) ->
     IFn
       ( List.map of_ty params
@@ -611,6 +618,7 @@ let rec resolve (t : infer_ty) : ty =
   | IUnit -> Unit
   | IArray elem -> Array (resolve elem)
   | ITuple items -> Tuple (List.map resolve items)
+  | ISum name -> Sum name
   | IRecord f | INamed (_, f) ->
     let rec collect f =
       (* An unconstrained tail closes, the way an unconstrained effect row

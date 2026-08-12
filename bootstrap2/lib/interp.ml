@@ -5,6 +5,7 @@ type value =
   | Tuple of value list
   (* Fields are mutable, so a record has identity like an array. *)
   | Record of (string * value ref) list
+  | Variant of string * (string * value) list
   | Float of float
   | Str of string
   | Bool of bool
@@ -47,6 +48,7 @@ let type_name = function
   | Array _ -> "array"
   | Tuple _ -> "tuple"
   | Record _ -> "record"
+  | Variant _ -> "variant"
   | Int _ -> "int"
   | Float _ -> "float"
   | Str _ -> "string"
@@ -58,6 +60,9 @@ let rec string_of_value = function
   | Array items ->
     "[" ^ String.concat ", " (Array.to_list (Array.map string_of_value items)) ^ "]"
   | Tuple items -> "(" ^ String.concat ", " (List.map string_of_value items) ^ ")"
+  | Variant (name, []) -> name
+  | Variant (name, fields) ->
+    name ^ "(" ^ String.concat ", " (List.map (fun (_, v) -> string_of_value v) fields) ^ ")"
   | Record fields ->
     "{ "
     ^ String.concat
@@ -85,6 +90,10 @@ let rec values_equal a b =
   | Array x, Array y -> x == y
   | Tuple x, Tuple y -> List.length x = List.length y && List.for_all2 values_equal x y
   | Record x, Record y -> x == y
+  | Variant (n, a), Variant (m, b) ->
+    String.equal n m
+    && List.length a = List.length b
+    && List.for_all2 (fun (_, x) (_, y) -> values_equal x y) a b
   | Int x, Int y -> x = y
   | Float x, Float y -> x = y
   | Str x, Str y -> String.equal x y
@@ -159,6 +168,8 @@ let rec eval env (e : Ast.cps_expr) : value =
   | `Tuple items -> Tuple (List.map (eval env) items)
   | `Record_lit fields ->
     Record (List.map (fun (l, v) -> l, ref (eval env v)) fields)
+  | `Variant (name, fields) ->
+    Variant (name, List.map (fun (l, v) -> l, eval env v) fields)
   | `Field (target, label) ->
     (match eval env target with
      | Record fields ->
@@ -255,6 +266,30 @@ and exec env (s : Ast.cps_stmt) : unit =
       | None -> Unit
     in
     raise (Return_value (v, span))
+  | `Match (scrutinee, cases) ->
+    let value = eval env scrutinee in
+    let bind_case (pattern : Ast.pattern) =
+      match pattern, value with
+      | Ast.Pat_wild, _ -> Some []
+      | Ast.Pat_variant (_, name, payload), Variant (tag, fields)
+        when String.equal name tag ->
+        Some
+          (List.map
+             (fun (label, binding) -> binding, List.assoc label fields)
+             (Ast.payload_fields payload))
+      | _ -> None
+    in
+    let rec first = function
+      | [] -> fail span "No case matched."
+      | (pattern, body) :: rest ->
+        (match bind_case pattern with
+         | None -> first rest
+         | Some bindings ->
+           let scope = new_env (Some env) in
+           List.iter (fun (name, v) -> define scope name v) bindings;
+           List.iter (exec scope) body)
+    in
+    first cases
 
 let globals out =
   let env = new_env None in

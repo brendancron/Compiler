@@ -1,22 +1,22 @@
-enum Shape {
+type Shape {
     Point,
     Circle(int),
     Rect(int, int),
 }
 
-match Shape::Point {
+match new Shape::Point {
     Shape::Point     => { print("point"); }
     Shape::Circle(r) => { print(r); }
     Shape::Rect(w, h) => { print(w); }
 }
 
-match Shape::Circle(10) {
+match new Shape::Circle(10) {
     Shape::Point     => { print("point"); }
     Shape::Circle(r) => { print(r); }
     Shape::Rect(w, h) => { print(w); }
 }
 
-match Shape::Rect(3, 4) {
+match new Shape::Rect(3, 4) {
     Shape::Point      => { print("point"); }
     Shape::Circle(r)  => { print(r); }
     Shape::Rect(w, h) => { print(w + h); }

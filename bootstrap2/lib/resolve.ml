@@ -46,6 +46,9 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
     (* Nominal identity was the checker's business; the value is a record. *)
     | `New (_, fields) ->
       `Record_lit (List.map (fun (l, v) -> l, expr registry v) fields)
+    | `New_variant (_, variant, payload) ->
+      `Variant
+        (variant, List.map (fun (l, v) -> l, expr registry v) (Ast.payload_fields payload))
     | #Ast.record as r ->
       (Ast.map_record (expr registry) r :> Ast.resolved_expr_kind)
     | #Ast.reflect as r ->
@@ -66,6 +69,8 @@ let rec stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt =
          e
        :> Ast.resolved_stmt_kind)
     | #Ast.type_defs as t -> t
+    | #Ast.matching as m ->
+      (Ast.map_matching (expr registry) (stmt registry) m :> Ast.resolved_stmt_kind)
   in
   { Ast.it; span = s.Ast.span; ann = s.Ast.ann }
 

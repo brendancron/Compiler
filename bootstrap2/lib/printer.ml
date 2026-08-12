@@ -78,6 +78,14 @@ let rec string_of_expr (e : Ast.expr) : string =
       "(new %s%s)"
       name
       (String.concat "" (List.map (fun (l, v) -> " " ^ l ^ ":" ^ string_of_expr v) fields))
+  | `New_variant (ty, variant, payload) ->
+    Printf.sprintf
+      "(new %s::%s%s)"
+      ty
+      variant
+      (String.concat
+         ""
+         (List.map (fun (_, v) -> " " ^ string_of_expr v) (Ast.payload_fields payload)))
   | `Index (t, i) -> Printf.sprintf "(index %s %s)" (string_of_expr t) (string_of_expr i)
   | `Index_assign (t, i, v) ->
     Printf.sprintf
@@ -147,12 +155,20 @@ let rec write_stmt buf indent (s : Ast.stmt) =
       (Printf.sprintf "run%s" (String.concat "" (List.map label handlers)))
       (body @ List.concat_map arms handlers)
   | `Resume value -> line "%s(resume %s)\n" pad (opt_expr value)
-  | `Type_decl (name, fields) ->
+  | `Type_decl (name, body) ->
     line
       "%s(type %s%s)\n"
       pad
       name
-      (String.concat "" (List.map (fun (l, _) -> " " ^ l) fields))
+      (match body with
+       | Ast.T_fields fields ->
+         String.concat "" (List.map (fun (l, _) -> " " ^ l) fields)
+       | Ast.T_variants variants ->
+         String.concat "" (List.map (fun (v : Ast.variant) -> " " ^ v.Ast.v_name) variants))
+  | `Match (scrutinee, cases) ->
+    nested
+      (Printf.sprintf "match %s" (string_of_expr scrutinee))
+      (List.concat_map snd cases)
   | `Handler_decl (name, h) ->
     nested
       (Printf.sprintf "handler %s : %s" name h.Ast.handled)
@@ -223,6 +239,16 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
         (String.concat
            ""
            (List.map (fun (l, v) -> " " ^ l ^ ":" ^ string_of_typed_expr v) fields))
+    | `New_variant (ty, variant, payload) ->
+      Printf.sprintf
+        "(new %s::%s%s)"
+        ty
+        variant
+        (String.concat
+           ""
+           (List.map
+              (fun (_, v) -> " " ^ string_of_typed_expr v)
+              (Ast.payload_fields payload)))
     | `Index (t, i) ->
       Printf.sprintf "(index %s %s)" (string_of_typed_expr t) (string_of_typed_expr i)
     | `Index_assign (t, i, v) ->
@@ -273,6 +299,10 @@ let rec write_typed_stmt buf indent (s : Ast.typed_stmt) =
       (body @ List.concat_map (fun h -> List.concat_map (fun a -> a.Ast.arm_body) h.Ast.arms) handlers)
   | `Resume value -> line "%s(resume %s)\n" pad (opt_typed_expr value)
   | `Type_decl (name, _) -> line "%s(type %s)\n" pad name
+  | `Match (scrutinee, cases) ->
+    nested
+      (Printf.sprintf "match %s" (string_of_typed_expr scrutinee))
+      (List.concat_map snd cases)
 
 let string_of_typed_program (program : Ast.typed_stmt list) : string =
   let buf = Buffer.create 256 in

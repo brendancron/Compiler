@@ -13,6 +13,7 @@ type token_type =
   | Slash
   | Star
   | Colon
+  | Colon_colon
   | Dot
   (* One or two character tokens. *)
   | Bang
@@ -50,6 +51,7 @@ type token_type =
   | Resume
   | Return
   | Run
+  | Match
   | New
   | True
   | Type
@@ -82,6 +84,7 @@ let token_type_to_string = function
   | Slash -> "SLASH"
   | Star -> "STAR"
   | Colon -> "COLON"
+  | Colon_colon -> "COLON_COLON"
   | Dot -> "DOT"
   | Bang -> "BANG"
   | Bang_equal -> "BANG_EQUAL"
@@ -116,6 +119,7 @@ let token_type_to_string = function
   | Resume -> "RESUME"
   | Return -> "RETURN"
   | Run -> "RUN"
+  | Match -> "MATCH"
   | New -> "NEW"
   | True -> "TRUE"
   | Type -> "TYPE"

@@ -33,6 +33,7 @@ and checked_stmt_kind =
   [ (checked_expr, checked_stmt) Ast.stmts
   | (checked_expr, checked_stmt, checked_stmt Ast.handler) Ast.effects
   | Ast.type_defs
+  | (checked_expr, checked_stmt) Ast.matching
   ]
 
 type env =
@@ -62,7 +63,11 @@ type effect_info =
 let ctx_effects = { ops = Hashtbl.create 16; declared = Hashtbl.create 8 }
 
 (* Declared nominal types, by name. *)
-let ctx_types : (string, Types.infer_fields) Hashtbl.t = Hashtbl.create 16
+type decl =
+  | Product of Types.infer_fields
+  | Sum of (string * Types.infer_ty Ast.payload) list
+
+let ctx_types : (string, decl) Hashtbl.t = Hashtbl.create 16
 
 let reset_effects () =
   Hashtbl.reset ctx_effects.ops;
@@ -165,7 +170,8 @@ let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
       (List.length args)
   | Ast.Ty_name other ->
     (match Hashtbl.find_opt ctx_types other with
-     | Some fields -> Types.INamed (other, fields)
+     | Some (Product fields) -> Types.INamed (other, fields)
+     | Some (Sum _) -> Types.ISum other
      | None -> fail t.Ast.span "Unknown type '%s'." other)
   | Ast.Ty_fn (params, ret, row) ->
     Types.IFn
@@ -212,6 +218,11 @@ let rec assigned_in_expr (e : Ast.desugared_expr) acc =
   | `Field_assign (r, _, v) -> assigned_in_expr v (assigned_in_expr r acc)
   | `New (_, fields) ->
     List.fold_left (fun acc (_, v) -> assigned_in_expr v acc) acc fields
+  | `New_variant (_, _, payload) ->
+    List.fold_left
+      (fun acc (_, v) -> assigned_in_expr v acc)
+      acc
+      (Ast.payload_fields payload)
 
 let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   let opt f o acc =
@@ -229,6 +240,12 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   | `While (cond, body) -> assigned_in_stmt body (assigned_in_expr cond acc)
   | `Return e -> opt assigned_in_expr e acc
   | `Effect_decl _ | `Type_decl _ -> acc
+  | `Match (scrutinee, cases) ->
+    List.fold_left
+      (fun acc (_, body) ->
+        List.fold_left (fun acc st -> assigned_in_stmt st acc) acc body)
+      (assigned_in_expr scrutinee acc)
+      cases
   | `Resume e -> opt assigned_in_expr e acc
   | `Run (body, handlers) ->
     let acc = List.fold_left (fun acc st -> assigned_in_stmt st acc) acc body in
@@ -401,8 +418,8 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     node (Types.IArray elem) (`Collection_lit items)
   | `New (name, fields) ->
     (match Hashtbl.find_opt ctx_types name with
-     | None -> fail span "Unknown type '%s'." name
-     | Some declared ->
+     | None | Some (Sum _) -> fail span "Unknown record type '%s'." name
+     | Some (Product declared) ->
        let rec labels f =
          match Types.repr_fields f with
          | Types.FEmpty | Types.FVar _ -> []
@@ -425,6 +442,38 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
            unify_at v.Ast.span (List.assoc l expected) v.Ast.ann)
          fields;
        node (Types.INamed (name, declared)) (`New (name, fields)))
+  | `New_variant (ty, variant, payload) ->
+    (match Hashtbl.find_opt ctx_types ty with
+     | None | Some (Product _) -> fail span "Unknown sum type '%s'." ty
+     | Some (Sum variants) ->
+       (match List.assoc_opt variant variants with
+        | None -> fail span "Type '%s' has no variant '%s'." ty variant
+        | Some declared ->
+          let expected = Ast.payload_fields declared in
+          let given =
+            List.map (fun (l, v) -> l, infer_expr env ctx v) (Ast.payload_fields payload)
+          in
+          if List.length expected <> List.length given
+          then
+            fail
+              span
+              "Variant '%s' carries %d value(s) but %d were given."
+              variant
+              (List.length expected)
+              (List.length given);
+          List.iter
+            (fun (l, (v : checked_expr)) ->
+              match List.assoc_opt l expected with
+              | Some ty -> unify_at v.Ast.span ty v.Ast.ann
+              | None -> fail span "Variant '%s' has no field '%s'." variant l)
+            given;
+          let payload =
+            match payload with
+            | Ast.P_none -> Ast.P_none
+            | Ast.P_tuple _ -> Ast.P_tuple (List.map snd given)
+            | Ast.P_fields _ -> Ast.P_fields given
+          in
+          node (Types.ISum ty) (`New_variant (ty, variant, payload))))
   | `Record_lit fields ->
     let fields = List.map (fun (l, v) -> l, infer_expr env ctx v) fields in
     node
@@ -491,16 +540,25 @@ and declare_types (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
-      | `Type_decl (name, fields) ->
+      | `Type_decl (name, body) ->
         if Hashtbl.mem ctx_types name
         then fail s.Ast.span "Type '%s' is already declared." name;
         Hashtbl.replace
           ctx_types
           name
-          (List.fold_right
-             (fun (l, t) rest -> Types.FCons (l, infer_ty_of_annotation t, rest))
-             fields
-             Types.FEmpty)
+          (match body with
+           | Ast.T_fields fields ->
+             Product
+               (List.fold_right
+                  (fun (l, t) rest -> Types.FCons (l, infer_ty_of_annotation t, rest))
+                  fields
+                  Types.FEmpty)
+           | Ast.T_variants variants ->
+             Sum
+               (List.map
+                  (fun (v : Ast.variant) ->
+                    v.Ast.v_name, Ast.map_payload infer_ty_of_annotation v.Ast.v_payload)
+                  variants))
       | _ -> ())
     body
 
@@ -630,7 +688,62 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
          fn_type);
     Ast.annotated span fn_type (`Fn (name, params, signature, body))
   (* Registered by [declare_types] before anything was hoisted. *)
-  | `Type_decl (name, fields) -> node (`Type_decl (name, fields))
+  | `Type_decl (name, body) -> node (`Type_decl (name, body))
+  | `Match (scrutinee, cases) ->
+    let scrutinee = infer_expr env ctx scrutinee in
+    let sum =
+      match Types.repr scrutinee.Ast.ann with
+      | Types.ISum name -> name
+      | other ->
+        fail
+          scrutinee.Ast.span
+          "Only a sum type can be matched, and this is %s."
+          (Types.string_of_infer_ty other)
+    in
+    let variants =
+      match Hashtbl.find_opt ctx_types sum with
+      | Some (Sum variants) -> variants
+      | _ -> fail span "Unknown sum type '%s'." sum
+    in
+    let covered = ref [] in
+    let cases =
+      List.map
+        (fun ((pattern : Ast.pattern), body) ->
+          let scope = new_env (Some env) in
+          (match pattern with
+           | Ast.Pat_wild -> covered := List.map fst variants
+           | Ast.Pat_variant (ty, variant, payload) ->
+             if not (String.equal ty sum)
+             then fail span "This matches a %s, not a %s." ty sum;
+             (match List.assoc_opt variant variants with
+              | None -> fail span "Type '%s' has no variant '%s'." sum variant
+              | Some declared ->
+                covered := variant :: !covered;
+                let expected = Ast.payload_fields declared in
+                let bindings = Ast.payload_fields payload in
+                if List.length expected <> List.length bindings
+                then
+                  fail
+                    span
+                    "Variant '%s' carries %d value(s) but %d were bound."
+                    variant
+                    (List.length expected)
+                    (List.length bindings);
+                List.iter
+                  (fun (l, name) ->
+                    match List.assoc_opt l expected with
+                    | Some ty -> bind scope name (Types.mono ty)
+                    | None -> fail span "Variant '%s' has no field '%s'." variant l)
+                  bindings));
+          pattern, infer_block scope ctx body)
+        cases
+    in
+    List.iter
+      (fun (name, _) ->
+        if not (List.mem name !covered)
+        then fail span "This match does not cover '%s'." name)
+      variants;
+    node (`Match (scrutinee, cases))
   | `Effect_decl (name, ops) ->
     Hashtbl.replace ctx_effects.declared name ops;
     List.iter
@@ -812,6 +925,8 @@ let rec resolve_stmt (s : checked_stmt) : Ast.typed_stmt =
       (Ast.map_effects resolve_expr resolve_stmt (Ast.map_handler resolve_stmt) e
        :> Ast.typed_stmt_kind)
     | #Ast.type_defs as t -> t
+    | #Ast.matching as m ->
+      (Ast.map_matching resolve_expr resolve_stmt m :> Ast.typed_stmt_kind)
   in
   { Ast.it; span = s.Ast.span; ann = Types.resolve s.Ast.ann }
 

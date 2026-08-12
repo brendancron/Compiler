@@ -100,6 +100,12 @@ type 'e logic =
   | `Or of 'e * 'e
   ]
 
+(* What a variant carries. *)
+type 'a payload =
+  | P_none
+  | P_tuple of 'a list
+  | P_fields of (string * 'a) list
+
 type 'e compound = [ `Compound of binop * string * 'e ]
 
 (* Indexing is a primitive: it survives every pass, and [Resolve] only decides
@@ -124,11 +130,32 @@ type 'e record =
 
 (* Lowered by [Resolve] into a plain record literal: nominal identity is a
    compile-time notion, and the value is a record either way. *)
-type 'e nominal = [ `New of string * (string * 'e) list ]
+type 'e nominal =
+  [ `New of string * (string * 'e) list
+  | `New_variant of string * string * 'e payload
+  ]
 
-(* A declaration binds a name to a set of fields. It has no runtime meaning, so
-   the CPS pass erases it alongside effect declarations. *)
-type type_defs = [ `Type_decl of string * (string * type_expr) list ]
+type variant =
+  { v_name : string
+  ; v_payload : type_expr payload
+  }
+
+(* A declaration binds a name to fields or to variants; which one the body is
+   decides whether the type is a product or a sum. It has no runtime meaning,
+   so the CPS pass erases it alongside effect declarations. *)
+type type_body =
+  | T_fields of (string * type_expr) list
+  | T_variants of variant list
+
+type type_defs = [ `Type_decl of string * type_body ]
+
+(* A pattern names a variant and binds what it carries. *)
+type pattern =
+  | Pat_variant of string * string * string payload
+  | Pat_wild
+
+type ('e, 's) matching = [ `Match of 'e * (pattern * 's list) list ]
+
 
 (* What the container is comes from context, so this cannot be lowered until
    the checker has run. [Resolve] turns it into an [`Array_lit] or a call. *)
@@ -136,6 +163,10 @@ type 'e collection = [ `Collection_lit of 'e list ]
 
 (* The primitive the others are built from. *)
 type 'e array_lit = [ `Array_lit of 'e list ]
+
+(* A constructed variant, once the type name has done its work in the checker.
+   A positional payload is keyed "0", "1", … so one shape covers both. *)
+type 'e variant_lit = [ `Variant of string * (string * 'e) list ]
 
 (* Eliminated by the CPS pass, which is why the interpreter has no handler
    stack: by the time it runs, these are ordinary closures and calls. *)
@@ -194,6 +225,7 @@ and stmt_kind =
   | (expr, stmt, stmt handler_clause) effects
   | stmt handler_defs
   | type_defs
+  | (expr, stmt) matching
   ]
 
 type program = stmt list
@@ -222,6 +254,7 @@ and desugared_stmt_kind =
   [ (desugared_expr, desugared_stmt) stmts
   | (desugared_expr, desugared_stmt, desugared_stmt handler) effects
   | type_defs
+  | (desugared_expr, desugared_stmt) matching
   ]
 
 (* Same constructors, every node carrying a resolved type. *)
@@ -247,6 +280,7 @@ and typed_stmt_kind =
   [ (typed_expr, typed_stmt) stmts
   | (typed_expr, typed_stmt, typed_stmt handler) effects
   | type_defs
+  | (typed_expr, typed_stmt) matching
   ]
 
 (* No [`Compound]: every operator is now a primitive or a call. *)
@@ -261,6 +295,7 @@ and resolved_expr_kind =
   | resolved_expr tuple
   | resolved_expr record
   | resolved_expr array_lit
+  | resolved_expr variant_lit
   | resolved_expr reflect
   ]
 
@@ -270,6 +305,7 @@ and resolved_stmt_kind =
   [ (resolved_expr, resolved_stmt) stmts
   | (resolved_expr, resolved_stmt, resolved_stmt handler) effects
   | type_defs
+  | (resolved_expr, resolved_stmt) matching
   ]
 
 (* No [`Typeof]: the interpreter cannot be handed one. *)
@@ -284,6 +320,7 @@ and reflected_expr_kind =
   | reflected_expr tuple
   | reflected_expr record
   | reflected_expr array_lit
+  | reflected_expr variant_lit
   ]
 
 type reflected_stmt = (reflected_stmt_kind, Types.ty) node
@@ -292,6 +329,7 @@ and reflected_stmt_kind =
   [ (reflected_expr, reflected_stmt) stmts
   | (reflected_expr, reflected_stmt, reflected_stmt handler) effects
   | type_defs
+  | (reflected_expr, reflected_stmt) matching
   ]
 
 (* No effect constructs: the CPS pass has turned them into closures and calls. *)
@@ -306,10 +344,15 @@ and cps_expr_kind =
   | cps_expr tuple
   | cps_expr record
   | cps_expr array_lit
+  | cps_expr variant_lit
   ]
 
 type cps_stmt = (cps_stmt_kind, Types.ty) node
-and cps_stmt_kind = (cps_expr, cps_stmt) stmts
+
+and cps_stmt_kind =
+  [ (cps_expr, cps_stmt) stmts
+  | (cps_expr, cps_stmt) matching
+  ]
 
 let map_vars (f : 'a -> 'b) (e : 'a vars) : 'b vars =
   match e with
@@ -347,9 +390,24 @@ let map_record (f : 'a -> 'b) (e : 'a record) : 'b record =
   | `Field (r, label) -> `Field (f r, label)
   | `Field_assign (r, label, v) -> `Field_assign (f r, label, f v)
 
+let map_payload (f : 'a -> 'b) (p : 'a payload) : 'b payload =
+  match p with
+  | P_none -> P_none
+  | P_tuple items -> P_tuple (List.map f items)
+  | P_fields fields -> P_fields (List.map (fun (l, v) -> l, f v) fields)
+
 let map_nominal (f : 'a -> 'b) (e : 'a nominal) : 'b nominal =
   match e with
   | `New (name, fields) -> `New (name, List.map (fun (l, v) -> l, f v) fields)
+  | `New_variant (ty, variant, payload) ->
+    `New_variant (ty, variant, map_payload f payload)
+
+let map_matching (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (m : ('e1, 's1) matching)
+  : ('e2, 's2) matching
+  =
+  match m with
+  | `Match (scrutinee, cases) ->
+    `Match (fe scrutinee, List.map (fun (p, body) -> p, List.map fs body) cases)
 
 let map_collection (f : 'a -> 'b) (e : 'a collection) : 'b collection =
   match e with
@@ -358,6 +416,18 @@ let map_collection (f : 'a -> 'b) (e : 'a collection) : 'b collection =
 let map_array_lit (f : 'a -> 'b) (e : 'a array_lit) : 'b array_lit =
   match e with
   | `Array_lit items -> `Array_lit (List.map f items)
+
+let map_variant_lit (f : 'a -> 'b) (e : 'a variant_lit) : 'b variant_lit =
+  match e with
+  | `Variant (name, fields) -> `Variant (name, List.map (fun (l, v) -> l, f v) fields)
+
+(* A positional payload is stored under "0", "1", … so one runtime shape serves
+   both tuple and field variants. *)
+let payload_fields (p : 'a payload) : (string * 'a) list =
+  match p with
+  | P_none -> []
+  | P_tuple items -> List.mapi (fun i v -> string_of_int i, v) items
+  | P_fields fields -> fields
 
 let map_reflect (f : 'a -> 'b) (e : 'a reflect) : 'b reflect =
   match e with
