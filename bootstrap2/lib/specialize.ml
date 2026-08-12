@@ -26,6 +26,7 @@ let rec type_directed_expr (e : Ast.typed_expr) =
     type_directed_expr a || type_directed_expr b || type_directed_expr c
   | `Call (callee, args) -> type_directed_expr callee || List.exists type_directed_expr args
   | `Tuple items -> List.exists type_directed_expr items
+  | `New_call (_, _, args) -> List.exists type_directed_expr args
   | `Record_lit fields | `New (_, fields) ->
     List.exists (fun (_, v) -> type_directed_expr v) fields
   | `New_variant (_, _, payload) ->

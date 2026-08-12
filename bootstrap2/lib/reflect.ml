@@ -9,10 +9,8 @@ let rec expr (e : Ast.resolved_expr) : Ast.reflected_expr =
     | #Ast.vars as v -> (Ast.map_vars expr v :> Ast.reflected_expr_kind)
     | #Ast.ops as o -> (Ast.map_ops expr o :> Ast.reflected_expr_kind)
     | #Ast.logic as l -> (Ast.map_logic expr l :> Ast.reflected_expr_kind)
-    | #Ast.indexing as i -> (Ast.map_indexing expr i :> Ast.reflected_expr_kind)
     | #Ast.tuple as t -> (Ast.map_tuple expr t :> Ast.reflected_expr_kind)
     | #Ast.record as r -> (Ast.map_record expr r :> Ast.reflected_expr_kind)
-    | #Ast.array_lit as a -> (Ast.map_array_lit expr a :> Ast.reflected_expr_kind)
     | #Ast.variant_lit as v ->
       (Ast.map_variant_lit expr v :> Ast.reflected_expr_kind)
   in

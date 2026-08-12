@@ -56,15 +56,6 @@ let rec expr (e : Ast.cps_expr) : unit =
     expect a.Ast.span "The operand of a logical operator" Types.Bool a.Ast.ann;
     expect b.Ast.span "The operand of a logical operator" Types.Bool b.Ast.ann;
     expect span "A logical operator" Types.Bool ann
-  | `Array_lit items ->
-    List.iter expr items;
-    (match ann with
-     | Types.Named (_, [ elem ], _) ->
-       List.iter
-         (fun (i : Ast.cps_expr) -> expect i.Ast.span "An array element" elem i.Ast.ann)
-         items
-     | other ->
-       fail span "An array literal is annotated %s." (Types.string_of_ty other))
   | `Tuple items ->
     List.iter expr items;
     expect
@@ -118,25 +109,6 @@ let rec expr (e : Ast.cps_expr) : unit =
         | None -> fail span "A tuple has no field %d." index)
      | other ->
        fail target.Ast.span "Taking a field of %s." (Types.string_of_ty other))
-  | `Index (target, i) ->
-    expr target;
-    expr i;
-    expect i.Ast.span "An index" Types.Int i.Ast.ann;
-    (match target.Ast.ann with
-     | Types.Named (_, [ elem ], _) -> expect span "An indexing result" elem ann
-     | other ->
-       fail target.Ast.span "Indexing a %s." (Types.string_of_ty other))
-  | `Index_assign (target, i, v) ->
-    expr target;
-    expr i;
-    expr v;
-    expect i.Ast.span "An index" Types.Int i.Ast.ann;
-    (match target.Ast.ann with
-     | Types.Named (_, [ elem ], _) ->
-       expect v.Ast.span "An assigned element" elem v.Ast.ann;
-       expect span "An index assignment" elem ann
-     | other ->
-       fail target.Ast.span "Indexing a %s." (Types.string_of_ty other))
   | `Variant (_, fields) ->
     List.iter (fun (_, v) -> expr v) fields;
     (match ann with

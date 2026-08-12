@@ -63,6 +63,12 @@ exception Failed of error
 let fail span fmt =
   Printf.ksprintf (fun message -> raise (Failed { span; message })) fmt
 
+let accessor registry (target : Ast.resolved_expr) pick =
+  match Option.bind (Types.type_name target.Ast.ann) (Registry.indexed registry) with
+  | Some entry -> pick entry
+  | None ->
+    fail target.Ast.span "Cannot index %s." (Types.string_of_ty target.Ast.ann)
+
 let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
   let span = e.Ast.span
   and ann = e.Ast.ann in
@@ -98,35 +104,51 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
       in
       let all = receiver :: args in
       `Call (fn_ref span (Ast.method_name owner name) all ann, all)
-    (* The container the checker settled on says what to build. Array stands as
-       written; anything else is built from one. *)
     | `Collection_lit items ->
       let items = List.map (expr registry) items in
-      let built =
-        Option.bind (Types.type_name ann) (Registry.container registry)
-      in
-      (match built with
-       | Some (Registry.Call name) ->
-         let elements : Ast.resolved_expr =
-           { Ast.it = `Array_lit items
-           ; span
-           ; ann =
-               Types.opaque
-                 Types.default_container
-                 (match ann with
-                  | Types.Named (_, args, _) -> args
-                  | other -> [ other ])
-           }
-         in
-         `Call (fn_ref span name [ elements ] ann, [ elements ])
-       | _ -> `Array_lit items)
+      let build name = Registry.container registry name in
+      let default = !Types.default_container in
+      (match Types.type_name ann, build default with
+       | Some name, Some primitive ->
+         (match build name with
+          | None ->
+            fail span "%s cannot be built from a literal." (Types.string_of_ty ann)
+          (* The primitive is built directly; anything else is built from one. *)
+          | Some make when String.equal name default ->
+            `Call (fn_ref span make items ann, items)
+          | Some make ->
+            let held =
+              match ann with
+              | Types.Named (_, args, _) -> args
+              | other -> [ other ]
+            in
+            let elements : Ast.resolved_expr =
+              { Ast.it = `Call (fn_ref span primitive items (Types.opaque default held), items)
+              ; span
+              ; ann = Types.opaque default held
+              }
+            in
+            `Call (fn_ref span make [ elements ] ann, [ elements ]))
+       | _ -> fail span "%s cannot be built from a literal." (Types.string_of_ty ann))
+    | `Index (target, index) ->
+      let target = expr registry target
+      and index = expr registry index in
+      let name = accessor registry target (fun entry -> entry.Registry.get) in
+      `Call (fn_ref span name [ target; index ] ann, [ target; index ])
+    | `Index_assign (target, index, v) ->
+      let target = expr registry target
+      and index = expr registry index
+      and v = expr registry v in
+      let args = [ target; index; v ] in
+      let name = accessor registry target (fun entry -> entry.Registry.set) in
+      `Call (fn_ref span name args ann, args)
     | #Ast.lit as l -> l
     | #Ast.vars as v -> (Ast.map_vars (expr registry) v :> Ast.resolved_expr_kind)
     | #Ast.ops as o -> (Ast.map_ops (expr registry) o :> Ast.resolved_expr_kind)
     | #Ast.logic as l -> (Ast.map_logic (expr registry) l :> Ast.resolved_expr_kind)
-    | #Ast.indexing as i ->
-      (Ast.map_indexing (expr registry) i :> Ast.resolved_expr_kind)
     | #Ast.tuple as t -> (Ast.map_tuple (expr registry) t :> Ast.resolved_expr_kind)
+    (* The checker turned every constructor call into an ordinary one. *)
+    | `New_call _ -> assert false
     | `New (_, fields) ->
       `Record_lit (List.map (fun (l, v) -> l, expr registry v) fields)
     | `New_variant (_, variant, payload) ->

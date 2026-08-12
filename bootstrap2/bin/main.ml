@@ -94,7 +94,7 @@ let () =
        then (
          print_endline "-- ast --";
          print_string (Printer.string_of_program program));
-       (match Desugar.program program with
+       (match Desugar.program (Prelude.program () @ program) with
         | Error e ->
           report e.span.line e.span.col "Desugar" e.message;
           exit 65
@@ -105,6 +105,7 @@ let () =
           exit 65
         | Ok desugared ->
         let registry = Registry.builtins () in
+        Builtins.register registry;
         match Typecheck.check ~registry desugared with
         | Error errors ->
           List.iter
@@ -132,7 +133,7 @@ let () =
                 report e.span.line e.span.col "Verify" e.message;
                 exit 70
               | Ok () -> ());
-             (match Interp.run converted with
+             (match Interp.run (Builtins.env ~out:print_string) converted with
               | Ok () -> ()
               | Error e ->
                 report e.span.line e.span.col "Runtime" e.message;

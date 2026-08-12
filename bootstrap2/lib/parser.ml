@@ -458,8 +458,26 @@ and primary s : Ast.expr =
       in
       Ast.at sp (`New_variant (name, variant, payload)))
     else (
-      ignore (consume s Token.Left_brace "Expected '{' after type name.");
-      Ast.at sp (`New (name, record_fields s)))
+      let type_args =
+        if check s Token.Less
+        then (
+          ignore (advance s);
+          let rec loop acc =
+            let t = type_expr s in
+            match matches s [ Token.Comma ] with
+            | Some _ -> loop (t :: acc)
+            | None -> List.rev (t :: acc)
+          in
+          let args = loop [] in
+          ignore (consume s Token.Greater "Expected '>' after type arguments.");
+          args)
+        else []
+      in
+      match matches s [ Token.Left_paren ] with
+      | Some _ -> Ast.at sp (`New_call (name, type_args, arguments s))
+      | None ->
+        ignore (consume s Token.Left_brace "Expected '{' after type name.");
+        Ast.at sp (`New (name, record_fields s)))
   | Token.Left_brace when not s.no_brace ->
     ignore (advance s);
     Ast.at sp (`Record_lit (record_fields s))

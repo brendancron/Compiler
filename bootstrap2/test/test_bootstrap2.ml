@@ -164,7 +164,7 @@ let interpret source =
        Error (Printf.sprintf "parse error [%d:%d] %s" e.line e.col e.message)
      | Error [] -> Error "parse failed"
      | Ok program ->
-       (match Desugar.program program with
+       (match Desugar.program (Prelude.program () @ program) with
         | Error e ->
           Error
             (Printf.sprintf "desugar error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
@@ -179,6 +179,7 @@ let interpret source =
                e.message)
         | Ok desugared ->
         let registry = Registry.builtins () in
+        Builtins.register registry;
         match Typecheck.check ~registry desugared with
         | Error (e :: _) ->
           Error
@@ -208,7 +209,7 @@ let interpret source =
                      e.span.Ast.col
                      e.message)
               | Ok () ->
-             match Interp.run ~out converted with
+             match Interp.run (Builtins.env ~out) converted with
               | Ok () -> Ok (Buffer.contents buf)
               | Error e ->
                 Error
@@ -335,7 +336,7 @@ let rejections source =
     (match Parser.parse tokens with
      | Error _ -> Error "parse failed"
      | Ok program ->
-       (match Desugar.program program with
+       (match Desugar.program (Prelude.program () @ program) with
         | Error e ->
           Ok (Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Ok desugared ->
@@ -344,6 +345,7 @@ let rejections source =
           Ok (Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Ok desugared ->
         let registry = Registry.builtins () in
+        Builtins.register registry;
         match Typecheck.check ~registry desugared with
         | Ok typed ->
           (match Resolve.program ~registry (Specialize.program typed) with

@@ -1,112 +1,10 @@
-type value =
-  | Int of int
-  (* Mutable and shared: `var ys = xs` aliases rather than copies. *)
-  | Array of value array
-  | List of value array ref
-  | Tuple of value list
-  (* Fields are mutable, so a record has identity like an array. *)
-  | Record of (string * value ref) list
-  | Variant of string * (string * value) list
-  | Float of float
-  | Str of string
-  | Bool of bool
-  | Unit
-  | Closure of
-      { params : string list
-      ; body : Ast.cps_stmt list
-      ; env : env
-      }
-  | Native of string * int option * (value list -> value) (* None arity = variadic *)
+open Value
 
-and env =
-  { vars : (string, value ref) Hashtbl.t
-  ; parent : env option
-  }
-
-type error =
-  { span : Ast.span
-  ; message : string
-  }
-
-exception Runtime_error of error
 exception Return_value of value * Ast.span
-
-let fail span fmt =
-  Printf.ksprintf (fun message -> raise (Runtime_error { span; message })) fmt
-
-let new_env parent = { vars = Hashtbl.create 8; parent }
-let define env name v = Hashtbl.replace env.vars name (ref v)
-
-let rec lookup env name =
-  match Hashtbl.find_opt env.vars name with
-  | Some r -> Some r
-  | None ->
-    (match env.parent with
-     | Some p -> lookup p name
-     | None -> None)
-
-let type_name = function
-  | Array _ -> "array"
-  | List _ -> "list"
-  | Tuple _ -> "tuple"
-  | Record _ -> "record"
-  | Variant _ -> "variant"
-  | Int _ -> "int"
-  | Float _ -> "float"
-  | Str _ -> "string"
-  | Bool _ -> "bool"
-  | Unit -> "unit"
-  | Closure _ | Native _ -> "fn"
-
-let rec string_of_value = function
-  | Array items ->
-    "[" ^ String.concat ", " (Array.to_list (Array.map string_of_value items)) ^ "]"
-  | List items ->
-    "[" ^ String.concat ", " (Array.to_list (Array.map string_of_value !items)) ^ "]"
-  | Tuple items -> "(" ^ String.concat ", " (List.map string_of_value items) ^ ")"
-  | Variant (name, []) -> name
-  | Variant (name, fields) ->
-    name ^ "(" ^ String.concat ", " (List.map (fun (_, v) -> string_of_value v) fields) ^ ")"
-  | Record fields ->
-    "{ "
-    ^ String.concat
-        ", "
-        (List.map (fun (l, v) -> l ^ ": " ^ string_of_value !v) fields)
-    ^ " }"
-  | Int n -> string_of_int n
-  | Float n -> Token.float_to_string n
-  | Str s -> s
-  | Bool b -> string_of_bool b
-  | Unit -> "()"
-  | Closure c -> Printf.sprintf "<fn/%d>" (List.length c.params)
-  | Native (name, _, _) -> Printf.sprintf "<native %s>" name
 
 let as_bool span = function
   | Bool b -> b
   | v -> fail span "Expected a bool condition, got %s." (type_name v)
-
-let contents = function
-  | Array items -> items
-  | List items -> !items
-  | _ -> [||]
-
-(* OCaml's structural comparison raises on functional values. *)
-let rec values_equal a b =
-  match a, b with
-  | Array x, Array y -> x == y
-  | List x, List y -> x == y
-  | Tuple x, Tuple y -> List.length x = List.length y && List.for_all2 values_equal x y
-  | Record x, Record y -> x == y
-  | Variant (n, a), Variant (m, b) ->
-    String.equal n m
-    && List.length a = List.length b
-    && List.for_all2 (fun (_, x) (_, y) -> values_equal x y) a b
-  | Int x, Int y -> x = y
-  | Float x, Float y -> x = y
-  | Str x, Str y -> String.equal x y
-  | Bool x, Bool y -> x = y
-  | Unit, Unit -> true
-  | _ -> false
 
 (* Mixed operands cannot reach here: there is no implicit widening. *)
 let eval_binop span (op : Ast.binop) a b =
@@ -170,7 +68,6 @@ let rec eval env (e : Ast.cps_expr) : value =
   | `Call (callee, args) ->
     let f = eval env callee in
     call span f (List.map (eval env) args)
-  | `Array_lit items -> Array (Array.of_list (List.map (eval env) items))
   | `Tuple items -> Tuple (List.map (eval env) items)
   | `Record_lit fields ->
     Record (List.map (fun (l, v) -> l, ref (eval env v)) fields)
@@ -197,45 +94,14 @@ let rec eval env (e : Ast.cps_expr) : value =
     (match eval env target with
      | Tuple items -> List.nth items index
      | v -> fail span "Cannot take a field of %s." (type_name v))
-  | `Index (target, index) ->
-    (match eval env target, eval env index with
-     | (Array _ | List _) as container, Int i ->
-       let items = contents container in
-       if i < 0 || i >= Array.length items
-       then fail span "Index %d is out of bounds for length %d." i (Array.length items);
-       items.(i)
-     | v, _ -> fail span "Cannot index %s." (type_name v))
-  | `Index_assign (target, index, v) ->
-    let value = eval env v in
-    (match eval env target, eval env index with
-     | (Array _ | List _) as container, Int i ->
-       let items = contents container in
-       if i < 0 || i >= Array.length items
-       then fail span "Index %d is out of bounds for length %d." i (Array.length items);
-       items.(i) <- value;
-       value
-     | v, _ -> fail span "Cannot index %s." (type_name v))
-
 and call span f args =
   match f with
-  | Closure c ->
-    let expected = List.length c.params
-    and got = List.length args in
-    if expected <> got
-    then fail span "Expected %d argument(s) but got %d." expected got;
-    let frame = new_env (Some c.env) in
-    List.iter2 (define frame) c.params args;
-    (try
-       List.iter (exec frame) c.body;
-       Unit
-     with
-     | Return_value (v, _) -> v)
-  | Native (name, arity, fn) ->
-    (match arity with
+  | Fn f ->
+    (match f.arity with
      | Some n when n <> List.length args ->
-       fail span "%s expects %d argument(s) but got %d." name n (List.length args)
+       fail span "%s expects %d argument(s) but got %d." f.name n (List.length args)
      | _ -> ());
-    fn args
+    f.apply span args
   | v -> fail span "Cannot call %s." (type_name v)
 
 and exec env (s : Ast.cps_stmt) : unit =
@@ -266,7 +132,23 @@ and exec env (s : Ast.cps_stmt) : unit =
   (* The closure captures the env it is declared in, which is the same table the
      name lands in — so recursion works without a separate binding step. *)
   | `Fn (name, params, _, body) ->
-    define env name (Closure { params = List.map (fun p -> p.Ast.name) params; body; env })
+    let names = List.map (fun (p : Ast.param) -> p.Ast.name) params in
+    define
+      env
+      name
+      (Fn
+         { name
+         ; arity = Some (List.length names)
+         ; apply =
+             (fun _ args ->
+               let frame = new_env (Some env) in
+               List.iter2 (define frame) names args;
+               (try
+                  List.iter (exec frame) body;
+                  Unit
+                with
+                | Return_value (v, _) -> v))
+         })
   | `Return e ->
     let v =
       match e with
@@ -299,97 +181,7 @@ and exec env (s : Ast.cps_stmt) : unit =
     in
     first cases
 
-let globals out =
-  let env = new_env None in
-  define
-    env
-    "print"
-    (Native
-       ( "print"
-       , None
-       , fun args ->
-           out (String.concat " " (List.map string_of_value args));
-           out "\n";
-           Unit ));
-  define
-    env
-    "str"
-    (Native
-       ( "str"
-       , Some 1
-       , function
-         | [ v ] -> Str (string_of_value v)
-         | _ -> Unit ));
-  define env "clock" (Native ("clock", Some 0, fun _ -> Float (Sys.time ())));
-  let method_ owner name arity fn =
-    let derived = Ast.method_name owner name in
-    define env derived (Native (derived, Some arity, fn))
-  in
-  method_ "Array" "len" 1 (function
-    | [ Array items ] -> Int (Array.length items)
-    | _ -> Unit);
-  method_ "string" "len" 1 (function
-    | [ Str s ] -> Int (String.length s)
-    | _ -> Unit);
-  method_ "string" "trim" 1 (function
-    | [ Str s ] -> Str (String.trim s)
-    | _ -> Unit);
-  method_ "string" "contains" 2 (function
-    | [ Str s; Str needle ] ->
-      let n = String.length needle in
-      let rec search i =
-        i + n <= String.length s
-        && (String.equal (String.sub s i n) needle || search (i + 1))
-      in
-      Bool (n = 0 || search 0)
-    | _ -> Unit);
-  method_ "string" "split" 2 (function
-    | [ Str s; Str sep ] when String.length sep = 1 ->
-      Array
-        (Array.of_list (List.map (fun part -> Str part) (String.split_on_char sep.[0] s)))
-    | _ -> Unit);
-  method_ "List" "len" 1 (function
-    | [ List items ] -> Int (Array.length !items)
-    | _ -> Unit);
-  method_ "List" "push" 2 (function
-    | [ List items; v ] ->
-      items := Array.append !items [| v |];
-      Unit
-    | _ -> Unit);
-  method_ "List" "pop" 1 (function
-    | [ List items ] ->
-      let n = Array.length !items in
-      if n = 0
-      then Unit
-      else (
-        let last = !items.(n - 1) in
-        items := Array.sub !items 0 (n - 1);
-        last)
-    | _ -> Unit);
-  method_ "List" "contains" 2 (function
-    | [ List items; needle ] ->
-      Bool (Array.exists (fun v -> values_equal v needle) !items)
-    | _ -> Unit);
-  method_ "Array" "contains" 2 (function
-    | [ items; needle ] -> Bool (Array.exists (fun v -> values_equal v needle) (contents items))
-    | _ -> Unit);
-  define
-    env
-    "List__of"
-    (Native
-       ( "List__of"
-       , Some 1
-       , function
-         | [ items ] -> List (ref (Array.copy (contents items)))
-         | _ -> Unit ));
-  method_ "string" "chars" 1 (function
-    | [ Str s ] ->
-      Array (Array.init (String.length s) (fun i -> Str (String.make 1 s.[i])))
-    | _ -> Unit);
-  env
-
-let run ?(out = print_string) (program : Ast.cps_stmt list) : (unit, error) result =
-  let env = globals out in
+let run env (program : Ast.cps_stmt list) : (unit, error) result =
   try
     List.iter (exec env) program;
     Ok ()

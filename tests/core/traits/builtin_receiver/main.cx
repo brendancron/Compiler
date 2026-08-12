@@ -10,8 +10,8 @@ impl string {
     }
 }
 
-impl Array {
-    fn first(self) {
+impl Array<T> {
+    fn first(self) -> T {
         return self[0];
     }
 }

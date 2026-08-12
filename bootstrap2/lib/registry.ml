@@ -1,29 +1,32 @@
-(* One table, two readers: the checker asks for a result type, [Resolve] asks
-   what to emit. Two matches that have to agree eventually will not. *)
-
 type emission =
-  (* Why `int + int` costs nothing: selection happened here, not at run time. *)
   | Primitive
   | Call of string
 
+type indexing =
+  { get : string
+  ; set : string
+  }
+
 type entry =
-  { (* [None] means the result is whatever the operands are. *)
+  { (* [None] is whatever the operands are. *)
     result : Types.ty option
   ; emit : emission
   }
 
 type t =
-  { containers : (string, emission) Hashtbl.t
-  ; indexed : (string, emission) Hashtbl.t
+  { (* The variadic constructor a literal of this type becomes. *)
+    containers : (string, string) Hashtbl.t
+  ; indexed : (string, indexing) Hashtbl.t
+  ; constructors : (string, string) Hashtbl.t
   ; exact : (Ast.binop * Types.ty * Types.ty, entry) Hashtbl.t
-  ; (* Operators defined for any two operands of the same type, which cannot be
-       enumerated — equality over every type there will ever be. *)
+  ; (* Any two operands of the same type, which cannot be enumerated. *)
     homogeneous : (Ast.binop, entry) Hashtbl.t
   }
 
 let create () =
   { containers = Hashtbl.create 8
   ; indexed = Hashtbl.create 8
+  ; constructors = Hashtbl.create 8
   ; exact = Hashtbl.create 64
   ; homogeneous = Hashtbl.create 8
   }
@@ -31,6 +34,8 @@ let create () =
 let register_container t name emission = Hashtbl.replace t.containers name emission
 let register_indexed t name emission = Hashtbl.replace t.indexed name emission
 let indexed t name = Hashtbl.find_opt t.indexed name
+let register_constructor t name fn = Hashtbl.replace t.constructors name fn
+let constructor t name = Hashtbl.find_opt t.constructors name
 let container t name = Hashtbl.find_opt t.containers name
 
 let register t op lhs rhs entry = Hashtbl.replace t.exact (op, lhs, rhs) entry
@@ -64,10 +69,6 @@ let unresolved_result (op : Ast.binop) operand =
 
 let builtins () =
   let t = create () in
-  register_container t "Array" Primitive;
-  register_container t "List" (Call "List__of");
-  register_indexed t "Array" Primitive;
-  register_indexed t "List" Primitive;
   let prim result = { result = Some result; emit = Primitive } in
   let arithmetic = [ Ast.Add; Ast.Sub; Ast.Mul; Ast.Div ] in
   let comparisons =

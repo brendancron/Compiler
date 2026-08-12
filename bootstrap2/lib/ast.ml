@@ -127,7 +127,8 @@ type 'e record =
   ]
 
 type 'e nominal =
-  [ `New of string * (string * 'e) list
+  [ `New_call of string * type_expr list * 'e list
+  | `New of string * (string * 'e) list
   | `New_variant of string * string * 'e payload
   ]
 
@@ -183,8 +184,6 @@ type ('e, 's) matching = [ `Match of 'e * (pattern * 's list) list ]
 
 
 type 'e collection = [ `Collection_lit of 'e list ]
-
-type 'e array_lit = [ `Array_lit of 'e list ]
 
 type 'e variant_lit = [ `Variant of string * (string * 'e) list ]
 
@@ -312,10 +311,8 @@ and resolved_expr_kind =
   | resolved_expr vars
   | resolved_expr ops
   | resolved_expr logic
-  | resolved_expr indexing
   | resolved_expr tuple
   | resolved_expr record
-  | resolved_expr array_lit
   | resolved_expr variant_lit
   | resolved_expr reflect
   ]
@@ -336,10 +333,8 @@ and reflected_expr_kind =
   | reflected_expr vars
   | reflected_expr ops
   | reflected_expr logic
-  | reflected_expr indexing
   | reflected_expr tuple
   | reflected_expr record
-  | reflected_expr array_lit
   | reflected_expr variant_lit
   ]
 
@@ -359,10 +354,8 @@ and cps_expr_kind =
   | cps_expr vars
   | cps_expr ops
   | cps_expr logic
-  | cps_expr indexing
   | cps_expr tuple
   | cps_expr record
-  | cps_expr array_lit
   | cps_expr variant_lit
   ]
 
@@ -417,6 +410,8 @@ let map_payload (f : 'a -> 'b) (p : 'a payload) : 'b payload =
 
 let map_nominal (f : 'a -> 'b) (e : 'a nominal) : 'b nominal =
   match e with
+  | `New_call (name, type_args, args) ->
+    `New_call (name, type_args, List.map f args)
   | `New (name, fields) -> `New (name, List.map (fun (l, v) -> l, f v) fields)
   | `New_variant (ty, variant, payload) ->
     `New_variant (ty, variant, map_payload f payload)
@@ -488,10 +483,6 @@ let map_matching (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (m : ('e1, 's1) matching)
 let map_collection (f : 'a -> 'b) (e : 'a collection) : 'b collection =
   match e with
   | `Collection_lit items -> `Collection_lit (List.map f items)
-
-let map_array_lit (f : 'a -> 'b) (e : 'a array_lit) : 'b array_lit =
-  match e with
-  | `Array_lit items -> `Array_lit (List.map f items)
 
 let map_variant_lit (f : 'a -> 'b) (e : 'a variant_lit) : 'b variant_lit =
   match e with

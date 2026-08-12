@@ -89,6 +89,11 @@ let rec string_of_expr (e : Ast.expr) : string =
   | `Field (r, label) -> Printf.sprintf "(field %s %s)" (string_of_expr r) label
   | `Field_assign (r, label, v) ->
     Printf.sprintf "(field-set %s %s %s)" (string_of_expr r) label (string_of_expr v)
+  | `New_call (name, _, args) ->
+    Printf.sprintf
+      "(new %s%s)"
+      name
+      (String.concat "" (List.map (fun a -> " " ^ string_of_expr a) args))
   | `New (name, fields) ->
     Printf.sprintf
       "(new %s%s)"
@@ -278,6 +283,11 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
         (string_of_typed_expr r)
         label
         (string_of_typed_expr v)
+    | `New_call (name, _, args) ->
+      Printf.sprintf
+        "(new %s%s)"
+        name
+        (String.concat "" (List.map (fun a -> " " ^ string_of_typed_expr a) args))
     | `New (name, fields) ->
       Printf.sprintf
         "(new %s%s)"

@@ -119,7 +119,8 @@ let rec repr_fields (f : infer_fields) : infer_fields =
     target
   | f -> f
 
-let default_container = "Array"
+(* Set from whoever supplies the containers. *)
+let default_container : string ref = ref ""
 
 let opaque name args = Named (name, args, [])
 let iopaque name args = INamed (name, args, FEmpty)
@@ -764,6 +765,6 @@ let rec resolve (t : infer_ty) : ty =
     else (
       match kind with
       | Numeric | Addable -> Int
-      | Collection elem -> Named (default_container, [ resolve elem ], [])
+      | Collection elem -> Named (!default_container, [ resolve elem ], [])
       | Any -> Generic id)
   | IVar { contents = Link _ } -> assert false (* repr collapsed these *)

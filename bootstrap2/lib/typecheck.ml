@@ -278,6 +278,8 @@ let rec assigned_in_expr (e : Ast.desugared_expr) acc =
   | `Field_assign (r, _, v) -> assigned_in_expr v (assigned_in_expr r acc)
   | `New (_, fields) ->
     List.fold_left (fun acc (_, v) -> assigned_in_expr v acc) acc fields
+  | `New_call (_, _, args) ->
+    List.fold_left (fun acc a -> assigned_in_expr a acc) acc args
   | `New_variant (_, _, payload) ->
     List.fold_left
       (fun acc (_, v) -> assigned_in_expr v acc)
@@ -329,8 +331,6 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
 
 let assigned_names body =
   List.fold_left (fun acc s -> assigned_in_stmt s acc) [] body
-
-let variadic_builtins = [ "print" ]
 
 let field_of (target : checked_expr) label =
   match Types.repr target.Ast.ann with
@@ -443,7 +443,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     let callee_node = infer_expr env ctx callee in
     let result =
       match callee.Ast.it with
-      | `Var name when List.mem name variadic_builtins -> Types.IUnit
+      | `Var name when List.mem name Builtins.variadic -> Types.IUnit
       | _ ->
         let ret = Types.fresh () in
         let row = Types.fresh_row () in
@@ -570,6 +570,34 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       (fun (i : checked_expr) -> unify_at i.Ast.span elem i.Ast.ann)
       items;
     node container (`Collection_lit items)
+  (* `new T<A>(x)` is a call of the function the registry names for T, so a type
+     that supplies one is constructed the same way any other is. *)
+  | `New_call (name, type_args, args) ->
+    (match Registry.constructor ctx.registry name with
+     | None -> fail span "'%s' cannot be constructed with arguments." name
+     | Some fn ->
+       let scheme =
+         match lookup env fn with
+         | Some scheme -> scheme
+         | None -> fail span "Undefined variable '%s'." fn
+       in
+       let fn_ty = Types.instantiate scheme in
+       let args = List.map (infer_expr env ctx) args in
+       let ret = Types.fresh () in
+       let row = Types.fresh_row () in
+       Types.unify
+         fn_ty
+         (Types.IFn (List.map (fun (a : checked_expr) -> a.Ast.ann) args, ret, row));
+       Types.unify_row row ctx.row;
+       (* Written arguments pin the result; the constructor's own parameters are
+          its business. *)
+       if type_args <> []
+       then
+         unify_at
+           span
+           (named_type span name (List.map infer_ty_of_annotation type_args))
+           ret;
+       node ret (`Call (Ast.annotated span fn_ty (`Var fn), args)))
   | `New (name, fields) ->
     (match Hashtbl.find_opt ctx_types name with
      | Some (Opaque _) -> fail span "'%s' cannot be constructed with 'new'." name
@@ -806,9 +834,7 @@ and declare_impls (body : Ast.desugared_stmt list) =
     body
 
 and self_ty span type_name params =
-  if String.equal type_name "Array"
-  then Types.iopaque "Array" [ Types.fresh () ]
-  else if params = []
+  if params = []
   then infer_ty_of_annotation (Ast.at span (Ast.Ty_name type_name))
   else
     named_type
@@ -883,8 +909,10 @@ and hoist env (body : Ast.desugared_stmt list) =
         List.iter
           (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
             match m.Ast.md_params with
+            (* [declare_impls] reported it; binding it anyway would report the
+               receiver as a mismatch on a parameter the author did write. *)
             | [] -> ()
-            | _ :: rest ->
+            | { Ast.name = "self"; _ } :: rest ->
               let mangled = Ast.method_name type_name m.Ast.md_name in
               let type_params =
                 impl_params
@@ -908,7 +936,8 @@ and hoist env (body : Ast.desugared_stmt list) =
                      (Types.IFn
                         ( param_types
                         , annotated_or_fresh m.Ast.md_signature.Ast.ret
-                        , row )))))
+                        , row ))))
+            | _ -> ())
           methods
       | `Fn (name, params, signature, _) ->
         let type_params = type_params_of s.Ast.span signature.Ast.comptime in
@@ -1373,21 +1402,6 @@ let pure params ret =
   in
   scheme_of (Types.IFn (params, ret, row))
 
-let globals () =
-  let env = new_env None in
-  bind env "str" (pure [ Types.fresh () ] Types.IStr);
-  bind env "clock" (pure [] Types.IFloat);
-  let beta = Types.fresh () in
-  bind
-    env
-    "print"
-    { Types.quantified = List.map fst (Types.free_vars beta)
-    ; quantified_rows = []
-    ; quantified_fields = []
-    ; body = beta
-    };
-  env
-
 let admits registry kind (t : Types.infer_ty) =
   match kind with
   | Types.Collection elem ->
@@ -1406,32 +1420,34 @@ let admits registry kind (t : Types.infer_ty) =
         | Types.Addable -> has Ast.Add
         | _ -> List.exists has [ Ast.Sub; Ast.Mul; Ast.Div; Ast.Less; Ast.Greater ]))
 
-let list_of = "List__of"
-
-let declare_builtin_types () =
+let declare_builtins env =
   List.iter
-    (fun name -> Hashtbl.replace ctx_types name (Opaque [ Types.fresh () ]))
-    [ "Array"; "List" ]
-
-let declare_builtin_methods env =
-  let method_ owner name params ret =
-    Hashtbl.replace ctx_methods (owner, name) ();
-    bind env (Ast.method_name owner name) (pure params ret)
-  in
-  let elem = Types.fresh () in
-  method_ "Array" "len" [ Types.iopaque "Array" [ elem ] ] Types.IInt;
-  method_ "string" "len" [ Types.IStr ] Types.IInt;
-  method_ "string" "trim" [ Types.IStr ] Types.IStr;
-  method_ "string" "contains" [ Types.IStr; Types.IStr ] Types.IBool;
-  method_ "string" "split" [ Types.IStr; Types.IStr ] (Types.iopaque "Array" [ Types.IStr ]);
-  method_ "string" "chars" [ Types.IStr ] (Types.iopaque "Array" [ Types.IStr ]);
-  let item = Types.fresh () in
-  method_ "List" "len" [ Types.iopaque "List" [ item ] ] Types.IInt;
-  method_ "List" "push" [ Types.iopaque "List" [ item ]; item ] Types.IUnit;
-  method_ "List" "pop" [ Types.iopaque "List" [ item ] ] item;
-  method_ "List" "contains" [ Types.iopaque "List" [ item ]; item ] Types.IBool;
-  method_ "Array" "contains" [ Types.iopaque "Array" [ item ]; item ] Types.IBool;
-  bind env list_of (pure [ Types.iopaque "Array" [ item ] ] (Types.iopaque "List" [ item ]))
+    (fun (name, arity) ->
+      Hashtbl.replace ctx_types name (Opaque (List.init arity (fun _ -> Types.fresh ()))))
+    Builtins.types;
+  List.iter
+    (fun (owner, name, signature) ->
+      let params, ret = signature () in
+      Hashtbl.replace ctx_methods (owner, name) ();
+      bind env (Ast.method_name owner name) (pure params ret))
+    Builtins.methods;
+  List.iter
+    (fun (name, signature) ->
+      let params, ret = signature () in
+      bind env name (pure params ret))
+    Builtins.functions;
+  List.iter
+    (fun name ->
+      let anything = Types.fresh () in
+      bind
+        env
+        name
+        { Types.quantified = List.map fst (Types.free_vars anything)
+        ; quantified_rows = []
+        ; quantified_fields = []
+        ; body = anything
+        })
+    Builtins.variadic
 
 let check ~registry (program : Ast.desugared_stmt list)
   : (Ast.typed_stmt list, error list) result
@@ -1439,9 +1455,8 @@ let check ~registry (program : Ast.desugared_stmt list)
   Types.reset ();
   Types.extra_admits := admits registry;
   reset_effects ();
-  let env = globals () in
-  declare_builtin_types ();
-  declare_builtin_methods env;
+  let env = new_env None in
+  declare_builtins env;
   let ctx =
     { registry
     ; return_type = None
@@ -1451,14 +1466,20 @@ let check ~registry (program : Ast.desugared_stmt list)
     }
   in
   let errors = ref [] in
-  (try
-     declare_types program;
-     declare_traits program;
-     declare_impls program;
-     declare_ops registry program;
-     hoist env program
-   with
-   | Located e -> errors := [ e ]);
+  (* Per statement, so one bad declaration does not skip the rest — everything
+     after it would then be checked without the signatures it needs. *)
+  let each pass =
+    List.iter
+      (fun s ->
+        try pass [ s ] with
+        | Located e -> errors := e :: !errors)
+      program
+  in
+  each declare_types;
+  each declare_traits;
+  each declare_impls;
+  each (declare_ops registry);
+  each (hoist env);
   let assigned = assigned_names program in
   let checked =
     List.filter_map
