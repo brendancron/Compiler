@@ -69,10 +69,14 @@ Type parameters and value parameters are handled in different places, which is w
 
 Reify turned out not to be needed for this: a written comptime argument is already syntax, and forwarding one substitutes a literal for a name. It becomes necessary when an argument is a *computed* compile-time value, which is metaprocessing.
 
+A generic body is copied per concrete type it is called at, because an operator or a method inside one cannot be selected while it is generic. Only bodies containing such a construct are copied; a generic function that merely moves values around is served by generalization from a single copy, as before.
+
+Constraints are inferred rather than written, so `fn sum<T>` needs no bound: the `+` in its body is what requires an `op +` at the instantiating type, and the requirement is checked when the copy is made. A written `T: Add` would name a predicate over the operator table as though it were declarable.
+
 | Fixtures | |
 |---|---|
-| Newly passing | `meta/params/func` |
-| Needing change | `core/generics` → `core/comptime`, off `struct`; `type_reuse` needs an annotation, since `.0` on an unannotated parameter never had a type to read |
+| Newly passing | `meta/params/func`, `core/traits/trait_bound` — the latter with its `<T: Summary>` dropped, since the constraint is now inferred |
+| Needing change | `core/generics` → `core/comptime`, off `struct`; `type_reuse` needs an annotation, since `.0` on an unannotated parameter never had a type to read; `traits/errors/unknown_receiver` became `unknown_method`, because a generic receiver is no longer an error |
 
 ### 7 · Operator declarations
 

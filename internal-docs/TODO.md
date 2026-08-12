@@ -24,4 +24,6 @@ Decisions taken deliberately later, with the reason.
 
 **Verify does not check effect rows.** It compares each node against its children, and a row belongs to a function reached through a name. The bug above is exactly the kind it was built to catch and cannot.
 
+**A deferred method call's result type rests on its uses.** When a receiver is a type parameter, the call is checked for the method's existence and its result is a fresh variable, pinned by whatever the caller does with it. `"x " + item.summarize()` pins it to string; a result nobody constrains is not checked against the impl until the copy is made, and not at all if no copy is. Specialization could re-check each copy against the declared method type.
+
 **Name resolution rules.** `tests/core/resolution` pins behaviour that no document describes — shadowing, ordering, and what a name means when several things could provide it.

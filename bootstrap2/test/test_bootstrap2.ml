@@ -71,6 +71,8 @@ let cases =
   ; "tests/core/comptime/parameterized_sums/main"
   ; "tests/core/comptime/value_params/main"
   ; "tests/core/comptime/mixed_params/main"
+  ; "tests/core/traits/trait_bound/main"
+  ; "tests/core/comptime/inferred_constraints/main"
   ; "tests/meta/params/func"
   ]
 
@@ -112,7 +114,7 @@ let error_cases =
   ; "tests/core/traits/errors/no_self"
   ; "tests/core/traits/errors/no_such_method"
   ; "tests/core/traits/errors/arity"
-  ; "tests/core/traits/errors/unknown_receiver"
+  ; "tests/core/traits/errors/unknown_method"
   ; "tests/core/comptime/errors/type_arity"
   ; "tests/core/comptime/errors/comptime_arity"
   ; "tests/core/comptime/errors/not_comptime"
@@ -176,7 +178,16 @@ let interpret source =
             (Printf.sprintf "type error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Error [] -> Error "type check failed"
         | Ok typed ->
-          (match Cps.program (Reflect.program (Resolve.program ~registry typed)) with
+          match Resolve.program ~registry (Specialize.program typed) with
+          | Error e ->
+            Error
+              (Printf.sprintf
+                 "resolve error [%d:%d] %s"
+                 e.span.Ast.line
+                 e.span.Ast.col
+                 e.message)
+          | Ok resolved ->
+          (match Cps.program (Reflect.program resolved) with
            | Error e ->
              Error
                (Printf.sprintf "cps error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
@@ -216,8 +227,13 @@ let rejections source =
         | Error e ->
           Ok (Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Ok desugared ->
-        match Typecheck.check ~registry:(Registry.builtins ()) desugared with
-        | Ok _ -> Error "expected an error, but the program checked"
+        let registry = Registry.builtins () in
+        match Typecheck.check ~registry desugared with
+        | Ok typed ->
+          (match Resolve.program ~registry (Specialize.program typed) with
+           | Ok _ -> Error "expected an error, but the program checked"
+           | Error e ->
+             Ok (Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message))
         | Error errors ->
           Ok
             (String.concat

@@ -95,7 +95,13 @@ let fresh_fields () =
   incr counter;
   FVar (ref (FUnbound !counter))
 
-let reset () = counter := 0
+(* Variables introduced by a written `<T>`. Never defaulted: the author said the
+   function is generic in T, so resolving it to int would contradict them. *)
+let declared_params : (int, unit) Hashtbl.t = Hashtbl.create 8
+
+let reset () =
+  counter := 0;
+  Hashtbl.reset declared_params
 
 let rec repr (t : infer_ty) : infer_ty =
   match t with
@@ -221,6 +227,57 @@ let type_name (t : ty) : string option =
   | Named (name, _, _) | Sum (name, _) -> Some name
   | Tuple _ | Record _ | Fn _ | Generic _ -> None
 
+let rec subst_generic mapping (t : ty) : ty =
+  match t with
+  | Generic id ->
+    (match List.assoc_opt id mapping with
+     | Some replacement -> replacement
+     | None -> t)
+  | Array elem -> Array (subst_generic mapping elem)
+  | Tuple items -> Tuple (List.map (subst_generic mapping) items)
+  | Record fields -> Record (List.map (fun (l, t) -> l, subst_generic mapping t) fields)
+  | Named (name, args, fields) ->
+    Named
+      ( name
+      , List.map (subst_generic mapping) args
+      , List.map (fun (l, t) -> l, subst_generic mapping t) fields )
+  | Sum (name, args) -> Sum (name, List.map (subst_generic mapping) args)
+  | Fn (params, ret, row) ->
+    Fn (List.map (subst_generic mapping) params, subst_generic mapping ret, row)
+  | scalar -> scalar
+
+(* What a concrete type says each [Generic] in a general one stands for. *)
+let rec match_generic (general : ty) (concrete : ty) acc =
+  match general, concrete with
+  | Generic id, _ -> if List.mem_assoc id acc then acc else (id, concrete) :: acc
+  | Array a, Array b -> match_generic a b acc
+  | Tuple a, Tuple b when List.length a = List.length b ->
+    List.fold_left2 (fun acc a b -> match_generic a b acc) acc a b
+  | Record a, Record b | Named (_, _, a), Named (_, _, b) ->
+    List.fold_left
+      (fun acc (label, ty) ->
+        match List.assoc_opt label b with
+        | Some other -> match_generic ty other acc
+        | None -> acc)
+      acc
+      a
+  | Sum (_, a), Sum (_, b) when List.length a = List.length b ->
+    List.fold_left2 (fun acc a b -> match_generic a b acc) acc a b
+  | Fn (pa, ra, _), Fn (pb, rb, _) when List.length pa = List.length pb ->
+    match_generic ra rb (List.fold_left2 (fun acc a b -> match_generic a b acc) acc pa pb)
+  | _ -> acc
+
+let rec has_generic (t : ty) =
+  match t with
+  | Generic _ -> true
+  | Array elem -> has_generic elem
+  | Tuple items -> List.exists has_generic items
+  | Record fields | Named (_, _, fields) ->
+    List.exists (fun (_, t) -> has_generic t) fields
+  | Sum (_, args) -> List.exists has_generic args
+  | Fn (params, ret, _) -> List.exists has_generic params || has_generic ret
+  | _ -> false
+
 let infer_type_name (t : infer_ty) : string option =
   match repr t with
   | IInt -> Some "int"
@@ -301,12 +358,17 @@ let strongest a b =
   | Addable, _ | _, Addable -> Addable
   | Any, Any -> Any
 
+(* Consulted when the lattice rejects a type: a declared operator makes a type
+   admissible that no builtin kind covers. Set by the checker, which is the only
+   thing that knows what has been declared. *)
+let extra_admits : (kind -> infer_ty -> bool) ref = ref (fun _ _ -> false)
+
 let kind_admits kind (t : infer_ty) =
   match kind, t with
   | Any, _ -> true
   | Numeric, (IInt | IFloat) -> true
   | Addable, (IInt | IFloat | IStr) -> true
-  | (Numeric | Addable), _ -> false
+  | (Numeric | Addable), _ -> !extra_admits kind t
 
 let rec occurs id (t : infer_ty) =
   match repr t with
@@ -344,9 +406,12 @@ and unify (a : infer_ty) (b : infer_ty) : unit =
   and b = repr b in
   match a, b with
   | IVar r1, IVar r2 when r1 == r2 -> ()
-  | ( IVar ({ contents = Unbound (_, k1) } as r1)
+  | ( IVar ({ contents = Unbound (id1, k1) } as r1)
     , IVar ({ contents = Unbound (id2, k2) } as r2) ) ->
     r2 := Unbound (id2, strongest k1 k2);
+    (* The survivor inherits the mark, or a declared parameter stops being one
+       the moment an operator gives it a kind. *)
+    if Hashtbl.mem declared_params id1 then Hashtbl.replace declared_params id2 ();
     r1 := Link (IVar r2)
   | IVar ({ contents = Unbound (id, kind) } as r), t
   | t, IVar ({ contents = Unbound (id, kind) } as r) ->
@@ -549,6 +614,11 @@ let instantiate ?(bound = []) (s : scheme) : infer_ty =
     in
     walk s.body)
 
+let declare_param (t : infer_ty) =
+  match repr t with
+  | IVar { contents = Unbound (id, _) } -> Hashtbl.replace declared_params id ()
+  | _ -> ()
+
 let var_id (t : infer_ty) =
   match repr t with
   | IVar { contents = Unbound (id, _) } -> id
@@ -701,7 +771,10 @@ let rec resolve (t : infer_ty) : ty =
      | _ -> Record fields)
   | IFn (params, ret, row) -> Fn (List.map resolve params, resolve ret, resolve_row row)
   | IVar { contents = Unbound (id, kind) } ->
-    (match kind with
-     | Numeric | Addable -> Int
-     | Any -> Generic id)
+    if Hashtbl.mem declared_params id
+    then Generic id
+    else (
+      match kind with
+      | Numeric | Addable -> Int
+      | Any -> Generic id)
   | IVar { contents = Link _ } -> assert false (* repr collapsed these *)

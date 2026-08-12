@@ -9,6 +9,10 @@ type error =
 
 exception Located of error
 
+(* A method call whose receiver is only known once the enclosing function is
+   specialized. *)
+exception Deferred
+
 type checked_expr = (checked_expr_kind, Types.infer_ty) Ast.node
 
 and checked_expr_kind =
@@ -231,7 +235,10 @@ let type_params_of span (comptime : Ast.comptime_param list) =
   List.map
     (fun (p : Ast.comptime_param) ->
       match p.Ast.cp_ty with
-      | None -> p.Ast.cp_name, Types.fresh ()
+      | None ->
+        let var = Types.fresh () in
+        Types.declare_param var;
+        p.Ast.cp_name, var
       | Some _ ->
         fail
           span
@@ -512,13 +519,23 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
   | `Method_call (receiver, name, args) ->
     let receiver = infer_expr env ctx receiver in
     let args = List.map (infer_expr env ctx) args in
+    (try
+    (* A receiver that is still a variable is one the enclosing function is
+       generic in. Specialization gives it a type; all that can be checked here
+       is that the method exists somewhere, so a typo still fails early. *)
     let owner =
       match Types.infer_type_name receiver.Ast.ann with
       | Some owner -> owner
       | None ->
         (match Types.repr receiver.Ast.ann with
          | Types.IVar _ ->
-           fail span "Cannot call '%s': the receiver's type is not known here." name
+           if not
+                (Hashtbl.fold
+                   (fun (_, declared) _ found -> found || String.equal declared name)
+                   ctx_methods
+                   false)
+           then fail span "No type has a method '%s'." name;
+           raise Deferred
          | other ->
            fail
              span
@@ -553,6 +570,8 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
          , row ));
     Types.unify_row row ctx.row;
     node ret (`Method_call (receiver, name, args))
+     with
+     | Deferred -> node (Types.fresh ()) (`Method_call (receiver, name, args)))
   | `Typeof e -> node Types.IStr (`Typeof (infer_expr env ctx e))
   | `Collection_lit items ->
     let elem = Types.fresh () in
@@ -1384,10 +1403,22 @@ let globals () =
     };
   env
 
+let admits registry kind (t : Types.infer_ty) =
+  match Types.concrete t with
+  | None -> false
+  | Some ty ->
+    let has op = Registry.find registry op ty ty <> None in
+    (match kind with
+     | Types.Addable -> has Ast.Add
+     | Types.Numeric ->
+       List.exists has [ Ast.Sub; Ast.Mul; Ast.Div; Ast.Less; Ast.Greater ]
+     | Types.Any -> true)
+
 let check ~registry (program : Ast.desugared_stmt list)
   : (Ast.typed_stmt list, error list) result
   =
   Types.reset ();
+  Types.extra_admits := admits registry;
   reset_effects ();
   let env = globals () in
   let ctx =

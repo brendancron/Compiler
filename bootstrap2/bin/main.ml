@@ -117,7 +117,12 @@ let () =
           then (
             print_endline "-- types --";
             print_string (Printer.string_of_typed_program typed));
-          (match Cps.program (Reflect.program (Resolve.program ~registry typed)) with
+          match Resolve.program ~registry (Specialize.program typed) with
+          | Error e ->
+            report e.span.line e.span.col "Resolve" e.message;
+            exit 65
+          | Ok resolved ->
+          (match Cps.program (Reflect.program resolved) with
            | Error e ->
              report e.span.line e.span.col "CPS" e.message;
              exit 70

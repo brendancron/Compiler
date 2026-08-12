@@ -53,6 +53,16 @@ and operand (p : Ast.param) =
   | Some { Ast.it = Ast.Ty_app (n, _); _ } -> n
   | _ -> "_"
 
+type error =
+  { span : Ast.span
+  ; message : string
+  }
+
+exception Failed of error
+
+let fail span fmt =
+  Printf.ksprintf (fun message -> raise (Failed { span; message })) fmt
+
 let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
   let span = e.Ast.span
   and ann = e.Ast.ann in
@@ -80,7 +90,11 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
       let owner =
         match Types.type_name receiver.Ast.ann with
         | Some owner -> owner
-        | None -> assert false (* the checker dispatched on this name *)
+        | None ->
+          fail
+            receiver.Ast.span
+            "Cannot call '%s': the receiver's type is not known here."
+            name
       in
       let all = receiver :: args in
       `Call (fn_ref span (Ast.method_name owner name) all ann, all)
@@ -168,7 +182,10 @@ and one registry (s : Ast.typed_stmt) : Ast.resolved_stmt =
   | [ single ] -> single
   | many -> { Ast.it = `Block many; span = s.Ast.span; ann = s.Ast.ann }
 
-let program ~registry (p : Ast.typed_stmt list) : Ast.resolved_stmt list =
+let program ~registry (p : Ast.typed_stmt list)
+  : (Ast.resolved_stmt list, error) result
+  =
   Hashtbl.reset declared_rows;
   List.iter record p;
-  block registry p
+  try Ok (block registry p) with
+  | Failed e -> Error e

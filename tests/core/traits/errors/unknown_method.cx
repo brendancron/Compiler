@@ -3,6 +3,6 @@ impl Circle {
     fn area(self) -> int { return self.radius; }
 }
 fn report(shape) {
-    print(shape.area());
+    print(shape.perimeter());
 }
 report(new Circle { radius: 2 });
