@@ -143,3 +143,79 @@ Suggested order, smallest first:
 3. **Run `Specialize.collect` over `Impl_decl` methods**, so a generic method is checked the way a generic function already is.
 4. **Give the prelude a filename and file-relative spans**, before it grows.
 5. **Decide the method-constraint story.** It is the one finding here with no design, and the standard library is what turns it from a corner case into the common path.
+
+## Plan to remediate
+
+Ordered by how quietly a finding fails, then by cost. Each step names what it closes and the fixture that would prove it, so the suite records the fix rather than a commit message.
+
+Steps 1 to 4 are the ones that should land before more standard library is written on top of them. The rest can follow modules.
+
+### 1 · Stop `Specialize` deleting what it did not rewrite
+
+Closes half of finding 1. `specialize.ml:194` drops a generic template unconditionally, including when a call site was left alone because its type never resolved. A deleted function reported as an undefined variable is the worst possible diagnostic for it. Dropping only templates whose every call site was rewritten, and reporting the ones that were not, turns a miscompile into an error at the call site that could not be resolved.
+
+Cheap, and independent of the design question in step 4.
+
+| Fixture | `comptime/errors/unresolved_method` — `fn describe(x) { return x.len(); }`, rejected where the receiver is decided |
+
+### 2 · Run `Specialize` over `impl` methods
+
+Closes finding 2. `specialize.ml:176` matches `Fn` and the statement forms containing one; `Impl_decl` falls into the catch-all. `type_directed` already handles `Impl_decl`, so the walker was written for this and the registration was not.
+
+Until this lands the prelude is written in the regime that is not checked, which is the same regime the collections library will be written in.
+
+| Fixture | `comptime/errors/impl_constraint` — a generic `impl` method using `+` at a type with no `op +`, rejected at the call site the way `fn` already is |
+
+### 3 · Structural equality for aggregates
+
+Closes finding 3. `value.ml:80` compares arrays and records with `==` while variants compare structurally, so which meaning `==` has depends on which constructor the value happens to be. The checker promises one operator over every type; the runtime provides two.
+
+Identity still matters — `var ys = xs` aliases, and mutating through one is visible through the other — but that is what identity is for, not what `==` should mean. A user's `op ==` continues to override.
+
+| Fixture | `core/operators/structural_equality` — arrays, records and nested combinations; and `List.contains` finding a record |
+
+### 4 · Decide the method-constraint story
+
+Closes the rest of finding 1, and it is the one finding with no design anywhere. `typecheck.ml:508` picks a receiver when exactly one type owns a method of that name — a heuristic that is already false for `len` and gets worse with every container added.
+
+Two shapes are available. Infer the requirement, the way operator constraints are inferred: record *has a method named m with this signature* against the type variable and discharge it when the copy is made. Or require it to be written, which is what every language of this shape does and which [Comptime Params](Comptime%20Params.md) explicitly rules out for operators.
+
+The operator half works because the registry can be consulted at the copy site. A method table keyed by `(type, name)` can be consulted the same way, so the inferred shape is reachable — the work is carrying the requirement through generalization and instantiation, which `quantified_rows` and `quantified_fields` already demonstrate.
+
+`Hash` and `ToString` are the two cases the standard library needs first.
+
+| Fixture | `core/traits/inferred_method_constraint` — the same method name on several types, dispatched correctly through a generic function |
+
+### 5 · One builtin table
+
+Closes finding 5 and the compiler half of finding 9. A record carrying name, signature and implementation, with `Builtins.types` / `methods` / `functions` / `values` derived from it, and a startup assertion that every name the registry emits exists. `__array_get` and its siblings are type checked for the first time.
+
+This is what makes adding a builtin one edit instead of three that must agree by convention.
+
+| Fixture | none — an assertion at startup, and the existing suite proves nothing regressed |
+
+### 6 · An unwrapping layer
+
+Closes the second half of finding 10. `as_int`, `as_str`, `arg1`, `arg2` combinators collapse the two fifths of `builtins.ml` that is unreachable argument-shape failure. Worth doing before the table above rather than after, since it decides what an entry looks like.
+
+### 7 · Give the prelude a filename
+
+Closes finding 6. Spans need a source identity before there are two sources; today a prelude error reports at a prelude line as though it were the user's file. A reserved prefix for compiler-generated names — `Ast.method_name`, `Specialize`'s copies — closes the collision half.
+
+Do this with modules, which is when a third source appears anyway.
+
+### 8 · Printing through a declared interface
+
+Closes finding 4. `print` special-cased by name in the checker is a hole — it ignores scope, so a user's own `print` produces a `Verify` failure rather than a shadowing error — and `Value.string_of_value` gives a type no way to control its own rendering. `stdlib/ops/ToString.cx` is the intended answer and is wired to nothing.
+
+Needs step 4 first: `ToString` as a constraint is exactly the mechanism that does not exist yet.
+
+### 9 · Surface syntax for the registry
+
+Closes finding 8. `op` declarations reach the operator table; nothing reaches `containers`, `indexed`, or `constructors`, so `[…]` and `[i]` are privileges of types blessed in OCaml. [Elaboration](Elaboration.md) already gives indexing the form it should take — `op [](r: Ring<T>, i: int)` — and [Collection Literals](Collection%20Literals.md) leaves the literal case as the `of` convention, which is a naming rule rather than a table entry and should be reconsidered.
+
+### 10 · Fallibility, and per-unit compiler state
+
+Finding 7 needs `Option`, `Result` or effects before the prelude can stop provoking array panics to signal a bad index; the effect machinery is the one mechanism that could already express it and no builtin uses it.
+
+The global tables in finding 10 are correct for one program per process and wrong for Step 10, which compiles several units, and Step 11, where compilation calls itself. Fix them when the second unit exists, not before.
