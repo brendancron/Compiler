@@ -6,6 +6,26 @@ Ordered work for `bootstrap2`, with the fixtures each step should light up and t
 
 ## Order
 
+## What each step is claiming
+
+`bootstrap2/test/test_bootstrap2.ml` carries a third list beside `cases` and `error_cases`: `expected_failing`, every fixture under `tests/` that neither claims, each tagged with what it is waiting on. The suite asserts they still fail, so a fixture that starts working is reported rather than sitting unnoticed — which is how four came to be passing with nothing recording it.
+
+The tags a step can discharge are `Step "..."`; the rest will not be fixed by finishing one:
+
+| Tag | Count | Meaning |
+|---|---|---|
+| `Step "9 · Iteration"` | 3 | `for (x in xs)` |
+| `Step "10 · Modules"` | 23 | `import`, and everything in `stdlib/` behind it |
+| `Step "11 · Metaprocessing"` | 12 | `meta`, `gen`, `derive` |
+| `Step "12 · typeof yields a Type"` | 6 | effect rows and enums in `typeof` output |
+| `Step "8 · List, Set, Map"` | 3 | `push`, `len`, and the container types |
+| `Rewrite` | 5 | predate a syntax decision — `struct`, `enum`, `fn(int): int` |
+| `Deferred` | 8 | taken later on purpose; see [TODO](TODO.md) |
+| `Backend` | 9 | `compile/*`, which needs an LLVM path this bootstrap has not got |
+| `Unplanned` | 19 | no design anywhere yet — trailing lambdas, `%`, `&&`, string indexing, generic effects, the file builtins |
+
+Two things that reads out of that table. **Step 8 is worth three fixtures, not the pile it looks like** — most of what mentions a collection is behind `import` first. And **modules unlock more than the next four steps combined**, because every `stdlib/` fixture is one `import` away from even parsing.
+
 ### 0 · Pipeline restructure
 
 No new language features. Introduce the registry as a value threaded through the compiler, move the builtin operator rules out of the checker's hardcoded arms and the interpreter's match into it, add the `Resolve` pass that reads it, and move `+=` and `++` out of `Desugar` so they reach the checker intact. Add tree verification after every node-constructing pass.

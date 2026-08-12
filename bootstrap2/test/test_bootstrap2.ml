@@ -20,6 +20,10 @@ let cases =
   ; "tests/core/control/for_c"
   ; "tests/core/operators/comparison"
   ; "tests/core/operators/compound_assign"
+  ; "tests/core/operators/unary_minus"
+  ; "tests/core/type_annotations/var_annot"
+  ; "tests/core/type_annotations/fn_annot"
+  ; "tests/core/type_annotations/mixed_annot"
   ; "tests/core/strings/concat"
   ; "tests/core/functions/fib"
   ; "tests/core/functions/greeting"
@@ -211,6 +215,119 @@ let interpret source =
                      e.span.Ast.col
                      e.message)))))
 
+(* Why a fixture does not run yet. A step is one from the implementation plan;
+   the rest will not be fixed by finishing it. *)
+type blocker =
+  | Step of string
+  | Rewrite (* predates a syntax decision, so the fixture is what is wrong *)
+  | Deferred (* a decision taken later on purpose; see internal-docs/TODO.md *)
+  | Backend (* needs the LLVM path, which this bootstrap does not have *)
+  | Unplanned (* no design for it anywhere yet *)
+
+(* Every fixture under tests/ that neither [cases] nor [error_cases] claims.
+   The suite asserts each still fails, so one that starts working is reported
+   rather than sitting unnoticed — which is how four of them came to be passing
+   with nothing recording it. *)
+let expected_failing : (string * blocker) list =
+    (* 8 · List, Set, Map *)
+  [ "tests/core/lists/list_methods", Step "8 · List, Set, Map"
+  ; "tests/core/operators/not_index", Step "8 · List, Set, Map"
+  ; "tests/core/strings/string_methods", Step "8 · List, Set, Map"
+    (* 9 · Iteration *)
+  ; "tests/core/lists/list", Step "9 · Iteration"
+  ; "tests/effects/logic/multi_guard", Step "9 · Iteration"
+  ; "tests/effects/logic/simple_guard", Step "9 · Iteration"
+    (* 10 · Modules *)
+  ; "tests/core/for_tuple/for_tuple", Step "10 · Modules"
+  ; "tests/core/modules/alias/main", Step "10 · Modules"
+  ; "tests/core/modules/circular/main", Step "10 · Modules"
+  ; "tests/core/modules/main", Step "10 · Modules"
+  ; "tests/core/modules/multi_export/main", Step "10 · Modules"
+  ; "tests/core/modules/qualified/main", Step "10 · Modules"
+  ; "tests/core/modules/same_dir/main", Step "10 · Modules"
+  ; "tests/core/modules/selective/main", Step "10 · Modules"
+  ; "tests/core/modules/wildcard/main", Step "10 · Modules"
+  ; "tests/stdlib/automata/dfa/dfa", Step "10 · Modules"
+  ; "tests/stdlib/automata/nfa/nfa", Step "10 · Modules"
+  ; "tests/stdlib/error/error", Step "10 · Modules"
+  ; "tests/stdlib/fallible/fallible", Step "10 · Modules"
+  ; "tests/stdlib/hashmap/hashmap", Step "10 · Modules"
+  ; "tests/stdlib/hashset/hashset", Step "10 · Modules"
+  ; "tests/stdlib/iterable/iterable", Step "10 · Modules"
+  ; "tests/stdlib/list/list", Step "10 · Modules"
+  ; "tests/stdlib/math/math", Step "10 · Modules"
+  ; "tests/stdlib/regex/regex/regex", Step "10 · Modules"
+  ; "tests/stdlib/string/string", Step "10 · Modules"
+  ; "tests/stdlib/stringbuilder/stringbuilder", Step "10 · Modules"
+  ; "tests/stdlib/toml/toml/toml", Step "10 · Modules"
+  ; "tests/stdlib/tostring/tostring", Step "10 · Modules"
+    (* 11 · Metaprocessing *)
+  ; "tests/meta/codegen/basic", Step "11 · Metaprocessing"
+  ; "tests/meta/codegen/env", Step "11 · Metaprocessing"
+  ; "tests/meta/codegen/gen_meta", Step "11 · Metaprocessing"
+  ; "tests/meta/codegen/gen_symbol", Step "11 · Metaprocessing"
+  ; "tests/meta/codegen/greeting", Step "11 · Metaprocessing"
+  ; "tests/meta/codegen/nested", Step "11 · Metaprocessing"
+  ; "tests/meta/codegen/sub1", Step "11 · Metaprocessing"
+  ; "tests/meta/derive/basic/main", Step "11 · Metaprocessing"
+  ; "tests/meta/execution/basic", Step "11 · Metaprocessing"
+  ; "tests/meta/execution/nested", Step "11 · Metaprocessing"
+  ; "tests/meta/functions/fib", Step "11 · Metaprocessing"
+  ; "tests/meta/functions/meta_fn", Step "11 · Metaprocessing"
+    (* 12 · typeof yields a Type *)
+  ; "tests/reflection/typeof_effect_ctl", Step "12 · typeof yields a Type"
+  ; "tests/reflection/typeof_effect_fn_vs_ctl", Step "12 · typeof yields a Type"
+  ; "tests/reflection/typeof_effect_multi", Step "12 · typeof yields a Type"
+  ; "tests/reflection/typeof_effect_transitive", Step "12 · typeof yields a Type"
+  ; "tests/reflection/typeof_enum", Step "12 · typeof yields a Type"
+  ; "tests/reflection/typeof_slice", Step "12 · typeof yields a Type"
+    (* Rewrite *)
+  ; "tests/core/builtins/free", Rewrite
+  ; "tests/core/enums/unit_variants", Rewrite
+  ; "tests/core/enums/wildcard", Rewrite
+  ; "tests/core/structs/struct2", Rewrite
+  ; "tests/core/structs/struct_dot_assign", Rewrite
+  ; "tests/types/gadt/main", Rewrite
+    (* Deferred *)
+  ; "tests/core/defer/defer_basic", Deferred
+  ; "tests/core/defer/defer_lifo", Deferred
+  ; "tests/core/defer/defer_return", Deferred
+  ; "tests/core/embed/embed", Deferred
+  ; "tests/core/resolution/symbol_res", Deferred
+  ; "tests/core/slices/negative_index", Deferred
+  ; "tests/core/slices/slice_range", Deferred
+  ; "tests/core/strings/string_slice", Deferred
+    (* Backend *)
+  ; "tests/compile/m0/m0", Backend
+  ; "tests/compile/m1/fib", Backend
+  ; "tests/compile/m2/struct", Backend
+  ; "tests/compile/m3/fact", Backend
+  ; "tests/compile/m4/countdown", Backend
+  ; "tests/compile/m5/sum", Backend
+  ; "tests/compile/m6/apply", Backend
+  ; "tests/compile/m7/safe_div", Backend
+  ; "tests/compile/m8/gadt", Backend
+    (* Unplanned *)
+  ; "tests/core/builtins/conversions", Unplanned
+  ; "tests/core/builtins/ord", Unplanned
+  ; "tests/core/builtins/readfile", Unplanned
+  ; "tests/core/builtins/writefile", Unplanned
+  ; "tests/core/functions/trailing_after_args", Unplanned
+  ; "tests/core/functions/trailing_explicit_param", Unplanned
+  ; "tests/core/functions/trailing_foreach", Unplanned
+  ; "tests/core/functions/trailing_it", Unplanned
+  ; "tests/core/functions/trailing_multi_param", Unplanned
+  ; "tests/core/math/modulus", Unplanned
+  ; "tests/core/operators/logical", Unplanned
+  ; "tests/core/operators/logical_symbols", Unplanned
+  ; "tests/core/operators/precedence", Unplanned
+  ; "tests/core/strings/string_index", Unplanned
+  ; "tests/core/strings/string_starts_ends", Unplanned
+  ; "tests/core/structs/struct", Unplanned
+  ; "tests/effects/async/async", Unplanned
+  ; "tests/effects/generic/generic", Unplanned
+  ]
+
 (* Formats diagnostics the way a .err file spells them. *)
 let rejections source =
   match Scanner.scan_tokens source with
@@ -283,13 +400,35 @@ let run_case root name =
         (normalize actual);
       false)
 
+(* A fixture is expected to fail, so passing is the failure. *)
+let run_expected_failing root (name, blocker) =
+  let path ext = Filename.concat root (name ^ ext) in
+  let expected = if Sys.file_exists (path ".txt") then Some (read_file (path ".txt")) else None in
+  match interpret (read_file (path ".cx")), expected with
+  | Ok actual, Some expected when String.equal (normalize actual) (normalize expected) ->
+    Printf.printf
+      "PASSES %s\n  now works; move it into `cases` (was waiting on %s)\n"
+      name
+      (match blocker with
+       | Step step -> step
+       | Rewrite -> "a rewrite"
+       | Deferred -> "a deferred decision"
+       | Backend -> "the backend"
+       | Unplanned -> "a design");
+    false
+  | _ -> true
+
 let () =
   match repo_root () with
   | None ->
     prerr_endline "could not locate the repo root (set CRONYX_REPO_ROOT)";
     exit 1
   | Some root ->
-    let results = List.map (run_case root) cases @ List.map (run_error_case root) error_cases in
+    let results =
+      List.map (run_case root) cases
+      @ List.map (run_error_case root) error_cases
+      @ List.map (run_expected_failing root) expected_failing
+    in
     let failed = List.length (List.filter not results) in
     Printf.printf "\n%d/%d passed\n" (List.length results - failed) (List.length results);
     if failed > 0 then exit 1
