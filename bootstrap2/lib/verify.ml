@@ -85,7 +85,7 @@ let rec expr (e : Ast.cps_expr) : unit =
       List.sort compare (List.map (fun (l, (v : Ast.cps_expr)) -> l, v.Ast.ann) fields)
     in
     (match ann with
-     | Types.Record declared | Types.Named (_, declared) ->
+     | Types.Record declared | Types.Named (_, _, declared) ->
        if declared <> actual
        then
          fail
@@ -98,7 +98,7 @@ let rec expr (e : Ast.cps_expr) : unit =
   | `Field (target, label) ->
     expr target;
     (match target.Ast.ann with
-     | Types.Record fields | Types.Named (_, fields) ->
+     | Types.Record fields | Types.Named (_, _, fields) ->
        (match List.assoc_opt label fields with
         | Some ty -> expect span "A field" ty ann
         | None -> fail span "A record has no field '%s'." label)
@@ -108,7 +108,7 @@ let rec expr (e : Ast.cps_expr) : unit =
     expr target;
     expr v;
     (match target.Ast.ann with
-     | Types.Record fields | Types.Named (_, fields) ->
+     | Types.Record fields | Types.Named (_, _, fields) ->
        (match List.assoc_opt label fields with
         | Some ty ->
           expect v.Ast.span "An assigned field" ty v.Ast.ann;

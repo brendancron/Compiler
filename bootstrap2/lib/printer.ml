@@ -58,6 +58,12 @@ let rec string_of_expr (e : Ast.expr) : string =
       "(call %s%s)"
       (string_of_expr callee)
       (String.concat "" (List.map (fun a -> " " ^ string_of_expr a) args))
+  | `Comptime_call (callee, type_args, args) ->
+    Printf.sprintf
+      "(call %s<%s>%s)"
+      (string_of_expr callee)
+      (String.concat ", " (List.map string_of_type_expr type_args))
+      (String.concat "" (List.map (fun a -> " " ^ string_of_expr a) args))
   | `Method_call (receiver, name, args) ->
     Printf.sprintf
       "(. %s %s%s)"
@@ -168,11 +174,14 @@ let rec write_stmt buf indent (s : Ast.stmt) =
          (Ast.string_of_binop op)
          (String.concat " " (List.map string_of_param params)))
       body
-  | `Type_decl (name, body) ->
+  | `Type_decl (name, params, body) ->
     line
-      "%s(type %s%s)\n"
+      "%s(type %s%s%s)\n"
       pad
       name
+      (match params with
+       | [] -> ""
+       | params -> Printf.sprintf "<%s>" (String.concat ", " params))
       (match body with
        | Ast.T_fields fields ->
          String.concat "" (List.map (fun (l, _) -> " " ^ l) fields)
@@ -194,7 +203,7 @@ let rec write_stmt buf indent (s : Ast.stmt) =
       (String.concat
          ""
          (List.map (fun (m : Ast.method_sig) -> " " ^ m.Ast.ms_name) methods))
-  | `Impl_decl (trait, type_name, methods) ->
+  | `Impl_decl (trait, type_name, _, methods) ->
     nested
       (match trait with
        | Some trait -> Printf.sprintf "impl %s for %s" trait type_name
@@ -331,11 +340,11 @@ let rec write_typed_stmt buf indent (s : Ast.typed_stmt) =
          (String.concat "" (List.map (fun h -> " handle " ^ h.Ast.handled) handlers)))
       (body @ List.concat_map (fun h -> List.concat_map (fun a -> a.Ast.arm_body) h.Ast.arms) handlers)
   | `Resume value -> line "%s(resume %s)\n" pad (opt_typed_expr value)
-  | `Type_decl (name, _) -> line "%s(type %s)\n" pad name
+  | `Type_decl (name, _, _) -> line "%s(type %s)\n" pad name
   | `Op_decl (op, _, _, body) ->
     nested (Printf.sprintf "op %s" (Ast.string_of_binop op)) body
   | `Trait_decl (name, _) -> line "%s(trait %s)\n" pad name
-  | `Impl_decl (trait, type_name, methods) ->
+  | `Impl_decl (trait, type_name, _, methods) ->
     nested
       (match trait with
        | Some trait -> Printf.sprintf "impl %s for %s" trait type_name

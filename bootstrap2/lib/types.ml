@@ -21,11 +21,12 @@ and ty =
   | Tuple of ty list
   | Record of fields
   (* Nominal: two declarations with identical fields are different types. The
-     fields ride along so a field access needs no lookup. *)
-  | Named of string * fields
+     type arguments come first and the instantiated fields ride along, so a
+     field access needs no lookup. *)
+  | Named of string * ty list * fields
   (* Nominal, and its variants live in the declaration table rather than in the
      type: nothing reaches a variant except by matching. *)
-  | Sum of string
+  | Sum of string * ty list
   | Fn of ty list * ty * row
   (* Quantified, not unresolved. Reaching codegen means the call site was never
      monomorphized. *)
@@ -46,8 +47,8 @@ type infer_ty =
   | IArray of infer_ty
   | ITuple of infer_ty list
   | IRecord of infer_fields
-  | INamed of string * infer_fields
-  | ISum of string
+  | INamed of string * infer_ty list * infer_fields
+  | ISum of string * infer_ty list
   | IFn of infer_ty list * infer_ty * infer_row
   | IVar of tv ref
 
@@ -157,7 +158,12 @@ let string_of_infer_row (r : infer_row) =
   | labels, open_ ->
     Printf.sprintf " <%s%s>" (String.concat ", " labels) (if open_ then "|_" else "")
 
-let rec string_of_infer_ty (t : infer_ty) : string =
+let rec string_of_infer_args (args : infer_ty list) =
+  match args with
+  | [] -> ""
+  | args -> Printf.sprintf "<%s>" (String.concat ", " (List.map string_of_infer_ty args))
+
+and string_of_infer_ty (t : infer_ty) : string =
   match repr t with
   | IInt -> "int"
   | IFloat -> "float"
@@ -167,7 +173,8 @@ let rec string_of_infer_ty (t : infer_ty) : string =
   | IArray elem -> Printf.sprintf "Array<%s>" (string_of_infer_ty elem)
   | ITuple items ->
     Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_infer_ty items))
-  | INamed (name, _) | ISum name -> name
+  | INamed (name, args, _) | ISum (name, args) ->
+    name ^ string_of_infer_args args
   | IRecord f ->
     let rec fields f =
       match repr_fields f with
@@ -186,7 +193,12 @@ let rec string_of_infer_ty (t : infer_ty) : string =
   | IVar { contents = Unbound (id, _) } -> Printf.sprintf "'%d" id
   | IVar { contents = Link _ } -> assert false (* repr collapsed these *)
 
-let rec string_of_ty (t : ty) : string =
+let rec string_of_args (args : ty list) =
+  match args with
+  | [] -> ""
+  | args -> Printf.sprintf "<%s>" (String.concat ", " (List.map string_of_ty args))
+
+and string_of_ty (t : ty) : string =
   match t with
   | Int -> "int"
   | Float -> "float"
@@ -196,7 +208,7 @@ let rec string_of_ty (t : ty) : string =
   | Array elem -> Printf.sprintf "Array<%s>" (string_of_ty elem)
   | Tuple items ->
     Printf.sprintf "(%s)" (String.concat ", " (List.map string_of_ty items))
-  | Named (name, _) | Sum name -> name
+  | Named (name, args, _) | Sum (name, args) -> name ^ string_of_args args
   | Record fields ->
     Printf.sprintf
       "{ %s }"
@@ -221,7 +233,7 @@ let type_name (t : ty) : string option =
   | Bool -> Some "bool"
   | Unit -> Some "unit"
   | Array _ -> Some "Array"
-  | Named (name, _) | Sum name -> Some name
+  | Named (name, _, _) | Sum (name, _) -> Some name
   | Tuple _ | Record _ | Fn _ | Generic _ -> None
 
 (* The same, before inference has finished. A receiver only has to be nominal
@@ -235,7 +247,7 @@ let infer_type_name (t : infer_ty) : string option =
   | IBool -> Some "bool"
   | IUnit -> Some "unit"
   | IArray _ -> Some "Array"
-  | INamed (name, _) | ISum name -> Some name
+  | INamed (name, _, _) | ISum (name, _) -> Some name
   | ITuple _ | IRecord _ | IFn _ | IVar _ -> None
 
 (* ---- row unification ---- *)
@@ -323,7 +335,7 @@ let rec occurs id (t : infer_ty) =
   | IVar { contents = Unbound (id', _) } -> id = id'
   | IArray elem -> occurs id elem
   | ITuple items -> List.exists (occurs id) items
-  | IRecord f | INamed (_, f) ->
+  | IRecord f | INamed (_, _, f) ->
     let rec walk f =
       match repr_fields f with
       | FEmpty | FVar _ -> false
@@ -368,9 +380,12 @@ and unify (a : infer_ty) (b : infer_ty) : unit =
   | IInt, IInt | IFloat, IFloat | IStr, IStr | IBool, IBool | IUnit, IUnit -> ()
   | IArray a, IArray b -> unify a b
   | IRecord a, IRecord b -> unify_fields a b
-  (* Nominal, so the name decides and the fields follow from it. *)
-  | INamed (a, _), INamed (b, _) when String.equal a b -> ()
-  | ISum a, ISum b when String.equal a b -> ()
+  (* Nominal, so the name decides; the fields follow from the arguments, which
+     is why only those are unified. *)
+  | INamed (a, xs, _), INamed (b, ys, _)
+    when String.equal a b && List.length xs = List.length ys -> List.iter2 unify xs ys
+  | ISum (a, xs), ISum (b, ys)
+    when String.equal a b && List.length xs = List.length ys -> List.iter2 unify xs ys
   | ITuple a, ITuple b ->
     if List.length a <> List.length b
     then
@@ -408,7 +423,11 @@ let free_vars (t : infer_ty) : (int * kind) list =
       if not (List.mem_assoc id !acc) then acc := (id, kind) :: !acc
     | IArray elem -> walk elem
     | ITuple items -> List.iter walk items
-    | IRecord f | INamed (_, f) -> walk_fields walk f
+    | IRecord f -> walk_fields walk f
+    | INamed (_, args, f) ->
+      List.iter walk args;
+      walk_fields walk f
+    | ISum (_, args) -> List.iter walk args
     | IFn (params, ret, _) ->
       List.iter walk params;
       walk ret
@@ -430,7 +449,11 @@ let free_row_vars (t : infer_ty) : int list =
     match repr t with
     | IArray elem -> walk elem
     | ITuple items -> List.iter walk items
-    | IRecord f | INamed (_, f) -> walk_fields walk f
+    | IRecord f -> walk_fields walk f
+    | INamed (_, args, f) ->
+      List.iter walk args;
+      walk_fields walk f
+    | ISum (_, args) -> List.iter walk args
     | IFn (params, ret, row) ->
       List.iter walk params;
       walk ret;
@@ -456,7 +479,11 @@ let free_field_vars (t : infer_ty) : int list =
     match repr t with
     | IArray elem -> walk elem
     | ITuple items -> List.iter walk items
-    | IRecord f | INamed (_, f) -> walk_fields f
+    | IRecord f -> walk_fields f
+    | INamed (_, args, f) ->
+      List.iter walk args;
+      walk_fields f
+    | ISum (_, args) -> List.iter walk args
     | IFn (params, ret, _) ->
       List.iter walk params;
       walk ret
@@ -476,13 +503,17 @@ let generalize ~env_vars ~env_rows ~env_fields body =
   ; body
   }
 
-let instantiate (s : scheme) : infer_ty =
+(* [bound] pins quantified variables in advance, which is what writing
+   `f<int>(x)` does: the parameter is decided before the arguments are checked
+   rather than recovered from them. *)
+let instantiate ?(bound = []) (s : scheme) : infer_ty =
   if s.quantified = [] && s.quantified_rows = [] && s.quantified_fields = []
   then s.body
   else (
     let types = Hashtbl.create 8
     and rows = Hashtbl.create 8
     and fields = Hashtbl.create 8 in
+    List.iter (fun (id, t) -> Hashtbl.replace types id t) bound;
     let rec walk_row r =
       match repr_row r with
       | REmpty -> REmpty
@@ -513,8 +544,13 @@ let instantiate (s : scheme) : infer_ty =
         else original
       | IArray elem -> IArray (walk elem)
       | ITuple items -> ITuple (List.map walk items)
+      | ISum (name, args) -> ISum (name, List.map walk args)
       | (IRecord _ | INamed _) as r ->
-        let f = (match r with IRecord f | INamed (_, f) -> f | _ -> assert false) in
+        let f =
+          match r with
+          | IRecord f | INamed (_, _, f) -> f
+          | _ -> assert false
+        in
         let rec copy f =
           match repr_fields f with
           | FEmpty -> FEmpty
@@ -532,16 +568,53 @@ let instantiate (s : scheme) : infer_ty =
           | FCons (label, ty, rest) -> FCons (label, walk ty, copy rest)
         in
         (match r with
-         | INamed (name, _) -> INamed (name, copy f)
+         | INamed (name, args, _) -> INamed (name, List.map walk args, copy f)
          | _ -> IRecord (copy f))
       | IFn (params, ret, row) -> IFn (List.map walk params, walk ret, walk_row row)
       | concrete -> concrete
     in
     walk s.body)
 
+let var_id (t : infer_ty) =
+  match repr t with
+  | IVar { contents = Unbound (id, _) } -> id
+  | other -> error "Not a type variable: %s." (string_of_infer_ty other)
+
+(* Copy [t], replacing each variable named in [mapping]. This is what a
+   declaration's parameters are for: `type Pair<A, B>` stores one variable per
+   parameter, and every use of `Pair` replaces them with that use's arguments. *)
+let rec substitute mapping (t : infer_ty) : infer_ty =
+  match repr t with
+  | IVar { contents = Unbound (id, _) } as original ->
+    (match List.assoc_opt id mapping with
+     | Some replacement -> replacement
+     | None -> original)
+  | IArray elem -> IArray (substitute mapping elem)
+  | ITuple items -> ITuple (List.map (substitute mapping) items)
+  | IRecord f -> IRecord (substitute_fields mapping f)
+  | INamed (name, args, f) ->
+    INamed
+      (name, List.map (substitute mapping) args, substitute_fields mapping f)
+  | ISum (name, args) -> ISum (name, List.map (substitute mapping) args)
+  | IFn (params, ret, row) ->
+    IFn (List.map (substitute mapping) params, substitute mapping ret, row)
+  | concrete -> concrete
+
+and substitute_fields mapping (f : infer_fields) : infer_fields =
+  match repr_fields f with
+  | FCons (label, ty, rest) ->
+    FCons (label, substitute mapping ty, substitute_fields mapping rest)
+  | other -> other
+
 (* The resolved type, but only when nothing is still being inferred. Used where
    a lookup needs a concrete type and must not force a defaulting decision. *)
-let rec concrete (t : infer_ty) : ty option =
+let rec concrete_all (args : infer_ty list) : ty list option =
+  List.fold_right
+    (fun a acc -> Option.bind acc (fun acc -> Option.map (fun a -> a :: acc) (concrete a)))
+    args
+    (Some [])
+
+and concrete (t : infer_ty) : ty option =
   let ( let* ) = Option.bind in
   match repr t with
   | IInt -> Some Int
@@ -552,8 +625,11 @@ let rec concrete (t : infer_ty) : ty option =
   | IArray elem ->
     let* elem = concrete elem in
     Some (Array elem)
-  | ISum name -> Some (Sum name)
-  | INamed (name, f) ->
+  | ISum (name, args) ->
+    let* args = concrete_all args in
+    Some (Sum (name, args))
+  | INamed (name, args, f) ->
+    let* args = concrete_all args in
     let rec collect f =
       match repr_fields f with
       | FEmpty | FVar _ -> Some []
@@ -563,7 +639,7 @@ let rec concrete (t : infer_ty) : ty option =
         Some ((label, ty) :: rest)
     in
     let* fields = collect f in
-    Some (Named (name, List.sort compare fields))
+    Some (Named (name, args, List.sort compare fields))
   | IRecord f ->
     let rec collect f =
       match repr_fields f with
@@ -615,10 +691,12 @@ let rec of_ty (t : ty) : infer_ty =
   | Record fields ->
     IRecord
       (List.fold_right (fun (l, t) rest -> FCons (l, of_ty t, rest)) fields FEmpty)
-  | Named (name, fields) ->
+  | Named (name, args, fields) ->
     INamed
-      (name, List.fold_right (fun (l, t) rest -> FCons (l, of_ty t, rest)) fields FEmpty)
-  | Sum name -> ISum name
+      ( name
+      , List.map of_ty args
+      , List.fold_right (fun (l, t) rest -> FCons (l, of_ty t, rest)) fields FEmpty )
+  | Sum (name, args) -> ISum (name, List.map of_ty args)
   | Fn (params, ret, row) ->
     IFn
       ( List.map of_ty params
@@ -645,8 +723,8 @@ let rec resolve (t : infer_ty) : ty =
   | IUnit -> Unit
   | IArray elem -> Array (resolve elem)
   | ITuple items -> Tuple (List.map resolve items)
-  | ISum name -> Sum name
-  | IRecord f | INamed (_, f) ->
+  | ISum (name, args) -> Sum (name, List.map resolve args)
+  | IRecord f | INamed (_, _, f) ->
     let rec collect f =
       (* An unconstrained tail closes, the way an unconstrained effect row
          does. *)
@@ -656,7 +734,7 @@ let rec resolve (t : infer_ty) : ty =
     in
     let fields = List.sort compare (collect f) in
     (match repr t with
-     | INamed (name, _) -> Named (name, fields)
+     | INamed (name, args, _) -> Named (name, List.map resolve args, fields)
      | _ -> Record fields)
   | IFn (params, ret, row) -> Fn (List.map resolve params, resolve ret, resolve_row row)
   | IVar { contents = Unbound (id, kind) } ->

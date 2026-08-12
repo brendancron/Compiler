@@ -160,6 +160,32 @@ and row_annotation s : string list =
       ignore (consume s Token.Greater "Expected '>' after effect row.");
       labels)
 
+(* `<T>`, `<T, n: int>`. Absent is the empty list, so nothing distinguishes a
+   declaration that writes `<>` from one that writes nothing. *)
+let comptime_params s : Ast.comptime_param list =
+  match matches s [ Token.Less ] with
+  | None -> []
+  | Some _ ->
+    let rec loop acc =
+      let name = consume_identifier s "Expected a comptime parameter name." in
+      let ty =
+        match matches s [ Token.Colon ] with
+        | Some _ -> Some (type_expr s)
+        | None -> None
+      in
+      let p = { Ast.cp_name = name; cp_ty = ty } in
+      match matches s [ Token.Comma ] with
+      | Some _ -> loop (p :: acc)
+      | None -> List.rev (p :: acc)
+    in
+    let params = loop [] in
+    ignore (consume s Token.Greater "Expected '>' after comptime parameters.");
+    params
+
+(* Just the names, for the declarations that take types and nothing else. *)
+let type_params s : string list =
+  List.map (fun (p : Ast.comptime_param) -> p.Ast.cp_name) (comptime_params s)
+
 let type_annotation s : Ast.type_expr option =
   match matches s [ Token.Colon ] with
   | Some _ -> Some (type_expr s)
@@ -167,12 +193,12 @@ let type_annotation s : Ast.type_expr option =
 
 (* Cronyx spells return types both ways: `fn f(): T` and `fn f() -> T`, with an
    effect row before the type when one is written. *)
-let signature s : Ast.signature =
+let signature ?(comptime = []) s : Ast.signature =
   match matches s [ Token.Arrow; Token.Colon ] with
-  | None -> { Ast.ret = None; row = None }
+  | None -> { Ast.ret = None; row = None; comptime }
   | Some _ ->
     let row = if check s Token.Less then Some (row_annotation s) else None in
-    { Ast.ret = Some (type_expr s); row }
+    { Ast.ret = Some (type_expr s); row; comptime }
 
 (* ---- expressions ---- *)
 
@@ -286,6 +312,14 @@ and call s : Ast.expr =
       let index = expression s in
       ignore (consume s Token.Right_bracket "Expected ']' after index.");
       loop (Ast.at callee.Ast.span (`Index (callee, index)))
+    | Token.Less ->
+      (match type_arguments s with
+       | Some type_args ->
+         ignore (consume s Token.Left_paren "Expected '(' after type arguments.");
+         loop
+           (Ast.at callee.Ast.span (`Comptime_call (callee, type_args, arguments s)))
+       (* Not a type argument list, so the '<' belongs to whoever comes next. *)
+       | None -> callee)
     | Token.Dot ->
       ignore (advance s);
       (match (peek s).Token.token_type with
@@ -303,6 +337,37 @@ and call s : Ast.expr =
     | _ -> callee
   in
   loop (primary s)
+
+(* `f<int>(x)` and `a < b > (c)` are the same shape, and no amount of whitespace
+   separates them, so a type argument list is accepted only when a call follows.
+   Speculative: the position and the recorded errors are put back when it turns
+   out not to be one. *)
+and type_arguments s : Ast.type_expr list option =
+  let start = s.current
+  and errors = s.errors in
+  let restore () =
+    s.current <- start;
+    s.errors <- errors;
+    None
+  in
+  match
+    ignore (advance s);
+    let rec loop acc =
+      let t = type_expr s in
+      match matches s [ Token.Comma ] with
+      | Some _ -> loop (t :: acc)
+      | None -> List.rev (t :: acc)
+    in
+    let args = loop [] in
+    if check s Token.Greater
+    then (
+      ignore (advance s);
+      Some args)
+    else None
+  with
+  | Some args when check s Token.Left_paren -> Some args
+  | _ -> restore ()
+  | exception Parse_error -> restore ()
 
 (* Assumes the '(' has been consumed; consumes the closing ')'. *)
 and arguments s : Ast.expr list =
@@ -499,9 +564,10 @@ and parameters s : Ast.param list =
 
 and fn_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected function name." in
+  let comptime = comptime_params s in
   ignore (consume s Token.Left_paren "Expected '(' after function name.");
   let params = parameters s in
-  let signature = signature s in
+  let signature = signature ~comptime s in
   ignore (consume s Token.Left_brace "Expected '{' before function body.");
   Ast.at sp (`Fn (name, params, signature, block s))
 
@@ -657,6 +723,7 @@ and op_decl s sp : Ast.stmt =
     | Some op -> op
     | None -> raise (error s tok "Expected an operator after 'op'.")
   in
+  let comptime = comptime_params s in
   ignore (consume s Token.Left_paren "Expected '(' after the operator.");
   let params =
     if check s Token.Right_paren
@@ -672,7 +739,7 @@ and op_decl s sp : Ast.stmt =
       loop [])
   in
   ignore (consume s Token.Right_paren "Expected ')' after operands.");
-  let signature = signature s in
+  let signature = signature ~comptime s in
   ignore (consume s Token.Left_brace "Expected '{' before the operator body.");
   Ast.at sp (`Op_decl (op, params, signature, block s))
 
@@ -685,9 +752,10 @@ and trait_decl s sp : Ast.stmt =
     else (
       ignore (consume s Token.Fn "Expected a method signature.");
       let method_name = consume_identifier s "Expected a method name." in
+      let comptime = comptime_params s in
       ignore (consume s Token.Left_paren "Expected '(' after the method name.");
       let params = parameters s in
-      let signature = signature s in
+      let signature = signature ~comptime s in
       ignore (consume s Token.Semicolon "Expected ';' after a method signature.");
       loop
         ({ Ast.ms_name = method_name; ms_params = params; ms_signature = signature }
@@ -701,10 +769,13 @@ and trait_decl s sp : Ast.stmt =
    claims to satisfy the trait, which the checker holds it to. *)
 and impl_decl s sp : Ast.stmt =
   let first = consume_identifier s "Expected a type or trait name after 'impl'." in
-  let trait, type_name =
+  let first_params = type_params s in
+  let trait, type_name, params =
     match matches s [ Token.For ] with
-    | Some _ -> Some first, consume_identifier s "Expected a type name after 'for'."
-    | None -> None, first
+    | Some _ ->
+      let name = consume_identifier s "Expected a type name after 'for'." in
+      Some first, name, type_params s
+    | None -> None, first, first_params
   in
   ignore (consume s Token.Left_brace "Expected '{' after the impl header.");
   let rec loop acc =
@@ -713,9 +784,10 @@ and impl_decl s sp : Ast.stmt =
     else (
       ignore (consume s Token.Fn "Expected a method.");
       let method_name = consume_identifier s "Expected a method name." in
+      let comptime = comptime_params s in
       ignore (consume s Token.Left_paren "Expected '(' after the method name.");
       let params = parameters s in
-      let signature = signature s in
+      let signature = signature ~comptime s in
       ignore (consume s Token.Left_brace "Expected '{' before the method body.");
       loop
         ({ Ast.md_name = method_name
@@ -728,10 +800,11 @@ and impl_decl s sp : Ast.stmt =
   in
   let methods = loop [] in
   ignore (consume s Token.Right_brace "Expected '}' after the methods.");
-  Ast.at sp (`Impl_decl (trait, type_name, methods))
+  Ast.at sp (`Impl_decl (trait, type_name, params, methods))
 
 and type_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected a type name." in
+  let params = type_params s in
   ignore (consume s Token.Left_brace "Expected '{' after type name.");
   let rec loop fields variants =
     if check s Token.Right_brace || is_at_end s
@@ -785,7 +858,7 @@ and type_decl s sp : Ast.stmt =
   let fields, variants = loop [] [] in
   ignore (consume s Token.Right_brace "Expected '}' after type body.");
   let body = if variants <> [] then Ast.T_variants variants else Ast.T_fields fields in
-  Ast.at sp (`Type_decl (name, body))
+  Ast.at sp (`Type_decl (name, params, body))
 
 and handler_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected handler name." in

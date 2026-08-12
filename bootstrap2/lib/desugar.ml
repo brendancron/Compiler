@@ -25,6 +25,7 @@ let rec expr (e : expr) : desugared_expr =
     | #record as r -> (map_record expr r :> desugared_expr_kind)
     | #nominal as n -> (map_nominal expr n :> desugared_expr_kind)
     | #collection as c -> (map_collection expr c :> desugared_expr_kind)
+    | #comptime_call as c -> (map_comptime_call expr c :> desugared_expr_kind)
     | #method_call as m -> (map_method_call expr m :> desugared_expr_kind)
     | #reflect as r -> (map_reflect expr r :> desugared_expr_kind)
   in

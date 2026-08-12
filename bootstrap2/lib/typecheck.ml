@@ -65,12 +65,50 @@ type effect_info =
 
 let ctx_effects = { ops = Hashtbl.create 16; declared = Hashtbl.create 8 }
 
-(* Declared nominal types, by name. *)
+(* Declared nominal types, by name. The variables are the declaration's
+   parameters, and every use of the type replaces them with that use's
+   arguments — so the fields and payloads recorded here are written in terms of
+   them and are never used directly. *)
 type decl =
-  | Product of Types.infer_fields
-  | Sum of (string * Types.infer_ty Ast.payload) list
+  | Product of Types.infer_ty list * Types.infer_fields
+  | Sum of Types.infer_ty list * (string * Types.infer_ty Ast.payload) list
 
 let ctx_types : (string, decl) Hashtbl.t = Hashtbl.create 16
+
+(* Type parameters of the declaration being checked. Saved and restored around
+   each one, since a `T` in one signature is unrelated to a `T` in another. *)
+let ctx_type_params : (string, Types.infer_ty) Hashtbl.t = Hashtbl.create 8
+
+let decl_params = function
+  | Product (vars, _) | Sum (vars, _) -> vars
+
+let params_of_decl name =
+  match Hashtbl.find_opt ctx_types name with
+  | Some decl -> decl_params decl
+  | None -> []
+
+(* What replaces a declaration's parameters in one use of it. *)
+let instance vars args = List.map2 (fun v a -> Types.var_id v, a) vars args
+
+(* The type parameters a named function was hoisted with, so the body and any
+   call that writes them out are talking about the same variables. *)
+let ctx_fn_params : (string, (string * Types.infer_ty) list) Hashtbl.t =
+  Hashtbl.create 16
+
+let with_type_params assoc f =
+  let saved =
+    List.map (fun (name, _) -> name, Hashtbl.find_opt ctx_type_params name) assoc
+  in
+  List.iter (fun (name, var) -> Hashtbl.replace ctx_type_params name var) assoc;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (name, previous) ->
+          match previous with
+          | Some var -> Hashtbl.replace ctx_type_params name var
+          | None -> Hashtbl.remove ctx_type_params name)
+        saved)
+    f
 
 (* Declared traits, and every method that exists, keyed by the type it was
    declared on. The name it compiles to is derived, so only membership is
@@ -83,7 +121,9 @@ let reset_effects () =
   Hashtbl.reset ctx_effects.declared;
   Hashtbl.reset ctx_types;
   Hashtbl.reset ctx_traits;
-  Hashtbl.reset ctx_methods
+  Hashtbl.reset ctx_methods;
+  Hashtbl.reset ctx_type_params;
+  Hashtbl.reset ctx_fn_params
 
 let new_env parent = { bindings = Hashtbl.create 16; parent }
 let bind env name scheme = Hashtbl.replace env.bindings name scheme
@@ -174,25 +214,54 @@ let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
          Types.FEmpty)
   | Ast.Ty_app ("Array", [ elem ]) -> Types.IArray (infer_ty_of_annotation elem)
   | Ast.Ty_app (name, args) ->
-    fail
-      t.Ast.span
-      "Unknown type '%s' with %d argument(s)."
-      name
-      (List.length args)
+    named_type t.Ast.span name (List.map infer_ty_of_annotation args)
   | Ast.Ty_name other ->
-    (match Hashtbl.find_opt ctx_types other with
-     | Some (Product fields) -> Types.INamed (other, fields)
-     | Some (Sum _) -> Types.ISum other
-     | None -> fail t.Ast.span "Unknown type '%s'." other)
+    (match Hashtbl.find_opt ctx_type_params other with
+     | Some var -> var
+     | None -> named_type t.Ast.span other [])
   | Ast.Ty_fn (params, ret, row) ->
     Types.IFn
       ( List.map infer_ty_of_annotation params
       , infer_ty_of_annotation ret
       , row_of_labels row )
 
+(* A declared type applied to its arguments. The declaration is written in terms
+   of its parameters, so an instance is those parameters replaced. *)
+and named_type span name args =
+  match Hashtbl.find_opt ctx_types name with
+  | None -> fail span "Unknown type '%s'." name
+  | Some decl ->
+    let vars = decl_params decl in
+    if List.length vars <> List.length args
+    then
+      fail
+        span
+        "Type '%s' takes %d argument(s) but %d were given."
+        name
+        (List.length vars)
+        (List.length args);
+    (match decl with
+     | Product (_, fields) ->
+       Types.INamed (name, args, Types.substitute_fields (instance vars args) fields)
+     | Sum _ -> Types.ISum (name, args))
+
 (* A written row is closed: `(int) -> unit` is a promise of purity. *)
 and row_of_labels labels =
   List.fold_right (fun label rest -> Types.RCons (label, rest)) labels Types.REmpty
+
+(* A bare name in `<>` is a type parameter; an annotated one is a value, which
+   monomorphization has to substitute before the body can be checked. *)
+let type_params_of span (comptime : Ast.comptime_param list) =
+  List.map
+    (fun (p : Ast.comptime_param) ->
+      match p.Ast.cp_ty with
+      | None -> p.Ast.cp_name, Types.fresh ()
+      | Some _ ->
+        fail
+          span
+          "Comptime value parameter '%s' is not supported yet."
+          p.Ast.cp_name)
+    comptime
 
 let annotated_or_fresh = function
   | Some t -> infer_ty_of_annotation t
@@ -218,7 +287,7 @@ let rec assigned_in_expr (e : Ast.desugared_expr) acc =
   | `Call (callee, args) ->
     List.fold_left (fun acc a -> assigned_in_expr a acc) (assigned_in_expr callee acc) args
   | `Typeof e -> assigned_in_expr e acc
-  | `Method_call (receiver, _, args) ->
+  | `Method_call (receiver, _, args) | `Comptime_call (receiver, _, args) ->
     List.fold_left
       (fun acc a -> assigned_in_expr a acc)
       (assigned_in_expr receiver acc)
@@ -258,7 +327,7 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   | `Effect_decl _ | `Type_decl _ | `Trait_decl _ -> acc
   | `Op_decl (_, _, _, body) ->
     List.fold_left (fun acc st -> assigned_in_stmt st acc) acc body
-  | `Impl_decl (_, _, methods) ->
+  | `Impl_decl (_, _, _, methods) ->
     List.fold_left
       (fun acc (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
         List.fold_left (fun acc st -> assigned_in_stmt st acc) acc m.Ast.md_body)
@@ -297,7 +366,7 @@ let variadic_builtins = [ "print" ]
    makes a field read work on any record that has one. *)
 let field_of (target : checked_expr) label =
   match Types.repr target.Ast.ann with
-  | Types.INamed (name, fields) ->
+  | Types.INamed (name, _, fields) ->
     let rec find f =
       match Types.repr_fields f with
       | Types.FCons (l, ty, _) when String.equal l label -> Some ty
@@ -425,6 +494,54 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
         ret
     in
     node result (`Call (callee_node, args))
+  (* Written where inference has nothing to recover the parameters from. The
+     arguments pin the callee's variables before the ordinary arguments are
+     checked; what survives is an ordinary call. *)
+  | `Comptime_call (callee, type_args, args) ->
+    let name =
+      match callee.Ast.it with
+      | `Var name -> name
+      | _ -> fail span "Only a named function takes comptime arguments."
+    in
+    let scheme =
+      match lookup env name with
+      | Some scheme -> scheme
+      | None -> fail span "Undefined variable '%s'." name
+    in
+    let declared = Option.value ~default:[] (Hashtbl.find_opt ctx_fn_params name) in
+    if List.length declared <> List.length type_args
+    then
+      fail
+        span
+        "'%s' takes %d comptime argument(s) but %d were given."
+        name
+        (List.length declared)
+        (List.length type_args);
+    (* A parameter the body already pinned is no longer a variable to bind, so
+       the written argument is checked against it instead. *)
+    let bound, pinned =
+      List.fold_left2
+        (fun (bound, pinned) (_, var) written ->
+          let written = infer_ty_of_annotation written in
+          match Types.repr var with
+          | Types.IVar { contents = Types.Unbound (id, _) } ->
+            (id, written) :: bound, pinned
+          | other -> bound, (other, written) :: pinned)
+        ([], [])
+        declared
+        type_args
+    in
+    let fn = Types.instantiate ~bound scheme in
+    List.iter (fun (a, b) -> unify_at span a b) pinned;
+    let args = List.map (infer_expr env ctx) args in
+    let callee_node : checked_expr = Ast.annotated callee.Ast.span fn (`Var name) in
+    let ret = Types.fresh () in
+    let row = Types.fresh_row () in
+    Types.unify
+      fn
+      (Types.IFn (List.map (fun (a : checked_expr) -> a.Ast.ann) args, ret, row));
+    Types.unify_row row ctx.row;
+    node ret (`Call (callee_node, args))
   (* Dispatch is by the receiver's type, which must therefore be known here.
      Nothing defers it: a method on a value whose type is still a variable has
      no answer until monomorphization. *)
@@ -484,10 +601,14 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       (fun (i : checked_expr) -> unify_at i.Ast.span elem i.Ast.ann)
       items;
     node (Types.IArray elem) (`Collection_lit items)
+  (* The arguments are variables the written fields pin down, which is how
+     `new Pair { first: 1, second: "a" }` comes out a `Pair<int, string>`. *)
   | `New (name, fields) ->
     (match Hashtbl.find_opt ctx_types name with
      | None | Some (Sum _) -> fail span "Unknown record type '%s'." name
-     | Some (Product declared) ->
+     | Some (Product (vars, declared)) ->
+       let args = List.map (fun _ -> Types.fresh ()) vars in
+       let declared = Types.substitute_fields (instance vars args) declared in
        let rec labels f =
          match Types.repr_fields f with
          | Types.FEmpty | Types.FVar _ -> []
@@ -509,15 +630,19 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
          (fun (l, (v : checked_expr)) ->
            unify_at v.Ast.span (List.assoc l expected) v.Ast.ann)
          fields;
-       node (Types.INamed (name, declared)) (`New (name, fields)))
+       node (Types.INamed (name, args, declared)) (`New (name, fields)))
   | `New_variant (ty, variant, payload) ->
     (match Hashtbl.find_opt ctx_types ty with
      | None | Some (Product _) -> fail span "Unknown sum type '%s'." ty
-     | Some (Sum variants) ->
+     | Some (Sum (vars, variants)) ->
        (match List.assoc_opt variant variants with
         | None -> fail span "Type '%s' has no variant '%s'." ty variant
         | Some declared ->
-          let expected = Ast.payload_fields declared in
+          let args = List.map (fun _ -> Types.fresh ()) vars in
+          let mapping = instance vars args in
+          let expected =
+            List.map (fun (l, t) -> l, Types.substitute mapping t) (Ast.payload_fields declared)
+          in
           let given =
             List.map (fun (l, v) -> l, infer_expr env ctx v) (Ast.payload_fields payload)
           in
@@ -541,7 +666,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
             | Ast.P_tuple _ -> Ast.P_tuple (List.map snd given)
             | Ast.P_fields _ -> Ast.P_fields given
           in
-          node (Types.ISum ty) (`New_variant (ty, variant, payload))))
+          node (Types.ISum (ty, args)) (`New_variant (ty, variant, payload))))
   | `Record_lit fields ->
     let fields = List.map (fun (l, v) -> l, infer_expr env ctx v) fields in
     node
@@ -570,23 +695,28 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
      rather than being unified into place. *)
   | `Tuple_get (target, index) ->
     let target = infer_expr env ctx target in
-    (match Types.concrete target.Ast.ann with
-     | Some (Types.Tuple items) ->
+    (* The arity is what the lookup needs, and a tuple has that as soon as it is
+       known to be one — the elements may still be variables. *)
+    (match Types.repr target.Ast.ann with
+     | Types.ITuple items ->
        (match List.nth_opt items index with
-        | Some ty -> node (Types.of_ty ty) (`Tuple_get (target, index))
+        | Some ty -> node ty (`Tuple_get (target, index))
         | None ->
           fail
             span
             "A tuple of %d element(s) has no field %d."
             (List.length items)
             index)
-     | Some other ->
-       fail target.Ast.span "Cannot take a field of %s." (Types.string_of_ty other)
-     | None ->
+     | Types.IVar _ ->
        fail
          target.Ast.span
          "The type of this tuple is not known here, so field %d cannot be resolved."
-         index)
+         index
+     | other ->
+       fail
+         target.Ast.span
+         "Cannot take a field of %s."
+         (Types.string_of_infer_ty other))
   | `Index (target, index) ->
     let target = infer_expr env ctx target in
     let index = infer_expr env ctx index in
@@ -670,15 +800,16 @@ and declare_impls (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
-      | `Impl_decl (trait, type_name, methods) ->
+      | `Impl_decl (trait, type_name, params, methods) ->
         let span = s.Ast.span in
+        let type_params = List.map (fun name -> name, Types.fresh ()) params in
         let supplies name =
           List.exists
             (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
               String.equal m.Ast.md_name name)
             methods
         in
-        ignore (self_ty span type_name);
+        with_type_params type_params (fun () -> ignore (self_ty span type_name params));
         (match trait with
          | None -> ()
          | Some trait ->
@@ -719,10 +850,21 @@ and declare_impls (body : Ast.desugared_stmt list) =
 
 (* `Array` is the one type an impl may name without naming its element type,
    which is what makes a method over any array expressible. *)
-and self_ty span type_name =
+and self_ty span type_name params =
   if String.equal type_name "Array"
   then Types.IArray (Types.fresh ())
-  else infer_ty_of_annotation (Ast.at span (Ast.Ty_name type_name))
+  else if params = []
+  then infer_ty_of_annotation (Ast.at span (Ast.Ty_name type_name))
+  else
+    named_type
+      span
+      type_name
+      (List.map
+         (fun name ->
+           match Hashtbl.find_opt ctx_type_params name with
+           | Some var -> var
+           | None -> Types.fresh ())
+         params)
 
 (* Type declarations are registered before anything is hoisted, because a
    function's signature may name one and hoisting reads signatures. *)
@@ -730,25 +872,33 @@ and declare_types (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
-      | `Type_decl (name, body) ->
+      | `Type_decl (name, params, body) ->
         if Hashtbl.mem ctx_types name
         then fail s.Ast.span "Type '%s' is already declared." name;
-        Hashtbl.replace
-          ctx_types
-          name
-          (match body with
-           | Ast.T_fields fields ->
-             Product
-               (List.fold_right
-                  (fun (l, t) rest -> Types.FCons (l, infer_ty_of_annotation t, rest))
-                  fields
-                  Types.FEmpty)
-           | Ast.T_variants variants ->
-             Sum
-               (List.map
-                  (fun (v : Ast.variant) ->
-                    v.Ast.v_name, Ast.map_payload infer_ty_of_annotation v.Ast.v_payload)
-                  variants))
+        let type_params = List.map (fun name -> name, Types.fresh ()) params in
+        let vars = List.map snd type_params in
+        (* Registered before the body is converted, so a declaration may refer
+           to itself. *)
+        Hashtbl.replace ctx_types name (Product (vars, Types.FEmpty));
+        let declared =
+          with_type_params type_params (fun () ->
+            match body with
+            | Ast.T_fields fields ->
+              Product
+                ( vars
+                , List.fold_right
+                    (fun (l, t) rest -> Types.FCons (l, infer_ty_of_annotation t, rest))
+                    fields
+                    Types.FEmpty )
+            | Ast.T_variants variants ->
+              Sum
+                ( vars
+                , List.map
+                    (fun (v : Ast.variant) ->
+                      v.Ast.v_name, Ast.map_payload infer_ty_of_annotation v.Ast.v_payload)
+                    variants ))
+        in
+        Hashtbl.replace ctx_types name declared
       | _ -> ())
     body
 
@@ -760,6 +910,7 @@ and hoist env (body : Ast.desugared_stmt list) =
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
       | `Op_decl (op, params, signature, _) ->
+        ignore (type_params_of s.Ast.span signature.Ast.comptime);
         let operand (p : Ast.param) =
           match p.Ast.ty with
           | Some t -> Types.string_of_ty (Option.get (Types.concrete (infer_ty_of_annotation t)))
@@ -779,41 +930,55 @@ and hoist env (body : Ast.desugared_stmt list) =
                    , annotated_or_fresh signature.Ast.ret
                    , Types.fresh_row () )))
          | _ -> ())
-      | `Impl_decl (_, type_name, methods) ->
+      | `Impl_decl (_, type_name, params, methods) ->
+        let impl_params = List.map (fun name -> name, Types.fresh ()) params in
         List.iter
           (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
             match m.Ast.md_params with
             | [] -> ()
             | _ :: rest ->
-              let param_types =
-                self_ty s.Ast.span type_name
-                :: List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) rest
+              let mangled = Ast.method_name type_name m.Ast.md_name in
+              let type_params =
+                impl_params
+                @ type_params_of s.Ast.span m.Ast.md_signature.Ast.comptime
               in
-              let row =
-                match m.Ast.md_signature.Ast.row with
-                | Some labels -> row_of_labels labels
-                | None -> Types.fresh_row ()
-              in
-              bind
-                env
-                (Ast.method_name type_name m.Ast.md_name)
-                (Types.mono
-                   (Types.IFn
-                      ( param_types
-                      , annotated_or_fresh m.Ast.md_signature.Ast.ret
-                      , row ))))
+              Hashtbl.replace ctx_fn_params mangled type_params;
+              with_type_params type_params (fun () ->
+                let param_types =
+                  self_ty s.Ast.span type_name params
+                  :: List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) rest
+                in
+                let row =
+                  match m.Ast.md_signature.Ast.row with
+                  | Some labels -> row_of_labels labels
+                  | None -> Types.fresh_row ()
+                in
+                bind
+                  env
+                  mangled
+                  (Types.mono
+                     (Types.IFn
+                        ( param_types
+                        , annotated_or_fresh m.Ast.md_signature.Ast.ret
+                        , row )))))
           methods
       | `Fn (name, params, signature, _) ->
-        let param_types = List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) params in
-        let row =
-          match signature.Ast.row with
-          | Some labels -> row_of_labels labels
-          | None -> Types.fresh_row ()
-        in
-        bind
-          env
-          name
-          (Types.mono (Types.IFn (param_types, annotated_or_fresh signature.Ast.ret, row)))
+        let type_params = type_params_of s.Ast.span signature.Ast.comptime in
+        Hashtbl.replace ctx_fn_params name type_params;
+        with_type_params type_params (fun () ->
+          let param_types =
+            List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) params
+          in
+          let row =
+            match signature.Ast.row with
+            | Some labels -> row_of_labels labels
+            | None -> Types.fresh_row ()
+          in
+          bind
+            env
+            name
+            (Types.mono
+               (Types.IFn (param_types, annotated_or_fresh signature.Ast.ret, row))))
       | _ -> ())
     body
 
@@ -881,6 +1046,9 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     unify_at cond.Ast.span Types.IBool cond.Ast.ann;
     node (`While (cond, infer_stmt env ctx assigned body))
   | `Fn (name, params, signature, body) ->
+    with_type_params
+      (Option.value ~default:[] (Hashtbl.find_opt ctx_fn_params name))
+      (fun () ->
     (* Recover the type [hoist] chose, so recursive calls in the body unify
        against the same variables. *)
     let param_types, declared_ret, declared_row =
@@ -922,9 +1090,9 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
          ~env_rows:(env_free_row_vars env)
          ~env_fields:(env_free_field_vars env)
          fn_type);
-    Ast.annotated span fn_type (`Fn (name, params, signature, body))
+    Ast.annotated span fn_type (`Fn (name, params, signature, body)))
   (* Registered by [declare_types] before anything was hoisted. *)
-  | `Type_decl (name, body) -> node (`Type_decl (name, body))
+  | `Type_decl (name, params, body) -> node (`Type_decl (name, params, body))
   (* Checked as the function it becomes; the registry entry was made by
      [declare_ops]. *)
   | `Op_decl (op, params, signature, body) ->
@@ -957,11 +1125,14 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
   | `Trait_decl (name, methods) -> node (`Trait_decl (name, methods))
   (* Each method is checked as the function it becomes, with `self` bound to the
      type the impl names. *)
-  | `Impl_decl (trait, type_name, methods) ->
+  | `Impl_decl (trait, type_name, params, methods) ->
     let methods =
       List.map
         (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
           let mangled = Ast.method_name type_name m.Ast.md_name in
+          with_type_params
+            (Option.value ~default:[] (Hashtbl.find_opt ctx_fn_params mangled))
+            (fun () ->
           let hoisted =
             match lookup env mangled with
             | Some { Types.body = Types.IFn (params, ret, row); _ }
@@ -1005,15 +1176,15 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
                ~env_rows:(env_free_row_vars env)
                ~env_fields:(env_free_field_vars env)
                fn_type);
-          { m with Ast.md_body = body; md_ann = fn_type })
+          { m with Ast.md_body = body; md_ann = fn_type }))
         methods
     in
-    node (`Impl_decl (trait, type_name, methods))
+    node (`Impl_decl (trait, type_name, params, methods))
   | `Match (scrutinee, cases) ->
     let scrutinee = infer_expr env ctx scrutinee in
-    let sum =
+    let sum, sum_args =
       match Types.repr scrutinee.Ast.ann with
-      | Types.ISum name -> name
+      | Types.ISum (name, args) -> name, args
       | other ->
         fail
           scrutinee.Ast.span
@@ -1022,7 +1193,14 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     in
     let variants =
       match Hashtbl.find_opt ctx_types sum with
-      | Some (Sum variants) -> variants
+      | Some (Sum (vars, variants)) ->
+        (* A pattern binds what this instance of the type carries, not what the
+           declaration carries. *)
+        let mapping = instance vars sum_args in
+        List.map
+          (fun (name, payload) ->
+            name, Ast.map_payload (Types.substitute mapping) payload)
+          variants
       | _ -> fail span "Unknown sum type '%s'." sum
     in
     let covered = ref [] in

@@ -48,10 +48,18 @@ type param =
   ; ty : type_expr option
   }
 
+(* A `<>` entry. A bare name is a type parameter, recovered from the call; an
+   annotated one is a value known at compile time and written at the call. *)
+type comptime_param =
+  { cp_name : string
+  ; cp_ty : type_expr option
+  }
+
 (* [row = None] leaves the effect row to inference; [Some labels] closes it. *)
 type signature =
   { ret : type_expr option
   ; row : string list option
+  ; comptime : comptime_param list
   }
 
 type op_kind =
@@ -147,7 +155,7 @@ type type_body =
   | T_fields of (string * type_expr) list
   | T_variants of variant list
 
-type type_defs = [ `Type_decl of string * type_body ]
+type type_defs = [ `Type_decl of string * string list * type_body ]
 
 (* An operator declaration is an ordinary function under a name derived from
    the operator and its operand types; [Resolve] turns it into one. *)
@@ -175,12 +183,18 @@ type ('s, 'ann) method_def =
    [Resolve] turns each into an ordinary function taking the receiver first. *)
 type ('s, 'ann) method_defs =
   [ `Trait_decl of string * method_sig list
-  | `Impl_decl of string option * string * ('s, 'ann) method_def list
+  | `Impl_decl of string option * string * string list * ('s, 'ann) method_def list
   ]
 
 (* Which function this is depends on the receiver's type, so it survives until
    the checker has one. *)
 type 'e method_call = [ `Method_call of 'e * string * 'e list ]
+
+(* Comptime arguments written out where inference has nothing to recover them
+   from. A bare name parses as a type; the checker reinterprets one that names a
+   value parameter instead. Eliminated by the checker, which has resolved the
+   arguments by the time it emits the call. *)
+type 'e comptime_call = [ `Comptime_call of 'e * type_expr list * 'e list ]
 
 (* A pattern names a variant and binds what it carries. *)
 type pattern =
@@ -247,6 +261,7 @@ and expr_kind =
   | expr record
   | expr nominal
   | expr collection
+  | expr comptime_call
   | expr method_call
   | expr reflect
   ]
@@ -281,6 +296,7 @@ and desugared_expr_kind =
   | desugared_expr record
   | desugared_expr nominal
   | desugared_expr collection
+  | desugared_expr comptime_call
   | desugared_expr method_call
   | desugared_expr reflect
   ]
@@ -469,6 +485,11 @@ let op_name op lhs rhs =
 (* The name a method is compiled under. *)
 let method_name type_name method_ = Printf.sprintf "%s__%s" type_name method_
 
+let map_comptime_call (f : 'a -> 'b) (e : 'a comptime_call) : 'b comptime_call =
+  match e with
+  | `Comptime_call (callee, type_args, args) ->
+    `Comptime_call (f callee, type_args, List.map f args)
+
 let map_method_call (f : 'a -> 'b) (e : 'a method_call) : 'b method_call =
   match e with
   | `Method_call (receiver, name, args) ->
@@ -489,8 +510,8 @@ let map_method_defs (fs : 's1 -> 's2) (fa : 'a1 -> 'a2) (m : ('s1, 'a1) method_d
   =
   match m with
   | `Trait_decl (name, methods) -> `Trait_decl (name, methods)
-  | `Impl_decl (trait, type_name, methods) ->
-    `Impl_decl (trait, type_name, List.map (map_method_def fs fa) methods)
+  | `Impl_decl (trait, type_name, params, methods) ->
+    `Impl_decl (trait, type_name, params, List.map (map_method_def fs fa) methods)
 
 let map_matching (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (m : ('e1, 's1) matching)
   : ('e2, 's2) matching

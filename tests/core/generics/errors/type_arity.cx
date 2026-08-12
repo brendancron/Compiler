@@ -1,0 +1,5 @@
+type Pair<A, B> {
+    first: A,
+    second: B
+}
+var p: Pair<int> = new Pair { first: 1, second: 2 };

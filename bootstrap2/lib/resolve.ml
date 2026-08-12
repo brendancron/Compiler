@@ -18,7 +18,7 @@ let row_of (t : Types.ty) =
 
 let rec record (s : Ast.typed_stmt) =
   match s.Ast.it with
-  | `Impl_decl (_, type_name, methods) ->
+  | `Impl_decl (_, type_name, _, methods) ->
     List.iter
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
         Hashtbl.replace
@@ -160,7 +160,7 @@ and stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =
      | _ -> [])
   (* Each method becomes a function taking the receiver first, which is what
      [`Method_call] was rewritten to call. *)
-  | `Impl_decl (_, type_name, methods) ->
+  | `Impl_decl (_, type_name, _, methods) ->
     List.map
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
         { Ast.it =

@@ -97,7 +97,7 @@ let fn_decl span name params body =
     (`Fn
       ( name
       , List.map (fun p -> { Ast.name = p; ty = None }) params
-      , { Ast.ret = None; row = None }
+      , { Ast.ret = None; row = None; comptime = [] }
       , body ))
 
 (* ---- tail-resumptive detection ---- *)

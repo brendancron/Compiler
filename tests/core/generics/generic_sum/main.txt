@@ -1,0 +1,9 @@
+3
+hi
+none
+Option<int>
+Option<string>
+7
+Box<int>
+5
+x

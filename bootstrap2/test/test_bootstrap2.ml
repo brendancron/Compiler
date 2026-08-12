@@ -65,6 +65,10 @@ let cases =
   ; "tests/core/traits/inherent/main"
   ; "tests/core/traits/builtin_receiver/main"
   ; "tests/effects/methods/methods"
+  ; "tests/core/generics/generic_fn/main"
+  ; "tests/core/generics/generic_struct/main"
+  ; "tests/core/generics/monomorphize/main"
+  ; "tests/core/generics/generic_sum/main"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
@@ -106,6 +110,8 @@ let error_cases =
   ; "tests/core/traits/errors/no_such_method"
   ; "tests/core/traits/errors/arity"
   ; "tests/core/traits/errors/unknown_receiver"
+  ; "tests/core/generics/errors/type_arity"
+  ; "tests/core/generics/errors/comptime_arity"
   ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)
