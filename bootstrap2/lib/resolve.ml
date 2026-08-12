@@ -98,7 +98,16 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
       in
       let all = receiver :: args in
       `Call (fn_ref span (Ast.method_name owner name) all ann, all)
-    | `Collection_lit items -> `Array_lit (List.map (expr registry) items)
+    (* Array is the primitive; anything else is built from one. *)
+    | `Collection_lit items ->
+      let items = List.map (expr registry) items in
+      (match ann with
+       | Types.List elem ->
+         let array : Ast.resolved_expr =
+           { Ast.it = `Array_lit items; span; ann = Types.Array elem }
+         in
+         `Call (fn_ref span "List__of" [ array ] ann, [ array ])
+       | _ -> `Array_lit items)
     | #Ast.lit as l -> l
     | #Ast.vars as v -> (Ast.map_vars (expr registry) v :> Ast.resolved_expr_kind)
     | #Ast.ops as o -> (Ast.map_ops (expr registry) o :> Ast.resolved_expr_kind)

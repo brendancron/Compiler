@@ -51,6 +51,9 @@ let cases =
   ; "tests/core/arrays/identity"
   ; "tests/core/lists/index_access"
   ; "tests/core/lists/index_assign"
+  ; "tests/core/lists/list_methods"
+  ; "tests/core/strings/string_methods"
+  ; "tests/core/operators/not_index"
   ; "tests/core/tuples/tuple_basic"
   ; "tests/reflection/typeof_tuple"
   ; "tests/core/tuples/typed"
@@ -229,12 +232,8 @@ type blocker =
    rather than sitting unnoticed — which is how four of them came to be passing
    with nothing recording it. *)
 let expected_failing : (string * blocker) list =
-    (* 8 · List, Set, Map *)
-  [ "tests/core/lists/list_methods", Step "8 · List, Set, Map"
-  ; "tests/core/operators/not_index", Step "8 · List, Set, Map"
-  ; "tests/core/strings/string_methods", Step "8 · List, Set, Map"
     (* 9 · Iteration *)
-  ; "tests/core/lists/list", Step "9 · Iteration"
+  [ "tests/core/lists/list", Step "9 · Iteration"
   ; "tests/effects/logic/multi_guard", Step "9 · Iteration"
   ; "tests/effects/logic/simple_guard", Step "9 · Iteration"
     (* 10 · Modules *)

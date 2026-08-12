@@ -123,7 +123,8 @@ let rec expr (e : Ast.cps_expr) : unit =
     expr i;
     expect i.Ast.span "An index" Types.Int i.Ast.ann;
     (match target.Ast.ann with
-     | Types.Array elem -> expect span "An indexing result" elem ann
+     | Types.Array elem | Types.List elem ->
+       expect span "An indexing result" elem ann
      | other ->
        fail target.Ast.span "Indexing a %s." (Types.string_of_ty other))
   | `Index_assign (target, i, v) ->
@@ -132,7 +133,7 @@ let rec expr (e : Ast.cps_expr) : unit =
     expr v;
     expect i.Ast.span "An index" Types.Int i.Ast.ann;
     (match target.Ast.ann with
-     | Types.Array elem ->
+     | Types.Array elem | Types.List elem ->
        expect v.Ast.span "An assigned element" elem v.Ast.ann;
        expect span "An index assignment" elem ann
      | other ->

@@ -2,6 +2,8 @@ type value =
   | Int of int
   (* Mutable and shared: `var ys = xs` aliases rather than copies. *)
   | Array of value array
+  (* Grows, so the backing array is replaced rather than updated. *)
+  | List of value array ref
   | Tuple of value list
   (* Fields are mutable, so a record has identity like an array. *)
   | Record of (string * value ref) list
@@ -46,6 +48,7 @@ let rec lookup env name =
 
 let type_name = function
   | Array _ -> "array"
+  | List _ -> "list"
   | Tuple _ -> "tuple"
   | Record _ -> "record"
   | Variant _ -> "variant"
@@ -59,6 +62,8 @@ let type_name = function
 let rec string_of_value = function
   | Array items ->
     "[" ^ String.concat ", " (Array.to_list (Array.map string_of_value items)) ^ "]"
+  | List items ->
+    "[" ^ String.concat ", " (Array.to_list (Array.map string_of_value !items)) ^ "]"
   | Tuple items -> "(" ^ String.concat ", " (List.map string_of_value items) ^ ")"
   | Variant (name, []) -> name
   | Variant (name, fields) ->
@@ -81,11 +86,19 @@ let as_bool span = function
   | Bool b -> b
   | v -> fail span "Expected a bool condition, got %s." (type_name v)
 
+(* The backing array of either container. A list's is replaced when it grows,
+   so this is only valid until the next push. *)
+let contents = function
+  | Array items -> items
+  | List items -> !items
+  | _ -> [||]
+
 (* OCaml's structural comparison raises on functional values. *)
 let rec values_equal a b =
   match a, b with
   (* Arrays have identity, so equality is identity. *)
   | Array x, Array y -> x == y
+  | List x, List y -> x == y
   | Tuple x, Tuple y -> List.length x = List.length y && List.for_all2 values_equal x y
   | Record x, Record y -> x == y
   | Variant (n, a), Variant (m, b) ->
@@ -190,7 +203,8 @@ let rec eval env (e : Ast.cps_expr) : value =
      | v -> fail span "Cannot take a field of %s." (type_name v))
   | `Index (target, index) ->
     (match eval env target, eval env index with
-     | Array items, Int i ->
+     | (Array _ | List _) as container, Int i ->
+       let items = contents container in
        if i < 0 || i >= Array.length items
        then fail span "Index %d is out of bounds for length %d." i (Array.length items);
        items.(i)
@@ -198,7 +212,8 @@ let rec eval env (e : Ast.cps_expr) : value =
   | `Index_assign (target, index, v) ->
     let value = eval env v in
     (match eval env target, eval env index with
-     | Array items, Int i ->
+     | (Array _ | List _) as container, Int i ->
+       let items = contents container in
        if i < 0 || i >= Array.length items
        then fail span "Index %d is out of bounds for length %d." i (Array.length items);
        items.(i) <- value;
@@ -310,6 +325,73 @@ let globals out =
          | [ v ] -> Str (string_of_value v)
          | _ -> Unit ));
   define env "clock" (Native ("clock", Some 0, fun _ -> Float (Sys.time ())));
+  (* Methods the compiler supplies, under the same derived name a declared one
+     gets, so nothing here distinguishes them from a method written in Cronyx. *)
+  let method_ owner name arity fn =
+    let derived = Ast.method_name owner name in
+    define env derived (Native (derived, Some arity, fn))
+  in
+  method_ "Array" "len" 1 (function
+    | [ Array items ] -> Int (Array.length items)
+    | _ -> Unit);
+  method_ "string" "len" 1 (function
+    | [ Str s ] -> Int (String.length s)
+    | _ -> Unit);
+  method_ "string" "trim" 1 (function
+    | [ Str s ] -> Str (String.trim s)
+    | _ -> Unit);
+  method_ "string" "contains" 2 (function
+    | [ Str s; Str needle ] ->
+      let n = String.length needle in
+      let rec search i =
+        i + n <= String.length s
+        && (String.equal (String.sub s i n) needle || search (i + 1))
+      in
+      Bool (n = 0 || search 0)
+    | _ -> Unit);
+  method_ "string" "split" 2 (function
+    | [ Str s; Str sep ] when String.length sep = 1 ->
+      Array
+        (Array.of_list (List.map (fun part -> Str part) (String.split_on_char sep.[0] s)))
+    | _ -> Unit);
+  method_ "List" "len" 1 (function
+    | [ List items ] -> Int (Array.length !items)
+    | _ -> Unit);
+  method_ "List" "push" 2 (function
+    | [ List items; v ] ->
+      items := Array.append !items [| v |];
+      Unit
+    | _ -> Unit);
+  method_ "List" "pop" 1 (function
+    | [ List items ] ->
+      let n = Array.length !items in
+      if n = 0
+      then Unit
+      else (
+        let last = !items.(n - 1) in
+        items := Array.sub !items 0 (n - 1);
+        last)
+    | _ -> Unit);
+  method_ "List" "contains" 2 (function
+    | [ List items; needle ] ->
+      Bool (Array.exists (fun v -> values_equal v needle) !items)
+    | _ -> Unit);
+  method_ "Array" "contains" 2 (function
+    | [ items; needle ] -> Bool (Array.exists (fun v -> values_equal v needle) (contents items))
+    | _ -> Unit);
+  define
+    env
+    "List__of"
+    (Native
+       ( "List__of"
+       , Some 1
+       , function
+         | [ items ] -> List (ref (Array.copy (contents items)))
+         | _ -> Unit ));
+  method_ "string" "chars" 1 (function
+    | [ Str s ] ->
+      Array (Array.init (String.length s) (fun i -> Str (String.make 1 s.[i])))
+    | _ -> Unit);
   env
 
 let run ?(out = print_string) (program : Ast.cps_stmt list) : (unit, error) result =

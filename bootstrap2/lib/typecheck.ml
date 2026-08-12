@@ -363,12 +363,12 @@ let field_of (target : checked_expr) label =
 
 let element_of (target : checked_expr) =
   match Types.concrete target.Ast.ann with
-  | Some (Types.Array elem) -> Types.of_ty elem
+  | Some (Types.Array elem) | Some (Types.List elem) -> Types.of_ty elem
   | Some other ->
     fail target.Ast.span "Cannot index %s." (Types.string_of_ty other)
   | None ->
     let elem = Types.fresh () in
-    unify_at target.Ast.span (Types.IArray elem) target.Ast.ann;
+    unify_at target.Ast.span (Types.fresh_with (Types.Collection elem)) target.Ast.ann;
     elem
 
 let binop_result registry (op : Ast.binop) a b =
@@ -529,13 +529,20 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       | None ->
         (match Types.repr receiver.Ast.ann with
          | Types.IVar _ ->
-           if not
-                (Hashtbl.fold
-                   (fun (_, declared) _ found -> found || String.equal declared name)
-                   ctx_methods
-                   false)
-           then fail span "No type has a method '%s'." name;
-           raise Deferred
+           (* One owner decides the receiver, which is what makes `xs.push(v)`
+              turn a literal into a list. Several and there is nothing to
+              choose, so it waits for specialization. *)
+           let owners =
+             Hashtbl.fold
+               (fun (owner, declared) _ acc ->
+                 if String.equal declared name then owner :: acc else acc)
+               ctx_methods
+               []
+           in
+           (match List.sort_uniq compare owners with
+            | [] -> fail span "No type has a method '%s'." name
+            | [ only ] -> only
+            | _ -> raise Deferred)
          | other ->
            fail
              span
@@ -575,11 +582,12 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
   | `Typeof e -> node Types.IStr (`Typeof (infer_expr env ctx e))
   | `Collection_lit items ->
     let elem = Types.fresh () in
+    let container = Types.fresh_with (Types.Collection elem) in
     let items = List.map (infer_expr env ctx) items in
     List.iter
       (fun (i : checked_expr) -> unify_at i.Ast.span elem i.Ast.ann)
       items;
-    node (Types.IArray elem) (`Collection_lit items)
+    node container (`Collection_lit items)
   | `New (name, fields) ->
     (match Hashtbl.find_opt ctx_types name with
      | None | Some (Sum _) -> fail span "Unknown record type '%s'." name
@@ -1412,7 +1420,33 @@ let admits registry kind (t : Types.infer_ty) =
      | Types.Addable -> has Ast.Add
      | Types.Numeric ->
        List.exists has [ Ast.Sub; Ast.Mul; Ast.Div; Ast.Less; Ast.Greater ]
-     | Types.Any -> true)
+     | Types.Collection _ | Types.Any -> false)
+
+(* The same shape a declared method gets: registered so a call can find it, and
+   bound under the derived name so [Resolve] emits an ordinary call. *)
+(* What a literal becomes when it is a list: the array is built first and copied
+   out of, which is what [Collection Literals] calls the two-allocation cost. *)
+let list_of = "List__of"
+
+let declare_builtin_methods env =
+  let method_ owner name params ret =
+    Hashtbl.replace ctx_methods (owner, name) ();
+    bind env (Ast.method_name owner name) (pure params ret)
+  in
+  let elem = Types.fresh () in
+  method_ "Array" "len" [ Types.IArray elem ] Types.IInt;
+  method_ "string" "len" [ Types.IStr ] Types.IInt;
+  method_ "string" "trim" [ Types.IStr ] Types.IStr;
+  method_ "string" "contains" [ Types.IStr; Types.IStr ] Types.IBool;
+  method_ "string" "split" [ Types.IStr; Types.IStr ] (Types.IArray Types.IStr);
+  method_ "string" "chars" [ Types.IStr ] (Types.IArray Types.IStr);
+  let item = Types.fresh () in
+  method_ "List" "len" [ Types.IList item ] Types.IInt;
+  method_ "List" "push" [ Types.IList item; item ] Types.IUnit;
+  method_ "List" "pop" [ Types.IList item ] item;
+  method_ "List" "contains" [ Types.IList item; item ] Types.IBool;
+  method_ "Array" "contains" [ Types.IArray item; item ] Types.IBool;
+  bind env list_of (pure [ Types.IArray item ] (Types.IList item))
 
 let check ~registry (program : Ast.desugared_stmt list)
   : (Ast.typed_stmt list, error list) result
@@ -1421,6 +1455,7 @@ let check ~registry (program : Ast.desugared_stmt list)
   Types.extra_admits := admits registry;
   reset_effects ();
   let env = globals () in
+  declare_builtin_methods env;
   let ctx =
     { registry
     ; return_type = None
