@@ -16,5 +16,5 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 | [Metaprocessing.md](Metaprocessing.md) | `meta` and `gen`, and compilation calling itself |
 | [Reify.md](Reify.md) | Turning a compile-time value back into syntax |
 | [Implementation Plan.md](Implementation%20Plan.md) | Build order, and which fixtures each step affects |
-| [Builtins Audit.md](Builtins%20Audit.md) | How builtins are supplied, and what a standard library hits |
+| [Remediation of Builtins.md](Remediation%20of%20Builtins.md) | What is wrong with how builtins are supplied, and the order to fix it |
 | [TODO.md](TODO.md) | Deferred decisions, and why |
