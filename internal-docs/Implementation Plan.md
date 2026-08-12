@@ -55,20 +55,24 @@ Structural records over the existing row machinery, `type Point { … }` for nom
 
 ### 5 · Reify
 
-The structural value-to-syntax walk. Scalars first, extending to each type as it lands. Nothing depends on it yet, but the next step does, and building it here keeps it separate from monomorphization.
+The structural value-to-syntax walk. Deferred: it has no producer and no consumer on its own, and step 6 turned out not to need it — see there. It becomes real with metaprocessing, where a compile-time value that was computed rather than written has to be turned back into code.
 
 | Fixtures | |
 |---|---|
-| Newly passing | none directly — exercised through steps 6 and 10 |
+| Newly passing | none directly — exercised through step 11 |
 
 ### 6 · Comptime params and monomorphization
 
-`<>` parsing, specialization per distinct argument, inferred operator constraints, and `Generic` finally getting a consumer. Value parameters need reify; type parameters need the constraint inference.
+`<>` parsing, specialization per distinct argument, inferred operator constraints, and `Generic` finally getting a consumer.
+
+Type parameters and value parameters are handled in different places, which is what the two checking regimes in [Comptime Params](Comptime%20Params.md) come to in practice. A type parameter is a variable the checker generalizes, so one copy serves every use. A value parameter is substituted before checking, by a pass over the desugared tree, because a value can decide a type — so the copy is what gets checked.
+
+Reify turned out not to be needed for this: a written comptime argument is already syntax, and forwarding one substitutes a literal for a name. It becomes necessary when an argument is a *computed* compile-time value, which is metaprocessing.
 
 | Fixtures | |
 |---|---|
 | Newly passing | `meta/params/func` |
-| Needing change | `core/generics/generic_fn` (already `<T>`), `core/generics/generic_struct` and `core/generics/monomorphize` — `struct` → `type` |
+| Needing change | `core/generics` → `core/comptime`, off `struct`; `type_reuse` needs an annotation, since `.0` on an unannotated parameter never had a type to read |
 
 ### 7 · Operator declarations
 

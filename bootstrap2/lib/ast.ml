@@ -190,11 +190,17 @@ type ('s, 'ann) method_defs =
    the checker has one. *)
 type 'e method_call = [ `Method_call of 'e * string * 'e list ]
 
+(* An argument in a `<>` list. A bare name parses as a type, since that is what
+   most of them are; whoever knows the declaration reinterprets one that names a
+   value parameter. *)
+type 'e comptime_arg =
+  | Ct_type of type_expr
+  | Ct_value of 'e
+
 (* Comptime arguments written out where inference has nothing to recover them
-   from. A bare name parses as a type; the checker reinterprets one that names a
-   value parameter instead. Eliminated by the checker, which has resolved the
-   arguments by the time it emits the call. *)
-type 'e comptime_call = [ `Comptime_call of 'e * type_expr list * 'e list ]
+   from. Value arguments are gone after monomorphization and type arguments
+   after checking, so nothing downstream carries either. *)
+type 'e comptime_call = [ `Comptime_call of 'e * 'e comptime_arg list * 'e list ]
 
 (* A pattern names a variant and binds what it carries. *)
 type pattern =
@@ -485,10 +491,16 @@ let op_name op lhs rhs =
 (* The name a method is compiled under. *)
 let method_name type_name method_ = Printf.sprintf "%s__%s" type_name method_
 
+let map_comptime_arg (f : 'a -> 'b) (a : 'a comptime_arg) : 'b comptime_arg =
+  match a with
+  | Ct_type t -> Ct_type t
+  | Ct_value v -> Ct_value (f v)
+
 let map_comptime_call (f : 'a -> 'b) (e : 'a comptime_call) : 'b comptime_call =
   match e with
-  | `Comptime_call (callee, type_args, args) ->
-    `Comptime_call (f callee, type_args, List.map f args)
+  | `Comptime_call (callee, comptime_args, args) ->
+    `Comptime_call
+      (f callee, List.map (map_comptime_arg f) comptime_args, List.map f args)
 
 let map_method_call (f : 'a -> 'b) (e : 'a method_call) : 'b method_call =
   match e with

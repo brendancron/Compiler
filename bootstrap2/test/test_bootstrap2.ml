@@ -65,10 +65,13 @@ let cases =
   ; "tests/core/traits/inherent/main"
   ; "tests/core/traits/builtin_receiver/main"
   ; "tests/effects/methods/methods"
-  ; "tests/core/generics/generic_fn/main"
-  ; "tests/core/generics/generic_struct/main"
-  ; "tests/core/generics/monomorphize/main"
-  ; "tests/core/generics/generic_sum/main"
+  ; "tests/core/comptime/type_params/main"
+  ; "tests/core/comptime/type_reuse/main"
+  ; "tests/core/comptime/parameterized_types/main"
+  ; "tests/core/comptime/parameterized_sums/main"
+  ; "tests/core/comptime/value_params/main"
+  ; "tests/core/comptime/mixed_params/main"
+  ; "tests/meta/params/func"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
@@ -110,8 +113,10 @@ let error_cases =
   ; "tests/core/traits/errors/no_such_method"
   ; "tests/core/traits/errors/arity"
   ; "tests/core/traits/errors/unknown_receiver"
-  ; "tests/core/generics/errors/type_arity"
-  ; "tests/core/generics/errors/comptime_arity"
+  ; "tests/core/comptime/errors/type_arity"
+  ; "tests/core/comptime/errors/comptime_arity"
+  ; "tests/core/comptime/errors/not_comptime"
+  ; "tests/core/comptime/errors/comptime_call"
   ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)
@@ -155,6 +160,15 @@ let interpret source =
           Error
             (Printf.sprintf "desugar error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Ok desugared ->
+        match Monomorphize.program desugared with
+        | Error e ->
+          Error
+            (Printf.sprintf
+               "comptime error [%d:%d] %s"
+               e.span.Ast.line
+               e.span.Ast.col
+               e.message)
+        | Ok desugared ->
         let registry = Registry.builtins () in
         match Typecheck.check ~registry desugared with
         | Error (e :: _) ->
@@ -195,6 +209,10 @@ let rejections source =
      | Error _ -> Error "parse failed"
      | Ok program ->
        (match Desugar.program program with
+        | Error e ->
+          Ok (Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+        | Ok desugared ->
+        match Monomorphize.program desugared with
         | Error e ->
           Ok (Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
         | Ok desugared ->

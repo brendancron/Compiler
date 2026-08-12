@@ -99,6 +99,11 @@ let () =
           report e.span.line e.span.col "Desugar" e.message;
           exit 65
         | Ok desugared ->
+        match Monomorphize.program desugared with
+        | Error e ->
+          report e.span.line e.span.col "Comptime" e.message;
+          exit 65
+        | Ok desugared ->
         let registry = Registry.builtins () in
         match Typecheck.check ~registry desugared with
         | Error errors ->

@@ -497,7 +497,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
   (* Written where inference has nothing to recover the parameters from. The
      arguments pin the callee's variables before the ordinary arguments are
      checked; what survives is an ordinary call. *)
-  | `Comptime_call (callee, type_args, args) ->
+  | `Comptime_call (callee, comptime_args, args) ->
     let name =
       match callee.Ast.it with
       | `Var name -> name
@@ -509,14 +509,24 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       | None -> fail span "Undefined variable '%s'." name
     in
     let declared = Option.value ~default:[] (Hashtbl.find_opt ctx_fn_params name) in
-    if List.length declared <> List.length type_args
+    if List.length declared <> List.length comptime_args
     then
       fail
         span
         "'%s' takes %d comptime argument(s) but %d were given."
         name
         (List.length declared)
-        (List.length type_args);
+        (List.length comptime_args);
+    (* Monomorphization consumed the value arguments; anything left is one that
+       could not be evaluated. *)
+    let type_args =
+      List.map
+        (function
+          | Ast.Ct_type t -> t
+          | Ast.Ct_value _ ->
+            fail span "A comptime argument to '%s' is not known at compile time." name)
+        comptime_args
+    in
     (* A parameter the body already pinned is no longer a variable to bind, so
        the written argument is checked against it instead. *)
     let bound, pinned =

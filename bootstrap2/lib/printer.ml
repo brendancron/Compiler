@@ -58,11 +58,15 @@ let rec string_of_expr (e : Ast.expr) : string =
       "(call %s%s)"
       (string_of_expr callee)
       (String.concat "" (List.map (fun a -> " " ^ string_of_expr a) args))
-  | `Comptime_call (callee, type_args, args) ->
+  | `Comptime_call (callee, comptime_args, args) ->
+    let comptime = function
+      | Ast.Ct_type t -> string_of_type_expr t
+      | Ast.Ct_value v -> string_of_expr v
+    in
     Printf.sprintf
       "(call %s<%s>%s)"
       (string_of_expr callee)
-      (String.concat ", " (List.map string_of_type_expr type_args))
+      (String.concat ", " (List.map comptime comptime_args))
       (String.concat "" (List.map (fun a -> " " ^ string_of_expr a) args))
   | `Method_call (receiver, name, args) ->
     Printf.sprintf

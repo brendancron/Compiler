@@ -1,0 +1,5 @@
+fn size<n: int>() {
+    print(n);
+}
+var runtime = 3;
+size<runtime>();

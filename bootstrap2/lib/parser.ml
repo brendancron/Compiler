@@ -313,12 +313,14 @@ and call s : Ast.expr =
       ignore (consume s Token.Right_bracket "Expected ']' after index.");
       loop (Ast.at callee.Ast.span (`Index (callee, index)))
     | Token.Less ->
-      (match type_arguments s with
-       | Some type_args ->
-         ignore (consume s Token.Left_paren "Expected '(' after type arguments.");
+      (match comptime_arguments s with
+       | Some comptime_args ->
+         ignore (consume s Token.Left_paren "Expected '(' after comptime arguments.");
          loop
-           (Ast.at callee.Ast.span (`Comptime_call (callee, type_args, arguments s)))
-       (* Not a type argument list, so the '<' belongs to whoever comes next. *)
+           (Ast.at
+              callee.Ast.span
+              (`Comptime_call (callee, comptime_args, arguments s)))
+       (* Not a comptime argument list, so the '<' belongs to what follows. *)
        | None -> callee)
     | Token.Dot ->
       ignore (advance s);
@@ -342,7 +344,7 @@ and call s : Ast.expr =
    separates them, so a type argument list is accepted only when a call follows.
    Speculative: the position and the recorded errors are put back when it turns
    out not to be one. *)
-and type_arguments s : Ast.type_expr list option =
+and comptime_arguments s : Ast.expr Ast.comptime_arg list option =
   let start = s.current
   and errors = s.errors in
   let restore () =
@@ -353,10 +355,27 @@ and type_arguments s : Ast.type_expr list option =
   match
     ignore (advance s);
     let rec loop acc =
-      let t = type_expr s in
+      (* A type is tried first because a bare name is usually one. A value
+         argument that happens to be a name is put back by whoever knows the
+         declaration it is passed to. *)
+      let arg =
+        let start = s.current
+        and errors = s.errors in
+        let as_value () =
+          s.current <- start;
+          s.errors <- errors;
+          (* Below comparison, so the closing '>' is not read as an operator. A
+             comptime argument is a literal or a name; it never needs more. *)
+          Ast.Ct_value (unary s)
+        in
+        match type_expr s with
+        | t when check s Token.Comma || check s Token.Greater -> Ast.Ct_type t
+        | _ -> as_value ()
+        | exception Parse_error -> as_value ()
+      in
       match matches s [ Token.Comma ] with
-      | Some _ -> loop (t :: acc)
-      | None -> List.rev (t :: acc)
+      | Some _ -> loop (arg :: acc)
+      | None -> List.rev (arg :: acc)
     in
     let args = loop [] in
     if check s Token.Greater
