@@ -40,6 +40,5 @@ var boxed = new Box { value: 7 };
 print(boxed.get());
 print(typeof(boxed));
 
-// Written out where there is nothing to recover them from.
 print(identity<int>(5));
 print(identity<string>("x"));

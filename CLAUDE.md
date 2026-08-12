@@ -34,7 +34,7 @@ cd bootstrap && RUSTFLAGS="-A warnings" cargo test
 
 ## Code style
 
-Applies to both `bootstrap/` (Rust) and `bootstrap2/` (OCaml).
+Applies to `bootstrap/` (Rust), `bootstrap2/` (OCaml), and the `.cx` fixtures in `tests/`. A fixture is read alongside its `.txt`, which already says what the program produces, so a header explaining what it demonstrates is the same noise as anywhere else.
 
 **Write few comments.** Most code should carry none. Two kinds earn their place:
 

@@ -1,6 +1,3 @@
-// The same generic function used at different concrete types. Each call is an
-// independent instantiation, and nothing is shared between them.
-
 fn wrap<T>(x: T) -> Array<T> {
     return [x];
 }

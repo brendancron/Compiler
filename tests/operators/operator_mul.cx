@@ -3,7 +3,6 @@ type Vec2 {
     y: int
 }
 
-// Scalar multiplication: Vec2 * int
 op *(a: Vec2, b: int) -> Vec2 {
         return new Vec2 { x: a.x * b, y: a.y * b };
 }

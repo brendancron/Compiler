@@ -1,6 +1,3 @@
-// Types and values in one list. The value is specialized away; the type
-// parameter stays, and one copy serves every type it is used at.
-
 fn buffer<T, n: int>(fill: T) -> Array<T> {
     print(n);
     return [fill];
