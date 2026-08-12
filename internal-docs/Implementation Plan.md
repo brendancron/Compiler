@@ -78,6 +78,15 @@ The structural value-to-syntax walk. Scalars first, extending to each type as it
 |---|---|
 | Needing change | `operators/*` — `impl Add for Vec2` → `op +`, since traits are gone |
 
+### 7b · Methods
+
+`trait` declares signatures, `impl [Trait for] Type` supplies bodies, and `x.m(a)` dispatches on the receiver's type. Each method compiles to a function named `Type__method` taking the receiver first, so the interpreter sees ordinary calls. Dispatch needs the receiver's type at the call site: a method on a value whose type is still a variable has no answer until monomorphization, so `fn notify(item) { item.summarize(); }` is an error until step 6.
+
+| Fixtures | |
+|---|---|
+| Needing change | `core/traits/*` — `struct` → `type`, literals → `new`, `to_string` → `str` |
+| Still blocked | `core/traits/trait_bound` — needs inferred method constraints, which arrive with step 6 |
+
 ### 8 · List, Set, Map
 
 `List<T>` with `push`, `Set<T>`, `Map<K, V>`, and literal narrowing across all four containers.

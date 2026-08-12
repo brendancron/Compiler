@@ -1,0 +1,8 @@
+type Circle { radius: int }
+impl Circle {
+    fn area(self) -> int { return self.radius; }
+}
+fn report(shape) {
+    print(shape.area());
+}
+report(new Circle { radius: 2 });

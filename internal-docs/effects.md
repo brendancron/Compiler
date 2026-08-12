@@ -108,9 +108,11 @@ If this proves too strict in practice, add widening at call sites later. Going t
 
 ### Open, closed, and defaulting
 
-Inferred function types get an open row. A written annotation is closed, so `fn f(): unit` is a contract that `f` is pure; without that rule there is no way to say so.
+A written row precedes the return type — `fn f(): <log> unit` — because type arguments made the trailing position ambiguous: `Array<int>` and `unit <log>` are the same shape, and nothing distinguishes a type argument list from a row. Koka writes them the same way. Printed types follow, so `typeof` reads `(string) -> <logger> unit`.
 
-An unconstrained row variable **defaults to the empty row** at `resolve` time, exactly parallel to unconstrained numeric variables defaulting to `int`. Without this, `typeof(double)` would print `(int) -> int <e5>` and break `tests/reflection/typeof_fn`, which both bootstraps currently agree on. With it, pure functions print no row and effectful ones print `<exn>`.
+Inferred function types get an open row. A written annotation is closed, so `fn f(): <> unit` is a contract that `f` is pure; without that rule there is no way to say so.
+
+An unconstrained row variable **defaults to the empty row** at `resolve` time, exactly parallel to unconstrained numeric variables defaulting to `int`. Without this, `typeof(double)` would print `(int) -> <e5> int`. With it, pure functions print no row at all and effectful ones print theirs.
 
 ### `resume` and answer types
 
@@ -139,3 +141,5 @@ Following the discipline the other passes use, the effect constructs (`effect` d
 ## Deferred
 
 Handler aliasing, syntax for writing a row variable in an annotation, and whether effect declarations nest — see [TODO](TODO.md). None of them block what is implemented.
+
+Explicit comptime arguments will hit the same ambiguity in expression position, where `pair<int>(1, 2)` and `a < b` cannot be told apart and `a<b` is idiomatic. Nothing decided here helps there; it needs a turbofish-style marker or inference-only type arguments.

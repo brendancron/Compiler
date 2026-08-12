@@ -1,9 +1,64 @@
 (* Turns every construct whose meaning depends on a type into a concrete
    primitive or call, using the types the checker inferred.
 
-   Today that is compound assignment. `x += v` becomes `x = x + v` unless the
-   type supplies an in-place entry, and no type does yet. Operators, indexing,
-   and collection literals join it here as the registry grows. *)
+   Compound assignment, operator selection, and method dispatch all land here.
+   A statement may expand into several, because an `impl` is a group of
+   functions written under one header. *)
+
+(* The effect row of every function this pass emits, by the name it emits it
+   under. A synthesized call has to describe the same function the declaration
+   does: the CPS pass reads the row off the callee to decide what evidence to
+   pass, and a call that claimed purity would be given none. *)
+let declared_rows : (string, Types.row) Hashtbl.t = Hashtbl.create 16
+
+let row_of (t : Types.ty) =
+  match t with
+  | Types.Fn (_, _, row) -> row
+  | _ -> []
+
+let rec record (s : Ast.typed_stmt) =
+  match s.Ast.it with
+  | `Impl_decl (_, type_name, methods) ->
+    List.iter
+      (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
+        Hashtbl.replace
+          declared_rows
+          (Ast.method_name type_name m.Ast.md_name)
+          (row_of m.Ast.md_ann);
+        List.iter record m.Ast.md_body)
+      methods
+  | `Op_decl (op, params, _, body) ->
+    (match params with
+     | [ lhs; rhs ] ->
+       Hashtbl.replace
+         declared_rows
+         (Ast.op_name op (operand lhs) (operand rhs))
+         (row_of s.Ast.ann)
+     | _ -> ());
+    List.iter record body
+  | `Block body | `Fn (_, _, _, body) -> List.iter record body
+  | `If (_, then_branch, else_branch) ->
+    record then_branch;
+    Option.iter record else_branch
+  | `While (_, body) -> record body
+  | `Run (body, handlers) ->
+    List.iter record body;
+    List.iter
+      (fun (h : Ast.typed_stmt Ast.handler) ->
+        List.iter
+          (fun (a : Ast.typed_stmt Ast.arm) -> List.iter record a.Ast.arm_body)
+          h.Ast.arms)
+      handlers
+  | `Match (_, cases) -> List.iter (fun (_, body) -> List.iter record body) cases
+  | _ -> ()
+
+(* An operator's operands are named as written, which is how [Registry] keyed
+   the entry the checker made. *)
+and operand (p : Ast.param) =
+  match p.Ast.ty with
+  | Some { Ast.it = Ast.Ty_name n; _ } -> n
+  | Some { Ast.it = Ast.Ty_app (n, _); _ } -> n
+  | _ -> "_"
 
 let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
   let span = e.Ast.span
@@ -26,14 +81,20 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
       and b = expr registry b in
       (match Registry.find registry op a.Ast.ann b.Ast.ann with
        | Some { Registry.emit = Registry.Call name; _ } ->
-         let callee : Ast.resolved_expr =
-           { Ast.it = `Var name
-           ; span
-           ; ann = Types.Fn ([ a.Ast.ann; b.Ast.ann ], ann, [])
-           }
-         in
-         `Call (callee, [ a; b ])
+         `Call (fn_ref span name [ a; b ] ann, [ a; b ])
        | _ -> `Binop (op, a, b))
+    (* The receiver becomes the first argument, which is the shape the method
+       was compiled under. *)
+    | `Method_call (receiver, name, args) ->
+      let receiver = expr registry receiver in
+      let args = List.map (expr registry) args in
+      let owner =
+        match Types.type_name receiver.Ast.ann with
+        | Some owner -> owner
+        | None -> assert false (* the checker dispatched on this name *)
+      in
+      let all = receiver :: args in
+      `Call (fn_ref span (Ast.method_name owner name) all ann, all)
     (* Only arrays exist so far, so every literal lowers to the primitive. *)
     | `Collection_lit items -> `Array_lit (List.map (expr registry) items)
     | #Ast.lit as l -> l
@@ -56,39 +117,78 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
   in
   { Ast.it; span; ann }
 
-let rec stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt =
-  let it : Ast.resolved_stmt_kind =
-    match s.Ast.it with
-    | #Ast.stmts as st ->
-      (Ast.map_stmts (expr registry) (stmt registry) st :> Ast.resolved_stmt_kind)
-    | #Ast.effects as e ->
-      (Ast.map_effects
-         (expr registry)
-         (stmt registry)
-         (Ast.map_handler (stmt registry))
-         e
-       :> Ast.resolved_stmt_kind)
-    (* An operator is an ordinary function under a derived name. *)
-    | `Op_decl (op, params, signature, body) ->
-      let operand (p : Ast.param) =
-        match p.Ast.ty with
-        | Some { Ast.it = Ast.Ty_name n; _ } -> n
-        | Some { Ast.it = Ast.Ty_app (n, _); _ } -> n
-        | _ -> "_"
-      in
-      (match params with
-       | [ lhs; rhs ] ->
-         `Fn
-           ( Ast.op_name op (operand lhs) (operand rhs)
-           , params
-           , signature
-           , List.map (stmt registry) body )
-       | _ -> `Block [])
-    | #Ast.type_defs as t -> t
-    | #Ast.matching as m ->
-      (Ast.map_matching (expr registry) (stmt registry) m :> Ast.resolved_stmt_kind)
-  in
-  { Ast.it; span = s.Ast.span; ann = s.Ast.ann }
+(* A reference to the function a lowered construct calls, typed from the
+   arguments it is about to be given. *)
+and fn_ref span name args result : Ast.resolved_expr =
+  { Ast.it = `Var name
+  ; span
+  ; ann =
+      Types.Fn
+        ( List.map (fun (a : Ast.resolved_expr) -> a.Ast.ann) args
+        , result
+        , Option.value ~default:[] (Hashtbl.find_opt declared_rows name) )
+  }
+
+and stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =
+  let span = s.Ast.span
+  and ann = s.Ast.ann in
+  let node it : Ast.resolved_stmt = { Ast.it; span; ann } in
+  match s.Ast.it with
+  (* [`Block] and [`Fn] hold statement lists, which is where an expansion has
+     room to land; the rest hold single statements. *)
+  | `Block body -> [ node (`Block (block registry body)) ]
+  | `Fn (name, params, signature, body) ->
+    [ node (`Fn (name, params, signature, block registry body)) ]
+  | #Ast.stmts as st ->
+    [ node (Ast.map_stmts (expr registry) (one registry) st :> Ast.resolved_stmt_kind) ]
+  | #Ast.effects as e ->
+    [ node
+        (Ast.map_effects (expr registry) (one registry) (Ast.map_handler (one registry)) e
+         :> Ast.resolved_stmt_kind)
+    ]
+  (* An operator is an ordinary function under a derived name. *)
+  | `Op_decl (op, params, signature, body) ->
+    (match params with
+     | [ lhs; rhs ] ->
+       [ node
+           (`Fn
+             ( Ast.op_name op (operand lhs) (operand rhs)
+             , params
+             , signature
+             , block registry body ))
+       ]
+     | _ -> [])
+  (* Each method becomes a function taking the receiver first, which is what
+     [`Method_call] was rewritten to call. *)
+  | `Impl_decl (_, type_name, methods) ->
+    List.map
+      (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
+        { Ast.it =
+            (`Fn
+            ( Ast.method_name type_name m.Ast.md_name
+            , m.Ast.md_params
+            , m.Ast.md_signature
+              , block registry m.Ast.md_body )
+             :> Ast.resolved_stmt_kind)
+        ; span
+        ; ann = m.Ast.md_ann
+        })
+      methods
+  | `Trait_decl _ -> []
+  | #Ast.type_defs as t -> [ node t ]
+  | #Ast.matching as m ->
+    [ node (Ast.map_matching (expr registry) (one registry) m :> Ast.resolved_stmt_kind) ]
+
+and block registry body = List.concat_map (stmt registry) body
+
+(* Where only one statement fits. An `impl` in such a position would be scoped
+   to it, which is no use to anyone, so nothing is lost by wrapping. *)
+and one registry (s : Ast.typed_stmt) : Ast.resolved_stmt =
+  match stmt registry s with
+  | [ single ] -> single
+  | many -> { Ast.it = `Block many; span = s.Ast.span; ann = s.Ast.ann }
 
 let program ~registry (p : Ast.typed_stmt list) : Ast.resolved_stmt list =
-  List.map (stmt registry) p
+  Hashtbl.reset declared_rows;
+  List.iter record p;
+  block registry p

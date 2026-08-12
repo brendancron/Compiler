@@ -153,6 +153,35 @@ type type_defs = [ `Type_decl of string * type_body ]
    the operator and its operand types; [Resolve] turns it into one. *)
 type 's op_defs = [ `Op_decl of binop * param list * signature * 's list ]
 
+(* A method declared without a body: what an `impl` of the trait must supply. *)
+type method_sig =
+  { ms_name : string
+  ; ms_params : param list
+  ; ms_signature : signature
+  }
+
+(* [md_ann] is the method's own type once there is one. It has to be recorded
+   here rather than left to the enclosing node: the CPS pass reads a function's
+   effect row off its annotation, and one impl holds several functions. *)
+type ('s, 'ann) method_def =
+  { md_name : string
+  ; md_params : param list
+  ; md_signature : signature
+  ; md_body : 's list
+  ; md_ann : 'ann
+  }
+
+(* An `impl` with no trait names none: the methods belong to the type alone.
+   [Resolve] turns each into an ordinary function taking the receiver first. *)
+type ('s, 'ann) method_defs =
+  [ `Trait_decl of string * method_sig list
+  | `Impl_decl of string option * string * ('s, 'ann) method_def list
+  ]
+
+(* Which function this is depends on the receiver's type, so it survives until
+   the checker has one. *)
+type 'e method_call = [ `Method_call of 'e * string * 'e list ]
+
 (* A pattern names a variant and binds what it carries. *)
 type pattern =
   | Pat_variant of string * string * string payload
@@ -218,6 +247,7 @@ and expr_kind =
   | expr record
   | expr nominal
   | expr collection
+  | expr method_call
   | expr reflect
   ]
 
@@ -230,6 +260,7 @@ and stmt_kind =
   | stmt handler_defs
   | type_defs
   | stmt op_defs
+  | (stmt, unit) method_defs
   | (expr, stmt) matching
   ]
 
@@ -250,6 +281,7 @@ and desugared_expr_kind =
   | desugared_expr record
   | desugared_expr nominal
   | desugared_expr collection
+  | desugared_expr method_call
   | desugared_expr reflect
   ]
 
@@ -260,6 +292,7 @@ and desugared_stmt_kind =
   | (desugared_expr, desugared_stmt, desugared_stmt handler) effects
   | type_defs
   | desugared_stmt op_defs
+  | (desugared_stmt, unit) method_defs
   | (desugared_expr, desugared_stmt) matching
   ]
 
@@ -277,6 +310,7 @@ and typed_expr_kind =
   | typed_expr record
   | typed_expr nominal
   | typed_expr collection
+  | typed_expr method_call
   | typed_expr reflect
   ]
 
@@ -287,6 +321,7 @@ and typed_stmt_kind =
   | (typed_expr, typed_stmt, typed_stmt handler) effects
   | type_defs
   | typed_stmt op_defs
+  | (typed_stmt, Types.ty) method_defs
   | (typed_expr, typed_stmt) matching
   ]
 
@@ -430,6 +465,32 @@ let op_name op lhs rhs =
     | Greater_equal -> "ge"
   in
   Printf.sprintf "__op_%s_%s_%s" symbol lhs rhs
+
+(* The name a method is compiled under. *)
+let method_name type_name method_ = Printf.sprintf "%s__%s" type_name method_
+
+let map_method_call (f : 'a -> 'b) (e : 'a method_call) : 'b method_call =
+  match e with
+  | `Method_call (receiver, name, args) ->
+    `Method_call (f receiver, name, List.map f args)
+
+let map_method_def (fs : 's1 -> 's2) (fa : 'a1 -> 'a2) (m : ('s1, 'a1) method_def)
+  : ('s2, 'a2) method_def
+  =
+  { md_name = m.md_name
+  ; md_params = m.md_params
+  ; md_signature = m.md_signature
+  ; md_body = List.map fs m.md_body
+  ; md_ann = fa m.md_ann
+  }
+
+let map_method_defs (fs : 's1 -> 's2) (fa : 'a1 -> 'a2) (m : ('s1, 'a1) method_defs)
+  : ('s2, 'a2) method_defs
+  =
+  match m with
+  | `Trait_decl (name, methods) -> `Trait_decl (name, methods)
+  | `Impl_decl (trait, type_name, methods) ->
+    `Impl_decl (trait, type_name, List.map (map_method_def fs fa) methods)
 
 let map_matching (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (m : ('e1, 's1) matching)
   : ('e2, 's2) matching

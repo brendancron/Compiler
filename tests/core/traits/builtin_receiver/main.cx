@@ -1,0 +1,22 @@
+impl int {
+    fn double(self) -> int {
+        return self * 2;
+    }
+}
+
+impl string {
+    fn shout(self) -> string {
+        return self + "!";
+    }
+}
+
+impl Array {
+    fn first(self) {
+        return self[0];
+    }
+}
+
+print(21.double());
+print("hey".shout());
+print([7, 8, 9].first());
+print(["a", "b"].first());

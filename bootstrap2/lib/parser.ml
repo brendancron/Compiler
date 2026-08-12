@@ -294,13 +294,18 @@ and call s : Ast.expr =
          loop (Ast.at callee.Ast.span (`Tuple_get (callee, n)))
        | Token.Identifier label ->
          ignore (advance s);
-         loop (Ast.at callee.Ast.span (`Field (callee, label)))
+         (match matches s [ Token.Left_paren ] with
+          | Some _ ->
+            loop
+              (Ast.at callee.Ast.span (`Method_call (callee, label, arguments s)))
+          | None -> loop (Ast.at callee.Ast.span (`Field (callee, label))))
        | _ -> raise (error s (peek s) "Expected a field after '.'."))
     | _ -> callee
   in
   loop (primary s)
 
-and finish_call s callee : Ast.expr =
+(* Assumes the '(' has been consumed; consumes the closing ')'. *)
+and arguments s : Ast.expr list =
   let args =
     if check s Token.Right_paren
     then []
@@ -314,7 +319,10 @@ and finish_call s callee : Ast.expr =
       loop [])
   in
   ignore (consume s Token.Right_paren "Expected ')' after arguments.");
-  Ast.at callee.Ast.span (`Call (callee, args))
+  args
+
+and finish_call s callee : Ast.expr =
+  Ast.at callee.Ast.span (`Call (callee, arguments s))
 
 (* Assumes the '{' has been consumed; consumes the closing '}'. *)
 and record_fields s : (string * Ast.expr) list =
@@ -459,15 +467,20 @@ let rec declaration s : Ast.stmt option =
     | Token.Op ->
       ignore (advance s);
       Some (op_decl s sp)
+    | Token.Trait ->
+      ignore (advance s);
+      Some (trait_decl s sp)
+    | Token.Impl ->
+      ignore (advance s);
+      Some (impl_decl s sp)
     | _ -> Some (statement s)
   with
   | Parse_error ->
     synchronize s;
     None
 
-and fn_decl s sp : Ast.stmt =
-  let name = consume_identifier s "Expected function name." in
-  ignore (consume s Token.Left_paren "Expected '(' after function name.");
+(* Assumes the '(' has been consumed; consumes the closing ')'. *)
+and parameters s : Ast.param list =
   let params =
     if check s Token.Right_paren
     then []
@@ -482,6 +495,12 @@ and fn_decl s sp : Ast.stmt =
       loop [])
   in
   ignore (consume s Token.Right_paren "Expected ')' after parameters.");
+  params
+
+and fn_decl s sp : Ast.stmt =
+  let name = consume_identifier s "Expected function name." in
+  ignore (consume s Token.Left_paren "Expected '(' after function name.");
+  let params = parameters s in
   let signature = signature s in
   ignore (consume s Token.Left_brace "Expected '{' before function body.");
   Ast.at sp (`Fn (name, params, signature, block s))
@@ -656,6 +675,60 @@ and op_decl s sp : Ast.stmt =
   let signature = signature s in
   ignore (consume s Token.Left_brace "Expected '{' before the operator body.");
   Ast.at sp (`Op_decl (op, params, signature, block s))
+
+and trait_decl s sp : Ast.stmt =
+  let name = consume_identifier s "Expected a trait name." in
+  ignore (consume s Token.Left_brace "Expected '{' after the trait name.");
+  let rec loop acc =
+    if check s Token.Right_brace || is_at_end s
+    then List.rev acc
+    else (
+      ignore (consume s Token.Fn "Expected a method signature.");
+      let method_name = consume_identifier s "Expected a method name." in
+      ignore (consume s Token.Left_paren "Expected '(' after the method name.");
+      let params = parameters s in
+      let signature = signature s in
+      ignore (consume s Token.Semicolon "Expected ';' after a method signature.");
+      loop
+        ({ Ast.ms_name = method_name; ms_params = params; ms_signature = signature }
+         :: acc))
+  in
+  let methods = loop [] in
+  ignore (consume s Token.Right_brace "Expected '}' after the trait body.");
+  Ast.at sp (`Trait_decl (name, methods))
+
+(* `impl Type` gives the methods to that type alone; `impl Trait for Type` also
+   claims to satisfy the trait, which the checker holds it to. *)
+and impl_decl s sp : Ast.stmt =
+  let first = consume_identifier s "Expected a type or trait name after 'impl'." in
+  let trait, type_name =
+    match matches s [ Token.For ] with
+    | Some _ -> Some first, consume_identifier s "Expected a type name after 'for'."
+    | None -> None, first
+  in
+  ignore (consume s Token.Left_brace "Expected '{' after the impl header.");
+  let rec loop acc =
+    if check s Token.Right_brace || is_at_end s
+    then List.rev acc
+    else (
+      ignore (consume s Token.Fn "Expected a method.");
+      let method_name = consume_identifier s "Expected a method name." in
+      ignore (consume s Token.Left_paren "Expected '(' after the method name.");
+      let params = parameters s in
+      let signature = signature s in
+      ignore (consume s Token.Left_brace "Expected '{' before the method body.");
+      loop
+        ({ Ast.md_name = method_name
+         ; md_params = params
+         ; md_signature = signature
+         ; md_body = block s
+         ; md_ann = ()
+         }
+         :: acc))
+  in
+  let methods = loop [] in
+  ignore (consume s Token.Right_brace "Expected '}' after the methods.");
+  Ast.at sp (`Impl_decl (trait, type_name, methods))
 
 and type_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected a type name." in

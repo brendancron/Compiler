@@ -67,6 +67,7 @@ let keyword = function
   | "fn" -> Some Token.Fn
   | "for" -> Some Token.For
   | "if" -> Some Token.If
+  | "impl" -> Some Token.Impl
   | "handle" -> Some Token.Handle
   | "handler" -> Some Token.Handler
   | "match" -> Some Token.Match
@@ -76,6 +77,7 @@ let keyword = function
   | "resume" -> Some Token.Resume
   | "return" -> Some Token.Return
   | "run" -> Some Token.Run
+  | "trait" -> Some Token.Trait
   | "true" -> Some Token.True
   | "type" -> Some Token.Type
   | "typeof" -> Some Token.Typeof

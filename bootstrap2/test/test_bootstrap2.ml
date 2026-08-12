@@ -60,6 +60,11 @@ let cases =
   ; "tests/operators/operator_eq"
   ; "tests/operators/operator_chain"
   ; "tests/operators/operator_in_fn"
+  ; "tests/core/traits/basic_impl/main"
+  ; "tests/core/traits/multiple_impls/main"
+  ; "tests/core/traits/inherent/main"
+  ; "tests/core/traits/builtin_receiver/main"
+  ; "tests/effects/methods/methods"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
@@ -94,6 +99,13 @@ let error_cases =
   ; "tests/operators/errors/duplicate"
   ; "tests/operators/errors/undeclared"
   ; "tests/operators/errors/unannotated"
+  ; "tests/core/traits/errors/incomplete"
+  ; "tests/core/traits/errors/unknown_trait"
+  ; "tests/core/traits/errors/duplicate"
+  ; "tests/core/traits/errors/no_self"
+  ; "tests/core/traits/errors/no_such_method"
+  ; "tests/core/traits/errors/arity"
+  ; "tests/core/traits/errors/unknown_receiver"
   ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)

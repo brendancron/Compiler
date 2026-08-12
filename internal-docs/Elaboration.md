@@ -220,6 +220,28 @@ Without it, zero-cost operators exist only in monomorphic code. That is the ceil
 
 - **Registration completes before type checking**, since the checker consults the table.
 
+## Methods are not in the table
+
+`xs.len()` looks like it belongs here, and it does not. An operator is selected from the types of its operands, which is why no name the author writes appears in the lowered code; a method is named at the call site, and the only question is which type's version of that name is meant. That is a lookup keyed by `(type, method)`, not a search over operand types, so it is a separate table with a separate rule.
+
+```cronyx
+trait Len {
+    fn len(self) -> int;
+}
+
+impl Len for Array {
+    fn len(self) -> int { … }
+}
+
+impl Rectangle {
+    fn area(self) -> int { return self.width * self.height; }
+}
+```
+
+An `impl` without a trait gives the methods to the type alone; naming a trait additionally claims to satisfy it, and every signature the trait declares must be supplied. Each method compiles to a function under a derived name, taking the receiver first — `Rectangle__area(r)` — so nothing downstream of [Resolve] has a notion of a method at all.
+
+Dispatch needs the receiver's type where the call is written. A receiver whose type is still a variable has no answer, which is the same wall [`Polymorphism forces monomorphization`](#polymorphism-forces-monomorphization) describes for operators, and it lifts at the same time.
+
 ## What this replaces
 
 The previous approach dispatched at runtime: a `HashMap` keyed by `(trait, type_name)`, consulted on every evaluation of an operator whose left operand was a struct, and reached only after falling through a match on the builtin cases. Selection here happens once, at compile time, and the builtin cases are entries rather than a fallthrough.

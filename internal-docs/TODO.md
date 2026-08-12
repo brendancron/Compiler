@@ -20,4 +20,8 @@ Decisions taken deliberately later, with the reason.
 
 **`embed`.** `tests/core/embed` exists and has not been discussed. Reading a file at compile time is a metaprocessing capability, so it belongs with the sandbox question about what the evaluator permits.
 
+**Effect rows at call sites are equated, not subsumed.** A call unifies the callee's row with the caller's, so a pure function called from an effectful one comes out annotated with the caller's effects — and the CPS pass, reading that annotation, passes it evidence it has no parameters for. `fn twice(n) { return n * 2; }` called from a function that performs `log` fails at run time with an arity error. Koka's rule is containment, not equality. Fixing it means a subrow constraint, or taking a function's row from its declaration rather than from a call site's inference variable. [Resolve] already does the latter for the calls it synthesizes, since it emits the declaration and the call together.
+
+**Verify does not check effect rows.** It compares each node against its children, and a row belongs to a function reached through a name. The bug above is exactly the kind it was built to catch and cannot.
+
 **Name resolution rules.** `tests/core/resolution` pins behaviour that no document describes — shadowing, ordering, and what a name means when several things could provide it.

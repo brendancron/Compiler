@@ -211,6 +211,33 @@ let rec string_of_ty (t : ty) : string =
       (string_of_ty ret)
   | Generic id -> Printf.sprintf "'%d" id
 
+(* The name an `impl` writes to reach this type. A structural type has none,
+   which is why a method cannot be declared on a bare record or tuple. *)
+let type_name (t : ty) : string option =
+  match t with
+  | Int -> Some "int"
+  | Float -> Some "float"
+  | Str -> Some "string"
+  | Bool -> Some "bool"
+  | Unit -> Some "unit"
+  | Array _ -> Some "Array"
+  | Named (name, _) | Sum name -> Some name
+  | Tuple _ | Record _ | Fn _ | Generic _ -> None
+
+(* The same, before inference has finished. A receiver only has to be nominal
+   enough to name, not fully resolved: the element type of the array a method is
+   called on is nobody's business but the method's. *)
+let infer_type_name (t : infer_ty) : string option =
+  match repr t with
+  | IInt -> Some "int"
+  | IFloat -> Some "float"
+  | IStr -> Some "string"
+  | IBool -> Some "bool"
+  | IUnit -> Some "unit"
+  | IArray _ -> Some "Array"
+  | INamed (name, _) | ISum name -> Some name
+  | ITuple _ | IRecord _ | IFn _ | IVar _ -> None
+
 (* ---- row unification ---- *)
 
 let rec row_occurs id (r : infer_row) =

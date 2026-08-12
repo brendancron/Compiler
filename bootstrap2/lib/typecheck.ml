@@ -24,6 +24,7 @@ and checked_expr_kind =
   | checked_expr Ast.record
   | checked_expr Ast.nominal
   | checked_expr Ast.collection
+  | checked_expr Ast.method_call
   | checked_expr Ast.reflect
   ]
 
@@ -35,6 +36,7 @@ and checked_stmt_kind =
   | Ast.type_defs
   | (checked_expr, checked_stmt) Ast.matching
   | checked_stmt Ast.op_defs
+  | (checked_stmt, Types.infer_ty) Ast.method_defs
   ]
 
 type env =
@@ -70,10 +72,18 @@ type decl =
 
 let ctx_types : (string, decl) Hashtbl.t = Hashtbl.create 16
 
+(* Declared traits, and every method that exists, keyed by the type it was
+   declared on. The name it compiles to is derived, so only membership is
+   stored. *)
+let ctx_traits : (string, Ast.method_sig list) Hashtbl.t = Hashtbl.create 8
+let ctx_methods : (string * string, unit) Hashtbl.t = Hashtbl.create 32
+
 let reset_effects () =
   Hashtbl.reset ctx_effects.ops;
   Hashtbl.reset ctx_effects.declared;
-  Hashtbl.reset ctx_types
+  Hashtbl.reset ctx_types;
+  Hashtbl.reset ctx_traits;
+  Hashtbl.reset ctx_methods
 
 let new_env parent = { bindings = Hashtbl.create 16; parent }
 let bind env name scheme = Hashtbl.replace env.bindings name scheme
@@ -208,6 +218,11 @@ let rec assigned_in_expr (e : Ast.desugared_expr) acc =
   | `Call (callee, args) ->
     List.fold_left (fun acc a -> assigned_in_expr a acc) (assigned_in_expr callee acc) args
   | `Typeof e -> assigned_in_expr e acc
+  | `Method_call (receiver, _, args) ->
+    List.fold_left
+      (fun acc a -> assigned_in_expr a acc)
+      (assigned_in_expr receiver acc)
+      args
   | `Index (a, b) -> assigned_in_expr b (assigned_in_expr a acc)
   | `Index_assign (a, b, c) ->
     assigned_in_expr c (assigned_in_expr b (assigned_in_expr a acc))
@@ -240,9 +255,15 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
     opt assigned_in_stmt else_branch (assigned_in_stmt then_branch (assigned_in_expr cond acc))
   | `While (cond, body) -> assigned_in_stmt body (assigned_in_expr cond acc)
   | `Return e -> opt assigned_in_expr e acc
-  | `Effect_decl _ | `Type_decl _ -> acc
+  | `Effect_decl _ | `Type_decl _ | `Trait_decl _ -> acc
   | `Op_decl (_, _, _, body) ->
     List.fold_left (fun acc st -> assigned_in_stmt st acc) acc body
+  | `Impl_decl (_, _, methods) ->
+    List.fold_left
+      (fun acc (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
+        List.fold_left (fun acc st -> assigned_in_stmt st acc) acc m.Ast.md_body)
+      acc
+      methods
   | `Match (scrutinee, cases) ->
     List.fold_left
       (fun acc (_, body) ->
@@ -404,6 +425,54 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
         ret
     in
     node result (`Call (callee_node, args))
+  (* Dispatch is by the receiver's type, which must therefore be known here.
+     Nothing defers it: a method on a value whose type is still a variable has
+     no answer until monomorphization. *)
+  | `Method_call (receiver, name, args) ->
+    let receiver = infer_expr env ctx receiver in
+    let args = List.map (infer_expr env ctx) args in
+    let owner =
+      match Types.infer_type_name receiver.Ast.ann with
+      | Some owner -> owner
+      | None ->
+        (match Types.repr receiver.Ast.ann with
+         | Types.IVar _ ->
+           fail span "Cannot call '%s': the receiver's type is not known here." name
+         | other ->
+           fail
+             span
+             "Cannot call '%s' on %s, which no impl can name."
+             name
+             (Types.string_of_infer_ty other))
+    in
+    let missing () = fail span "Type '%s' has no method '%s'." owner name in
+    if not (Hashtbl.mem ctx_methods (owner, name)) then missing ();
+    let fn =
+      match lookup env (Ast.method_name owner name) with
+      | Some scheme -> Types.instantiate scheme
+      | None -> missing ()
+    in
+    (* Unification would report the arity failure as a type mismatch on a
+       function nobody wrote. *)
+    (match Types.repr fn with
+     | Types.IFn (params, _, _) when List.length params <> List.length args + 1 ->
+       fail
+         span
+         "Method '%s' takes %d argument(s) but %d were passed."
+         name
+         (List.length params - 1)
+         (List.length args)
+     | _ -> ());
+    let ret = Types.fresh () in
+    let row = Types.fresh_row () in
+    Types.unify
+      fn
+      (Types.IFn
+         ( receiver.Ast.ann :: List.map (fun (a : checked_expr) -> a.Ast.ann) args
+         , ret
+         , row ));
+    Types.unify_row row ctx.row;
+    node ret (`Method_call (receiver, name, args))
   (* The operand is checked for its type but never evaluated. *)
   | `Typeof e -> node Types.IStr (`Typeof (infer_expr env ctx e))
   (* Every element agrees, and with only arrays so far the container is not in
@@ -584,6 +653,77 @@ and declare_ops registry (body : Ast.desugared_stmt list) =
       | _ -> ())
     body
 
+(* Traits are registered before impls so an impl can be held to one, and both
+   before hoisting, which reads the signatures they introduce. *)
+and declare_traits (body : Ast.desugared_stmt list) =
+  List.iter
+    (fun (s : Ast.desugared_stmt) ->
+      match s.Ast.it with
+      | `Trait_decl (name, methods) ->
+        if Hashtbl.mem ctx_traits name
+        then fail s.Ast.span "Trait '%s' is already declared." name;
+        Hashtbl.replace ctx_traits name methods
+      | _ -> ())
+    body
+
+and declare_impls (body : Ast.desugared_stmt list) =
+  List.iter
+    (fun (s : Ast.desugared_stmt) ->
+      match s.Ast.it with
+      | `Impl_decl (trait, type_name, methods) ->
+        let span = s.Ast.span in
+        let supplies name =
+          List.exists
+            (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
+              String.equal m.Ast.md_name name)
+            methods
+        in
+        ignore (self_ty span type_name);
+        (match trait with
+         | None -> ()
+         | Some trait ->
+           (match Hashtbl.find_opt ctx_traits trait with
+            | None -> fail span "Unknown trait '%s'." trait
+            | Some required ->
+              List.iter
+                (fun (r : Ast.method_sig) ->
+                  if not (supplies r.Ast.ms_name)
+                  then
+                    fail
+                      span
+                      "'%s' for '%s' is missing method '%s'."
+                      trait
+                      type_name
+                      r.Ast.ms_name)
+                required));
+        List.iter
+          (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
+            (match m.Ast.md_params with
+             | { Ast.name = "self"; _ } :: _ -> ()
+             | _ ->
+               fail
+                 span
+                 "Method '%s' must take 'self' as its first parameter."
+                 m.Ast.md_name);
+            if Hashtbl.mem ctx_methods (type_name, m.Ast.md_name)
+            then
+              fail
+                span
+                "Type '%s' already has a method '%s'."
+                type_name
+                m.Ast.md_name;
+            Hashtbl.replace ctx_methods (type_name, m.Ast.md_name) ())
+          methods
+      | _ -> ())
+    body
+
+(* `Array` is the one type an impl may name without naming its element type,
+   which is what makes a method over any array expressible. *)
+and self_ty span type_name =
+  if String.equal type_name "Array"
+  then Types.IArray (Types.fresh ())
+  else infer_ty_of_annotation (Ast.at span (Ast.Ty_name type_name))
+
 (* Type declarations are registered before anything is hoisted, because a
    function's signature may name one and hoisting reads signatures. *)
 and declare_types (body : Ast.desugared_stmt list) =
@@ -639,6 +779,30 @@ and hoist env (body : Ast.desugared_stmt list) =
                    , annotated_or_fresh signature.Ast.ret
                    , Types.fresh_row () )))
          | _ -> ())
+      | `Impl_decl (_, type_name, methods) ->
+        List.iter
+          (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
+            match m.Ast.md_params with
+            | [] -> ()
+            | _ :: rest ->
+              let param_types =
+                self_ty s.Ast.span type_name
+                :: List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) rest
+              in
+              let row =
+                match m.Ast.md_signature.Ast.row with
+                | Some labels -> row_of_labels labels
+                | None -> Types.fresh_row ()
+              in
+              bind
+                env
+                (Ast.method_name type_name m.Ast.md_name)
+                (Types.mono
+                   (Types.IFn
+                      ( param_types
+                      , annotated_or_fresh m.Ast.md_signature.Ast.ret
+                      , row ))))
+          methods
       | `Fn (name, params, signature, _) ->
         let param_types = List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) params in
         let row =
@@ -655,6 +819,8 @@ and hoist env (body : Ast.desugared_stmt list) =
 
 and infer_block env ctx (body : Ast.desugared_stmt list) : checked_stmt list =
   declare_types body;
+  declare_traits body;
+  declare_impls body;
   hoist env body;
   let assigned = assigned_names body in
   List.map (fun s -> infer_stmt env ctx assigned s) body
@@ -763,20 +929,86 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
      [declare_ops]. *)
   | `Op_decl (op, params, signature, body) ->
     let scope = new_env (Some env) in
-    List.iter
-      (fun (p : Ast.param) ->
-        bind scope p.Ast.name (Types.mono (annotated_or_fresh p.Ast.ty)))
-      params;
+    let param_types =
+      List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) params
+    in
+    List.iter2
+      (fun (p : Ast.param) ty -> bind scope p.Ast.name (Types.mono ty))
+      params
+      param_types;
     let declared_ret = annotated_or_fresh signature.Ast.ret in
+    let declared_row = Types.fresh_row () in
     let saved_return = ctx.return_type
-    and saved_saw = ctx.saw_return in
+    and saved_saw = ctx.saw_return
+    and saved_row = ctx.row in
     ctx.return_type <- Some declared_ret;
     ctx.saw_return <- false;
+    ctx.row <- declared_row;
     let body = infer_block scope ctx body in
     if not ctx.saw_return then Types.unify declared_ret Types.IUnit;
     ctx.return_type <- saved_return;
     ctx.saw_return <- saved_saw;
-    node (`Op_decl (op, params, signature, body))
+    ctx.row <- saved_row;
+    Ast.annotated
+      span
+      (Types.IFn (param_types, declared_ret, declared_row))
+      (`Op_decl (op, params, signature, body))
+  (* Read by [declare_impls]; it introduces no binding of its own. *)
+  | `Trait_decl (name, methods) -> node (`Trait_decl (name, methods))
+  (* Each method is checked as the function it becomes, with `self` bound to the
+     type the impl names. *)
+  | `Impl_decl (trait, type_name, methods) ->
+    let methods =
+      List.map
+        (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
+          let mangled = Ast.method_name type_name m.Ast.md_name in
+          let hoisted =
+            match lookup env mangled with
+            | Some { Types.body = Types.IFn (params, ret, row); _ }
+              when List.length params = List.length m.Ast.md_params ->
+              Some (params, ret, row)
+            | _ -> None
+          in
+          let param_types, declared_ret, declared_row =
+            match hoisted with
+            | Some triple -> triple
+            | None ->
+              ( List.map
+                  (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty)
+                  m.Ast.md_params
+              , annotated_or_fresh m.Ast.md_signature.Ast.ret
+              , Types.fresh_row () )
+          in
+          let scope = new_env (Some env) in
+          List.iter2
+            (fun (p : Ast.param) ty -> bind scope p.Ast.name (Types.mono ty))
+            m.Ast.md_params
+            param_types;
+          let saved_return = ctx.return_type
+          and saved_saw = ctx.saw_return
+          and saved_row = ctx.row in
+          ctx.return_type <- Some declared_ret;
+          ctx.saw_return <- false;
+          ctx.row <- declared_row;
+          let body = infer_block scope ctx m.Ast.md_body in
+          if not ctx.saw_return then Types.unify declared_ret Types.IUnit;
+          ctx.return_type <- saved_return;
+          ctx.saw_return <- saved_saw;
+          ctx.row <- saved_row;
+          let fn_type = Types.IFn (param_types, declared_ret, declared_row) in
+          Hashtbl.remove env.bindings mangled;
+          bind
+            env
+            mangled
+            (Types.generalize
+               ~env_vars:(env_free_vars env)
+               ~env_rows:(env_free_row_vars env)
+               ~env_fields:(env_free_field_vars env)
+               fn_type);
+          { m with Ast.md_body = body; md_ann = fn_type })
+        methods
+    in
+    node (`Impl_decl (trait, type_name, methods))
   | `Match (scrutinee, cases) ->
     let scrutinee = infer_expr env ctx scrutinee in
     let sum =
@@ -1001,6 +1233,8 @@ let rec resolve_expr (e : checked_expr) : Ast.typed_expr =
     | #Ast.nominal as n -> (Ast.map_nominal resolve_expr n :> Ast.typed_expr_kind)
     | #Ast.collection as c ->
       (Ast.map_collection resolve_expr c :> Ast.typed_expr_kind)
+    | #Ast.method_call as m ->
+      (Ast.map_method_call resolve_expr m :> Ast.typed_expr_kind)
     | #Ast.reflect as r -> (Ast.map_reflect resolve_expr r :> Ast.typed_expr_kind)
   in
   { Ast.it; span = e.Ast.span; ann = Types.resolve e.Ast.ann }
@@ -1016,24 +1250,32 @@ let rec resolve_stmt (s : checked_stmt) : Ast.typed_stmt =
     | #Ast.matching as m ->
       (Ast.map_matching resolve_expr resolve_stmt m :> Ast.typed_stmt_kind)
     | #Ast.op_defs as o -> (Ast.map_op_defs resolve_stmt o :> Ast.typed_stmt_kind)
+    | #Ast.method_defs as m ->
+      (Ast.map_method_defs resolve_stmt Types.resolve m :> Ast.typed_stmt_kind)
   in
   { Ast.it; span = s.Ast.span; ann = Types.resolve s.Ast.ann }
 
 (* ---- entry point ---- *)
 
+(* A builtin performs nothing, but writing that as a closed row would close the
+   caller's: a call unifies the two. Quantifying it instead gives every call site
+   a row of its own, which is what generalization does for a pure function
+   written in Cronyx. *)
+let pure params ret =
+  let row = Types.fresh_row () in
+  let scheme_of body =
+    { Types.quantified = List.map fst (Types.free_vars body)
+    ; quantified_rows = Types.free_row_vars body
+    ; quantified_fields = []
+    ; body
+    }
+  in
+  scheme_of (Types.IFn (params, ret, row))
+
 let globals () =
   let env = new_env None in
-  let alpha = Types.fresh () in
-  let quantified = List.map fst (Types.free_vars alpha) in
-  bind
-    env
-    "str"
-    { Types.quantified
-    ; quantified_rows = []
-    ; quantified_fields = []
-    ; body = Types.IFn ([ alpha ], Types.IStr, Types.REmpty)
-    };
-  bind env "clock" (Types.mono (Types.IFn ([], Types.IFloat, Types.REmpty)));
+  bind env "str" (pure [ Types.fresh () ] Types.IStr);
+  bind env "clock" (pure [] Types.IFloat);
   (* See [variadic_builtins]. *)
   let beta = Types.fresh () in
   bind
@@ -1065,6 +1307,8 @@ let check ~registry (program : Ast.desugared_stmt list)
      with the rest. *)
   (try
      declare_types program;
+     declare_traits program;
+     declare_impls program;
      declare_ops registry program;
      hoist env program
    with

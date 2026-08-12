@@ -25,6 +25,7 @@ let rec expr (e : expr) : desugared_expr =
     | #record as r -> (map_record expr r :> desugared_expr_kind)
     | #nominal as n -> (map_nominal expr n :> desugared_expr_kind)
     | #collection as c -> (map_collection expr c :> desugared_expr_kind)
+    | #method_call as m -> (map_method_call expr m :> desugared_expr_kind)
     | #reflect as r -> (map_reflect expr r :> desugared_expr_kind)
   in
   { it; span = sp; ann = () }
@@ -64,6 +65,7 @@ let rec stmt (s : stmt) : desugared_stmt =
     | #type_defs as t -> t
     | #matching as m -> (map_matching expr stmt m :> desugared_stmt_kind)
     | #op_defs as o -> (map_op_defs stmt o :> desugared_stmt_kind)
+    | #method_defs as m -> (map_method_defs stmt Fun.id m :> desugared_stmt_kind)
     (* Declarations vanish; only the inlined copies survive. *)
     | `Handler_decl _ -> `Block []
   in

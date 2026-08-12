@@ -131,6 +131,10 @@ var ys = pair<int>(1, 2);     // T written
 var empty = pair<string>();   // nothing to infer from
 ```
 
+Writing them explicitly collides with comparison: `pair<int>(1, 2)` and `a < b` are the same shape, and `a<b` without spaces is idiomatic, so whitespace cannot decide it. The rule is C#'s, narrowed — after an identifier, try to parse a type argument list, and accept it only if the token after the closing `>` is `(`. Explicit arguments appear only at call sites, so requiring the call to follow is sufficient, and the one program it misreads — `a < b > (c)` — is not one anybody writes.
+
+This is the same ambiguity that moved effect rows before the return type, and it is worth noting that the fix there does not help here. In type position `<` is never comparison; in expression position it is.
+
 A type name in expression position *is* the value, so `int` and `Array<int>` are ordinary expressions of type `Type`. `typeof` yields one, and reification writes one back out as the type expression that denotes it.
 
 `Type` is a record like any other, so field access and reification come from the record rules:

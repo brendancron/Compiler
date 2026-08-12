@@ -58,6 +58,12 @@ let rec string_of_expr (e : Ast.expr) : string =
       "(call %s%s)"
       (string_of_expr callee)
       (String.concat "" (List.map (fun a -> " " ^ string_of_expr a) args))
+  | `Method_call (receiver, name, args) ->
+    Printf.sprintf
+      "(. %s %s%s)"
+      (string_of_expr receiver)
+      name
+      (String.concat "" (List.map (fun a -> " " ^ string_of_expr a) args))
   | `And (a, b) -> Printf.sprintf "(and %s %s)" (string_of_expr a) (string_of_expr b)
   | `Or (a, b) -> Printf.sprintf "(or %s %s)" (string_of_expr a) (string_of_expr b)
   | `Typeof e -> Printf.sprintf "(typeof %s)" (string_of_expr e)
@@ -180,6 +186,20 @@ let rec write_stmt buf indent (s : Ast.stmt) =
     nested
       (Printf.sprintf "handler %s : %s" name h.Ast.handled)
       (List.concat_map (fun a -> a.Ast.arm_body) h.Ast.arms)
+  | `Trait_decl (name, methods) ->
+    line
+      "%s(trait %s%s)\n"
+      pad
+      name
+      (String.concat
+         ""
+         (List.map (fun (m : Ast.method_sig) -> " " ^ m.Ast.ms_name) methods))
+  | `Impl_decl (trait, type_name, methods) ->
+    nested
+      (match trait with
+       | Some trait -> Printf.sprintf "impl %s for %s" trait type_name
+       | None -> Printf.sprintf "impl %s" type_name)
+      (List.concat_map (fun (m : (Ast.stmt, unit) Ast.method_def) -> m.Ast.md_body) methods)
 
 let string_of_program (program : Ast.program) : string =
   let buf = Buffer.create 256 in
@@ -217,6 +237,12 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
       Printf.sprintf "(or %s %s)" (string_of_typed_expr a) (string_of_typed_expr b)
     | `Compound (op, name, v) ->
       Printf.sprintf "(%s= %s %s)" (string_of_binop op) name (string_of_typed_expr v)
+    | `Method_call (receiver, name, args) ->
+      Printf.sprintf
+        "(. %s %s%s)"
+        (string_of_typed_expr receiver)
+        name
+        (String.concat "" (List.map (fun a -> " " ^ string_of_typed_expr a) args))
     | `Typeof e -> Printf.sprintf "(typeof %s)" (string_of_typed_expr e)
     | `Collection_lit items ->
       Printf.sprintf "[%s]" (String.concat " " (List.map string_of_typed_expr items))
@@ -308,6 +334,15 @@ let rec write_typed_stmt buf indent (s : Ast.typed_stmt) =
   | `Type_decl (name, _) -> line "%s(type %s)\n" pad name
   | `Op_decl (op, _, _, body) ->
     nested (Printf.sprintf "op %s" (Ast.string_of_binop op)) body
+  | `Trait_decl (name, _) -> line "%s(trait %s)\n" pad name
+  | `Impl_decl (trait, type_name, methods) ->
+    nested
+      (match trait with
+       | Some trait -> Printf.sprintf "impl %s for %s" trait type_name
+       | None -> Printf.sprintf "impl %s" type_name)
+      (List.concat_map
+         (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) -> m.Ast.md_body)
+         methods)
   | `Match (scrutinee, cases) ->
     nested
       (Printf.sprintf "match %s" (string_of_typed_expr scrutinee))

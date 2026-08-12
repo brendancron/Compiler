@@ -45,6 +45,7 @@ type token_type =
   | Fn
   | For
   | If
+  | Impl
   | Op
   | Or
   | Handle
@@ -55,6 +56,7 @@ type token_type =
   | Match
   | New
   | True
+  | Trait
   | Type
   | Typeof
   | With
@@ -114,6 +116,7 @@ let token_type_to_string = function
   | Fn -> "FN"
   | For -> "FOR"
   | If -> "IF"
+  | Impl -> "IMPL"
   | Op -> "OP"
   | Or -> "OR"
   | Handle -> "HANDLE"
@@ -124,6 +127,7 @@ let token_type_to_string = function
   | Match -> "MATCH"
   | New -> "NEW"
   | True -> "TRUE"
+  | Trait -> "TRAIT"
   | Type -> "TYPE"
   | Typeof -> "TYPEOF"
   | With -> "WITH"
