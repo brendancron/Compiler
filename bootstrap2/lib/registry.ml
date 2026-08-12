@@ -13,13 +13,23 @@ type entry =
   }
 
 type t =
-  { exact : (Ast.binop * Types.ty * Types.ty, entry) Hashtbl.t
+  { (* What a collection literal builds, by the name of the type it builds. A
+       container is a candidate for `[…]` exactly by being in here. *)
+    containers : (string, emission) Hashtbl.t
+  ; exact : (Ast.binop * Types.ty * Types.ty, entry) Hashtbl.t
   ; (* Operators defined for any two operands of the same type, which cannot be
        enumerated — equality over every type there will ever be. *)
     homogeneous : (Ast.binop, entry) Hashtbl.t
   }
 
-let create () = { exact = Hashtbl.create 64; homogeneous = Hashtbl.create 8 }
+let create () =
+  { containers = Hashtbl.create 8
+  ; exact = Hashtbl.create 64
+  ; homogeneous = Hashtbl.create 8
+  }
+
+let register_container t name emission = Hashtbl.replace t.containers name emission
+let container t name = Hashtbl.find_opt t.containers name
 
 let register t op lhs rhs entry = Hashtbl.replace t.exact (op, lhs, rhs) entry
 
@@ -52,6 +62,10 @@ let unresolved_result (op : Ast.binop) operand =
 
 let builtins () =
   let t = create () in
+  (* Array is the one the others are built from, so it is the one that stands as
+     written — and the one an unnarrowed literal defaults to. *)
+  register_container t "Array" Primitive;
+  register_container t "List" (Call "List__of");
   let prim result = { result = Some result; emit = Primitive } in
   let arithmetic = [ Ast.Add; Ast.Sub; Ast.Mul; Ast.Div ] in
   let comparisons =

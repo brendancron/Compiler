@@ -1412,15 +1412,24 @@ let globals () =
   env
 
 let admits registry kind (t : Types.infer_ty) =
-  match Types.concrete t with
-  | None -> false
-  | Some ty ->
-    let has op = Registry.find registry op ty ty <> None in
-    (match kind with
-     | Types.Addable -> has Ast.Add
-     | Types.Numeric ->
-       List.exists has [ Ast.Sub; Ast.Mul; Ast.Div; Ast.Less; Ast.Greater ]
-     | Types.Collection _ | Types.Any -> false)
+  match kind with
+  (* A candidate is one the registry knows how to build, and its element is
+     whatever it was written to hold. *)
+  | Types.Collection elem ->
+    (match Types.container_element t with
+     | Some (name, held) when Registry.container registry name <> None ->
+       Types.unify elem held;
+       true
+     | _ -> false)
+  | Types.Any -> true
+  | Types.Addable | Types.Numeric ->
+    (match Types.concrete t with
+     | None -> false
+     | Some ty ->
+       let has op = Registry.find registry op ty ty <> None in
+       (match kind with
+        | Types.Addable -> has Ast.Add
+        | _ -> List.exists has [ Ast.Sub; Ast.Mul; Ast.Div; Ast.Less; Ast.Greater ]))
 
 (* The same shape a declared method gets: registered so a call can find it, and
    bound under the derived name so [Resolve] emits an ordinary call. *)

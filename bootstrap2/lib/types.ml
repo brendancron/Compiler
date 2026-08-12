@@ -289,6 +289,15 @@ let rec has_generic (t : ty) =
   | Fn (params, ret, _) -> List.exists has_generic params || has_generic ret
   | _ -> false
 
+(* A container and what it holds. A declared one holds its sole type argument,
+   which is how a collection written in Cronyx can be a candidate for `[…]`. *)
+let container_element (t : infer_ty) : (string * infer_ty) option =
+  match repr t with
+  | IArray elem -> Some ("Array", elem)
+  | IList elem -> Some ("List", elem)
+  | INamed (name, [ elem ], _) -> Some (name, elem)
+  | _ -> None
+
 let infer_type_name (t : infer_ty) : string option =
   match repr t with
   | IInt -> Some "int"
@@ -418,9 +427,8 @@ and kind_admits kind (t : infer_ty) =
   | Any, _ -> true
   | Numeric, (IInt | IFloat) -> true
   | Addable, (IInt | IFloat | IStr) -> true
-  | Collection elem, (IArray other | IList other) ->
-    unify elem other;
-    true
+  (* Which containers exist is the registry's business, so the answer comes back
+     through the hook rather than being written in here. *)
   | (Numeric | Addable | Collection _), _ -> !extra_admits kind t
 
 and unify (a : infer_ty) (b : infer_ty) : unit =

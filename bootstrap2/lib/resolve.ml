@@ -63,6 +63,13 @@ exception Failed of error
 let fail span fmt =
   Printf.ksprintf (fun message -> raise (Failed { span; message })) fmt
 
+(* What the array handed to a container's constructor holds. *)
+let element_of_container (t : Types.ty) =
+  match t with
+  | Types.Array elem | Types.List elem -> elem
+  | Types.Named (_, [ elem ], _) -> elem
+  | other -> other
+
 let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
   let span = e.Ast.span
   and ann = e.Ast.ann in
@@ -98,15 +105,22 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
       in
       let all = receiver :: args in
       `Call (fn_ref span (Ast.method_name owner name) all ann, all)
-    (* Array is the primitive; anything else is built from one. *)
+    (* The container the checker settled on says what to build. Array stands as
+       written; anything else is built from one. *)
     | `Collection_lit items ->
       let items = List.map (expr registry) items in
-      (match ann with
-       | Types.List elem ->
-         let array : Ast.resolved_expr =
-           { Ast.it = `Array_lit items; span; ann = Types.Array elem }
+      let built =
+        Option.bind (Types.type_name ann) (Registry.container registry)
+      in
+      (match built with
+       | Some (Registry.Call name) ->
+         let elements : Ast.resolved_expr =
+           { Ast.it = `Array_lit items
+           ; span
+           ; ann = Types.Array (element_of_container ann)
+           }
          in
-         `Call (fn_ref span "List__of" [ array ] ann, [ array ])
+         `Call (fn_ref span name [ elements ] ann, [ elements ])
        | _ -> `Array_lit items)
     | #Ast.lit as l -> l
     | #Ast.vars as v -> (Ast.map_vars (expr registry) v :> Ast.resolved_expr_kind)
