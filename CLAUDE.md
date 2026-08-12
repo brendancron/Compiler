@@ -36,12 +36,22 @@ cd bootstrap && RUSTFLAGS="-A warnings" cargo test
 
 Applies to `bootstrap/` (Rust), `bootstrap2/` (OCaml), and the `.cx` fixtures in `tests/`. A fixture is read alongside its `.txt`, which already says what the program produces, so a header explaining what it demonstrates is the same noise as anywhere else.
 
-**Write few comments.** Most code should carry none. Two kinds earn their place:
+**A comment is the exception.** Start from the assumption that it should not exist and make it earn its place. Two kinds do:
 
-1. **Clarifying genuinely complex logic** — a subtle invariant, a trap, why the obvious alternative fails.
-2. **Organizing** — a short label over a long list, like `(* One or two character tokens. *)` in `token.ml`.
+1. **A trap** — a subtle invariant, an ordering that has to hold, why the obvious alternative fails. The test is whether a competent reader would lose an hour without it.
+2. **A label** over a long list, like `(* One or two character tokens. *)` in `token.ml`.
 
-Anything else is noise. Do not summarize what a function does when its name and signature already say it, and do not restate the line below.
+Everything else is noise, including all of these:
+
+- what a function does — the name and signature say it
+- what a pass consumes and produces — the types say it
+- why a design was chosen — that belongs in `internal-docs/`
+- a restatement of the line below, however rephrased
+- narrating a branch of a `match` that already reads clearly
+
+A file may carry a one- or two-line header when its purpose is not obvious from its name. Most files do not need one.
+
+Rewriting a comment to be more insightful is usually the wrong fix. Deleting it is the right one.
 
 **Never describe development in code.** No stages, milestones, plan phases, what a rewrite replaced, or what is coming next. Write for someone reading the file in three years with no memory of how it was built — "Stage 1 → stage 2" means nothing to them, and the types (`desugared_expr` → `typed_expr`) already say what a pass consumes and produces. That material belongs in conversation or `internal-docs/`, never in a source file.
 

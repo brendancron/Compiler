@@ -1,14 +1,9 @@
-(* What operators exist, at what types, and what each becomes.
-
-   Two consumers read it. The checker asks for a result type; [Resolve] asks
-   what to emit. Keeping them one table is the point — two matches that have to
-   agree will eventually not. *)
+(* One table, two readers: the checker asks for a result type, [Resolve] asks
+   what to emit. Two matches that have to agree eventually will not. *)
 
 type emission =
-  (* The node stands as written and the backend implements it directly. This is
-     why `int + int` costs nothing: selection happened here, not at run time. *)
+  (* Why `int + int` costs nothing: selection happened here, not at run time. *)
   | Primitive
-  (* A declared operator, called like any other function. *)
   | Call of string
 
 type entry =
@@ -30,8 +25,6 @@ let register t op lhs rhs entry = Hashtbl.replace t.exact (op, lhs, rhs) entry
 
 let register_homogeneous t op entry = Hashtbl.replace t.homogeneous op entry
 
-(* Only entries written for these exact operands. The homogeneous fallback is a
-   default, so a declaration may override it. *)
 let find_exact t op lhs rhs = Hashtbl.find_opt t.exact (op, lhs, rhs)
 
 let find t op lhs rhs =
@@ -44,9 +37,6 @@ let result_of entry operand =
   | Some ty -> ty
   | None -> operand
 
-(* The constraint to attach when the operand types are not yet known. It is the
-   registry's shape stated as a kind: `+` admits int, float and string, the
-   other arithmetic admits int and float. *)
 let constraint_of (op : Ast.binop) =
   match op with
   | Ast.Add -> Types.Addable
@@ -54,8 +44,6 @@ let constraint_of (op : Ast.binop) =
   | Ast.Less | Ast.Less_equal | Ast.Greater | Ast.Greater_equal -> Types.Numeric
   | Ast.Equal | Ast.Not_equal -> Types.Any
 
-(* Whether an operator's result is the operand type or a bool, for the case
-   where the operands are still variables. *)
 let unresolved_result (op : Ast.binop) operand =
   match op with
   | Ast.Add | Ast.Sub | Ast.Mul | Ast.Div -> operand

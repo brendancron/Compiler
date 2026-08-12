@@ -1,12 +1,6 @@
-(* Checks that a tree's type annotations agree with its structure.
-
-   Passes that only copy annotations cannot break this. Passes that construct
-   nodes invent annotations, and a wrong one is silent — a synthesized call
-   whose callee is not typed as a function still runs, and a synthesized call
-   carrying the wrong effect row makes CPS skip a conversion it needed to make.
-
-   This is a local check: it compares each node against its children and does
-   not carry an environment, so a `Var` is taken at its word. *)
+(* Annotations invented by a pass that constructs nodes are wrong silently, so
+   each node is checked against its children. Local: there is no environment,
+   and a `Var` is taken at its word. *)
 
 type error =
   { span : Ast.span
@@ -78,7 +72,6 @@ let rec expr (e : Ast.cps_expr) : unit =
       "A tuple"
       (Types.Tuple (List.map (fun (i : Ast.cps_expr) -> i.Ast.ann) items))
       ann
-  (* A nominal type is a record at run time, so a literal may carry either. *)
   | `Record_lit fields ->
     List.iter (fun (_, v) -> expr v) fields;
     let actual =
@@ -144,8 +137,6 @@ let rec expr (e : Ast.cps_expr) : unit =
        expect span "An index assignment" elem ann
      | other ->
        fail target.Ast.span "Indexing a %s." (Types.string_of_ty other))
-  (* The payload's types are the declaration's business; only the tag survives
-     here, so there is nothing local to check beyond the parts. *)
   | `Variant (_, fields) ->
     List.iter (fun (_, v) -> expr v) fields;
     (match ann with

@@ -7,8 +7,6 @@ type error =
 
 exception Error of error
 
-(* Handlers declared with `handler name : effect { ... }`, inlined into the
-   `run` blocks that name them. *)
 let declared : (string, stmt handler) Hashtbl.t = Hashtbl.create 8
 
 let rec expr (e : expr) : desugared_expr =
@@ -39,7 +37,6 @@ let rec stmt (s : stmt) : desugared_stmt =
     | `For (init, cond, step, body) ->
       let cond =
         match cond with
-        (* An absent condition has no location of its own. *)
         | None -> at sp (`Bool true)
         | Some c -> expr c
       in
@@ -67,7 +64,6 @@ let rec stmt (s : stmt) : desugared_stmt =
     | #matching as m -> (map_matching expr stmt m :> desugared_stmt_kind)
     | #op_defs as o -> (map_op_defs stmt o :> desugared_stmt_kind)
     | #method_defs as m -> (map_method_defs stmt Fun.id m :> desugared_stmt_kind)
-    (* Declarations vanish; only the inlined copies survive. *)
     | `Handler_decl _ -> `Block []
   in
   { it; span = sp; ann = () }

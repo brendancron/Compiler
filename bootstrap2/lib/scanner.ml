@@ -30,7 +30,6 @@ let advance s =
   s.current <- s.current + 1;
   c
 
-(* '\000' stands in for "past the end"; Lox source has no NUL bytes. *)
 let peek s = if is_at_end s then '\000' else s.source.[s.current]
 
 let peek_next s =
@@ -45,8 +44,6 @@ let matches s expected =
 
 let lexeme s = String.sub s.source s.start (s.current - s.start)
 
-(* Tokens and errors are positioned at their first character, not at wherever
-   the cursor happens to be — a multi-line string points at its opening quote. *)
 let add_token s token_type =
   s.tokens
   <- Token.make token_type ~lexeme:(lexeme s) ~line:s.start_line ~col:s.start_col
@@ -99,18 +96,15 @@ let string_literal s =
   if is_at_end s
   then error s "Unterminated string."
   else (
-    (* The closing quote. *)
     ignore (advance s);
-    (* Trim the surrounding quotes. *)
     add_token s (Token.String (String.sub s.source (s.start + 1) (s.current - s.start - 2))))
 
 let number s =
   while is_digit (peek s) do
     ignore (advance s)
   done;
-  (* Only consume the '.' if a digit follows it: `123.` is not a valid float, so
-     leave the dot for the caller to reject rather than building a bad lexeme.
-     The dot is also what tells int and float literals apart. *)
+  (* Consume the '.' only if a digit follows: `123.` is not a float, and the
+     dot is also what tells int and float literals apart. *)
   let is_float = peek s = '.' && is_digit (peek_next s) in
   if is_float
   then (
@@ -198,7 +192,6 @@ let scan_tokens source =
     }
   in
   while not (is_at_end s) do
-    (* We are at the beginning of the next lexeme. *)
     s.start <- s.current;
     s.start_line <- s.line;
     s.start_col <- col_of s s.current;

@@ -9,12 +9,11 @@ type state =
   ; mutable current : int
   ; mutable errors : error list (* reversed *)
   (* A `{` after a match's scrutinee opens the cases, so brace literals are
-     suppressed while parsing one. Parenthesise to write one there. *)
+     suppressed there. Parenthesise to write one. *)
   ; mutable no_brace : bool
   }
 
-(* Raised to unwind to the enclosing declaration, which then resynchronizes.
-   The error itself is recorded before raising. *)
+(* Unwinds to the enclosing declaration. The error is recorded before raising. *)
 exception Parse_error
 
 let peek s = s.tokens.(s.current)
@@ -44,7 +43,6 @@ let consume_identifier s message =
     name
   | _ -> raise (error s (peek s) message)
 
-(* Consume the next token only if it is one of [ops] at this precedence level. *)
 let matches_binop s ops =
   let token_type = (peek s).Token.token_type in
   if List.mem token_type ops
@@ -73,8 +71,6 @@ let synchronize s =
 
 (* ---- type annotations ---- *)
 
-(* Annotations are optional everywhere; these only run once a ':' or '->' has
-   been seen, so a missing annotation is never an error here. *)
 let rec type_expr s : Ast.type_expr =
   let tok = peek s in
   let sp = Ast.span_of_token tok in
@@ -112,8 +108,6 @@ let rec type_expr s : Ast.type_expr =
       ignore (consume s Token.Greater "Expected '>' after type arguments.");
       Ast.at sp (Ast.Ty_app (name, args)))
     else Ast.at sp (Ast.Ty_name name)
-  (* `(int, string) -> bool` — a parenthesized list is only ever a function
-     type, since there are no tuples in the language yet. *)
   | Token.Left_paren ->
     ignore (advance s);
     let items =
@@ -129,18 +123,15 @@ let rec type_expr s : Ast.type_expr =
         loop [])
     in
     ignore (consume s Token.Right_paren "Expected ')' after type list.");
-    (* An arrow makes it a function type; without one it is a tuple. *)
     if check s Token.Arrow
     then (
       ignore (advance s);
-      (* The row comes first so that `<` after the arrow is never mistaken for a
-         type argument list. *)
+      (* The row comes first, or `<` after the arrow reads as a type argument. *)
       let row = row_annotation s in
       Ast.at sp (Ast.Ty_fn (items, type_expr s, row)))
     else Ast.at sp (Ast.Ty_tuple items)
   | _ -> raise (error s tok "Expected a type.")
 
-(* `<log, exn>`. A written row is closed, so its absence means pure. *)
 and row_annotation s : string list =
   match matches s [ Token.Less ] with
   | None -> []
@@ -160,8 +151,6 @@ and row_annotation s : string list =
       ignore (consume s Token.Greater "Expected '>' after effect row.");
       labels)
 
-(* `<T>`, `<T, n: int>`. Absent is the empty list, so nothing distinguishes a
-   declaration that writes `<>` from one that writes nothing. *)
 let comptime_params s : Ast.comptime_param list =
   match matches s [ Token.Less ] with
   | None -> []
@@ -182,7 +171,6 @@ let comptime_params s : Ast.comptime_param list =
     ignore (consume s Token.Greater "Expected '>' after comptime parameters.");
     params
 
-(* Just the names, for the declarations that take types and nothing else. *)
 let type_params s : string list =
   List.map (fun (p : Ast.comptime_param) -> p.Ast.cp_name) (comptime_params s)
 
@@ -191,8 +179,6 @@ let type_annotation s : Ast.type_expr option =
   | Some _ -> Some (type_expr s)
   | None -> None
 
-(* Cronyx spells return types both ways: `fn f(): T` and `fn f() -> T`, with an
-   effect row before the type when one is written. *)
 let signature ?(comptime = []) s : Ast.signature =
   match matches s [ Token.Arrow; Token.Colon ] with
   | None -> { Ast.ret = None; row = None; comptime }
@@ -202,8 +188,6 @@ let signature ?(comptime = []) s : Ast.signature =
 
 (* ---- expressions ---- *)
 
-(* A binary node takes the span of its left operand, so it points at where the
-   expression begins rather than at the operator. *)
 let rec expression s : Ast.expr = assignment s
 
 and assignment s : Ast.expr =
@@ -218,7 +202,6 @@ and assignment s : Ast.expr =
     | `Field (target, label), None ->
       Ast.at left.Ast.span (`Field_assign (target, label, value))
     | _ ->
-      (* Recorded, not raised: the parse is still well-formed from here. *)
       ignore (error s tok "Invalid assignment target.");
       left
   in
@@ -280,9 +263,8 @@ and unary s : Ast.expr =
     Ast.at (Ast.span_of_token tok) (`Unop (op, right))
   | None -> postfix s
 
-(* `x++` / `x--` bind tighter than any prefix or infix operator. They yield the
-   updated value, so `++x` and `x++` would mean the same thing; only the
-   postfix spelling is accepted. *)
+(* These yield the updated value, so `++x` and `x++` would mean the same
+   thing; only the postfix spelling is accepted. *)
 and postfix s : Ast.expr =
   let rec loop left =
     let step op tok =
@@ -320,7 +302,6 @@ and call s : Ast.expr =
            (Ast.at
               callee.Ast.span
               (`Comptime_call (callee, comptime_args, arguments s)))
-       (* Not a comptime argument list, so the '<' belongs to what follows. *)
        | None -> callee)
     | Token.Dot ->
       ignore (advance s);
@@ -340,10 +321,9 @@ and call s : Ast.expr =
   in
   loop (primary s)
 
-(* `f<int>(x)` and `a < b > (c)` are the same shape, and no amount of whitespace
-   separates them, so a type argument list is accepted only when a call follows.
-   Speculative: the position and the recorded errors are put back when it turns
-   out not to be one. *)
+(* `f<int>(x)` and `a < b > (c)` are the same shape and whitespace cannot
+   separate them, so this is accepted only when a call follows. Speculative:
+   position and recorded errors are put back when it is not one. *)
 and comptime_arguments s : Ast.expr Ast.comptime_arg list option =
   let start = s.current
   and errors = s.errors in
@@ -355,17 +335,13 @@ and comptime_arguments s : Ast.expr Ast.comptime_arg list option =
   match
     ignore (advance s);
     let rec loop acc =
-      (* A type is tried first because a bare name is usually one. A value
-         argument that happens to be a name is put back by whoever knows the
-         declaration it is passed to. *)
       let arg =
         let start = s.current
         and errors = s.errors in
         let as_value () =
           s.current <- start;
           s.errors <- errors;
-          (* Below comparison, so the closing '>' is not read as an operator. A
-             comptime argument is a literal or a name; it never needs more. *)
+          (* Below comparison, or the closing '>' reads as an operator. *)
           Ast.Ct_value (unary s)
         in
         match type_expr s with
@@ -509,8 +485,7 @@ and primary s : Ast.expr =
     s.no_brace <- false;
     let first = expression s in
     s.no_brace <- saved;
-    (* A comma is what makes it a tuple; otherwise the parens only shaped the
-       parse and no node survives them. *)
+    (* A comma is what makes it a tuple; otherwise no node survives the parens. *)
     if check s Token.Comma
     then (
       let rec loop acc =
@@ -733,8 +708,6 @@ and effect_decl s sp : Ast.stmt =
   ignore (consume s Token.Right_brace "Expected '}' after effect operations.");
   Ast.at sp (`Effect_decl (name, ops))
 
-(* Entries written `name: T` are fields and the type is a product; bare entries
-   are variants and it is a sum. A declaration may not mix them. *)
 and op_decl s sp : Ast.stmt =
   let tok = advance s in
   let op =
@@ -784,8 +757,6 @@ and trait_decl s sp : Ast.stmt =
   ignore (consume s Token.Right_brace "Expected '}' after the trait body.");
   Ast.at sp (`Trait_decl (name, methods))
 
-(* `impl Type` gives the methods to that type alone; `impl Trait for Type` also
-   claims to satisfy the trait, which the checker holds it to. *)
 and impl_decl s sp : Ast.stmt =
   let first = consume_identifier s "Expected a type or trait name after 'impl'." in
   let first_params = type_params s in
@@ -900,8 +871,6 @@ and handler s : Ast.stmt Ast.handler =
         else (
           let rec params acc =
             let p = consume_identifier s "Expected parameter name." in
-            (* The effect declaration is authoritative, so an annotation here is
-               accepted and discarded. *)
             ignore (type_annotation s);
             match matches s [ Token.Comma ] with
             | Some _ -> params (p :: acc)
@@ -934,8 +903,7 @@ and run_stmt s sp : Ast.stmt =
   let handlers = loop [] in
   if handlers = []
   then ignore (error s (peek s) "Expected 'handle' or 'with' after a run block.");
-  (* `with` reads as an expression and takes a terminator; `handle` closes with
-     its own brace and does not. *)
+  (* `with` takes a terminator; `handle` closes with its own brace. *)
   ignore (matches s [ Token.Semicolon ]);
   Ast.at sp (`Run (body, handlers))
 

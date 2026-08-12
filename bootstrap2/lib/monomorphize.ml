@@ -1,13 +1,7 @@
-(* Comptime value parameters, substituted before anything is checked.
-
-   A value can decide a type — `fn field_of<name: string>(r) { return r.name; }`
-   has no one type for its body — so the argument goes in first and the result is
-   checked like any other function. One copy per distinct argument, and the
-   template itself does not survive.
-
-   Type parameters are left alone. Generalization already serves every
-   instantiation from one copy, so specializing on them would only multiply
-   identical code. *)
+(* Comptime value parameters, substituted before anything is checked: a value
+   can decide a type, so there is no one type to check the template against.
+   Type parameters are left alone — generalization already serves every use
+   from one copy. *)
 
 open Ast
 
@@ -40,8 +34,6 @@ let is_value (p : comptime_param) = p.cp_ty <> None
 let split (signature : signature) =
   List.partition is_value signature.comptime
 
-(* What distinguishes one instantiation from another. Only literals reach here,
-   so this is total. *)
 let rec key_of (e : desugared_expr) =
   match e.it with
   | `Int n -> string_of_int n
@@ -57,8 +49,6 @@ let rec is_literal (e : desugared_expr) =
   | `Unop (Neg, inner) -> is_literal inner
   | _ -> false
 
-(* Substituting a comptime parameter puts a literal where a name was, so a body
-   that reads one is ordinary code by the time it is checked. *)
 let rec subst_expr env (e : desugared_expr) : desugared_expr =
   let it : desugared_expr_kind =
     match e.it with
@@ -73,8 +63,8 @@ let rec subst_expr env (e : desugared_expr) : desugared_expr =
     | #record as r -> (map_record (subst_expr env) r :> desugared_expr_kind)
     | #nominal as n -> (map_nominal (subst_expr env) n :> desugared_expr_kind)
     | #collection as c -> (map_collection (subst_expr env) c :> desugared_expr_kind)
-    (* A comptime parameter passed straight on parsed as a type, so replacing it
-       has to reach inside the argument list as well as the ordinary one. *)
+    (* A parameter passed straight on parsed as a type, so substitution has to
+       reach into the comptime list too. *)
     | `Comptime_call (callee, comptime_args, args) ->
       let arg = function
         | Ct_type { it = Ty_name written; _ } when List.mem_assoc written env ->
@@ -111,13 +101,9 @@ and subst_stmt env (s : desugared_stmt) : desugared_stmt =
   in
   { s with it }
 
-(* A value argument is a literal, or a comptime parameter of the enclosing
-   function — which substitution has already turned into one. Anything else has
-   to say why it is not. *)
 let literal_of name (arg : desugared_expr comptime_arg) =
   let written =
     match arg with
-    (* A bare name parses as a type; here it names a value. *)
     | Ct_type { it = Ty_name written; span = at } ->
       { it = `Var written; span = at; ann = () }
     | Ct_type t ->
@@ -184,7 +170,6 @@ let rec expr state (e : desugared_expr) : desugared_expr =
   in
   { e with it }
 
-(* Emit the copy this call needs, if it is new, and become a call of it. *)
 and specialize state span name comptime_args args : desugared_expr_kind =
   let template = Hashtbl.find state.templates name in
   let declared = template.t_signature.comptime in
@@ -245,8 +230,6 @@ and stmt state (s : desugared_stmt) : desugared_stmt =
   in
   { s with it }
 
-(* Templates are collected from the whole tree before anything is rewritten, so
-   a call may precede the declaration it names. *)
 let rec collect state (s : desugared_stmt) =
   match s.it with
   | `Fn (name, params, signature, body) ->

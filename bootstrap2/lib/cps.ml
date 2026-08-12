@@ -1,16 +1,5 @@
-(* Effect constructs become closures and calls, which is why the interpreter has
-   no handler stack.
-
-   Two translations, chosen per effect. An effect whose handlers all resume in
-   tail position needs only *evidence passing*: a function whose row mentions it
-   gains one parameter per operation, performing an operation calls that
-   parameter, and `run`/`handle` binds the arms as local functions. Nothing is
-   restructured.
-
-   An effect with a handler that aborts or resumes more than once needs
-   *continuations*. Everything following an operation becomes a closure, which
-   the arm receives. Resuming is calling it — twice, if the handler likes — and
-   falling off the end of an arm abandons it, which is abort. *)
+(* Two translations, chosen per effect: evidence passing when every handler
+   resumes in tail position, continuations otherwise. *)
 
 type error =
   { span : Ast.span
@@ -38,8 +27,7 @@ let fresh prefix =
   incr counter;
   Printf.sprintf "__%s%d" prefix !counter
 
-(* Sorted and deduplicated, so a caller and a callee agree on the order without
-   having to communicate. *)
+(* Sorted and deduplicated, so caller and callee agree without communicating. *)
 let evidence_of_row info (row : Types.row) =
   row
   |> List.sort_uniq String.compare
@@ -61,28 +49,20 @@ let evidence_ty info op =
   | Some t -> t
   | None -> Types.Unit
 
-(* Evidence parameters are appended to a function, so its type gains them too.
-   Leaving the original type in place would describe a function of the wrong
-   arity. *)
+(* The type has to gain them too, or it describes the wrong arity. *)
 let widen info (t : Types.ty) =
   match t with
   | Types.Fn (params, ret, row) ->
     Types.Fn (params @ List.map (evidence_ty info) (evidence_of_row info row), ret, row)
   | other -> other
 
-(* Whether reaching this row can suspend, which forces the caller into
-   continuation-passing form too. *)
 let is_delimited info (row : Types.row) = List.exists (Hashtbl.mem info.delimited) row
 
 let node span it : Ast.cps_stmt = { Ast.it; span; ann = Types.Unit }
 let var span ty name : Ast.cps_expr = { Ast.it = `Var name; span; ann = ty }
 
-(* There is no unit literal, and the value is always discarded. *)
 let ignored span : Ast.cps_expr = { Ast.it = `Bool false; span; ann = Types.Bool }
 
-(* The callee's type is recovered from what it is being handed: a continuation
-   or an evidence function takes exactly these arguments and produces
-   [result]. *)
 let call ?(result = Types.Unit) span callee args =
   let callee_ty =
     Types.Fn (List.map (fun (a : Ast.cps_expr) -> a.Ast.ann) args, result, [])
@@ -125,9 +105,8 @@ let is_return (s : Ast.reflected_stmt) =
   | `Return _ -> true
   | _ -> false
 
-(* A `ctl` arm that resumes exactly once, as the last thing it does, behaves
-   like a `fn` arm: the resumed value is what the operation returns. Koka calls
-   this bind-inversion. *)
+(* A `ctl` arm resuming exactly once, last, behaves like a `fn` arm. Koka
+   calls this bind-inversion. *)
 let tail_resumptive (body : Ast.reflected_stmt list) =
   match List.rev body with
   | ({ Ast.it = `Resume value; _ } as last) :: earlier
@@ -153,8 +132,8 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
     match e.Ast.it with
     | #Ast.lit as l -> l
     | `Var name ->
-      (* A bare reference to an effectful function would escape with the wrong
-         arity, since its evidence is only known at call sites. *)
+      (* Evidence is only known at call sites, so a bare reference would
+         escape with the wrong arity. *)
       if is_effectful info e.Ast.ann
       then
         unsupported e.Ast.span "'%s' performs effects and cannot be used as a value yet." name
@@ -233,8 +212,6 @@ let rec suspends_stmt info (s : Ast.reflected_stmt) =
     || List.exists (fun (_, body) -> List.exists (suspends_stmt info) body) cases
   | _ -> false
 
-(* Pull the first suspending call out of [e], with a rebuild that puts a
-   variable in its place. *)
 let rec extract info (e : Ast.reflected_expr)
   : (Ast.reflected_expr * (string -> Ast.reflected_expr)) option
   =
@@ -289,7 +266,6 @@ and extract_list info items rebuild =
 
 (* ---- continuation-passing form ---- *)
 
-(* [k] names the function to invoke with this block's result. *)
 let rec cps info k (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
   match stmts with
   | [] ->
@@ -322,7 +298,6 @@ let rec cps info k (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
         | Some (c, rebuild) ->
           sequence info span c (fun name ->
             match (rebuild name).Ast.it with
-            (* The statement was nothing but the call. *)
             | `Var _ -> cps info k rest
             | _ -> cps info k ({ s with Ast.it = `Expr (rebuild name) } :: rest))
         | None -> unsupported span "This effect cannot be sequenced yet.")
@@ -332,7 +307,6 @@ let rec cps info k (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
           let bound = ref name in
           let build tmp =
             match (rebuild tmp).Ast.it with
-            (* The resumed value is the whole initializer, so bind it directly. *)
             | `Var _ ->
               bound := name;
               cps info k rest
@@ -374,13 +348,11 @@ let rec cps info k (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
         | Some s -> s :: cps info k rest
         | None -> cps info k rest))
 
-(* Bind [c]'s result to a fresh name and continue with [build]. *)
 and sequence info span c build =
   let name = fresh "v" in
   let next = fresh "k" in
   fn_decl span next [ name ] (build name) :: invoke info span next c
 
-(* Perform [c], handing it [next] as its continuation. *)
 and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
   match c.Ast.it with
   | `Call (callee, args) ->
@@ -397,9 +369,8 @@ and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
     [ call span target (args @ evidence @ [ var span Types.Unit next ]) ]
   | _ -> unsupported span "This effect cannot be sequenced yet."
 
-(* `run { body } handle e { arms }` installs the arms and gives the body a
-   continuation that resumes execution after the block. An arm that never calls
-   its own continuation therefore abandons the rest of the body: abort. *)
+(* The body's continuation resumes after the block, so an arm that never calls
+   it abandons the rest of the body: abort. *)
 and run info span k handlers body rest : Ast.cps_stmt list =
   let after = fresh "after" in
   let arms =
@@ -409,7 +380,6 @@ and run info span k handlers body rest : Ast.cps_stmt list =
           (fun (a : Ast.reflected_stmt Ast.arm) ->
             let arm_body =
               match a.Ast.arm_kind with
-              (* Auto-resume: the arm's value is what the operation returns. *)
               | Ast.Op_fn -> cps info continuation a.Ast.arm_body
               | Ast.Op_ctl -> cps info after a.Ast.arm_body
             in
@@ -469,8 +439,6 @@ and block info (s : Ast.reflected_stmt) : Ast.cps_stmt =
   | Some s -> s
   | None -> node s.Ast.span (`Block [])
 
-(* Walk a statement list, switching into continuation-passing form at the first
-   `run` that needs it — everything after that run becomes its continuation. *)
 and sequence_body info (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
   match stmts with
   | [] -> []
@@ -511,10 +479,9 @@ let collect (p : Ast.reflected_stmt list) =
           ops
       | _ -> ())
     p;
-  (* Whole-program: a function's row says which effects it may perform, not
-     which handler catches them, so one aborting handler makes the effect
-     delimited everywhere. Every effect on the same `run` goes with it, so that
-     all of its arms share one calling convention. *)
+  (* A row says which effects a function performs, not which handler catches
+     them, so one aborting handler delimits that effect everywhere — and every
+     effect on the same `run` with it, so its arms share a convention. *)
   let rec scan (s : Ast.reflected_stmt) =
     (match s.Ast.it with
      | `Run (_, handlers) when not (handlers_are_tail_resumptive handlers) ->

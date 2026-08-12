@@ -1,6 +1,5 @@
-(* Replaces `typeof(e)` with the string form of e's type. Runs after checking
-   because that is when the annotation exists, and before evaluation so the
-   interpreter never sees the node. *)
+(* After checking, because that is when the annotation exists; before
+   evaluation, so the interpreter never sees the node. *)
 
 let rec expr (e : Ast.resolved_expr) : Ast.reflected_expr =
   let it : Ast.reflected_expr_kind =

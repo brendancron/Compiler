@@ -1,14 +1,11 @@
-(* [infer_ty] is mutable and may hold unresolved variables; [ty] cannot, so
-   consumers never have to handle a type that is still being inferred.
-   [resolve] is the only way across. *)
+(* [infer_ty] may hold unresolved variables; [ty] cannot, and [resolve] is the
+   only way across. *)
 
-(* Effect labels a function may perform. A multiset, following Koka's scoped
-   rows: two nested handlers for the same effect are distinguished by there
-   being two occurrences, and each `handle` peels one. *)
+(* A multiset, following Koka: two nested handlers for one effect are two
+   occurrences, and each `handle` peels one. *)
 type row = string list
 
-(* Field name to type, sorted, so two records with the same fields are the same
-   type however they were written. *)
+(* Sorted, so two records with the same fields are the same type. *)
 type fields = (string * ty) list
 
 and ty =
@@ -20,16 +17,10 @@ and ty =
   | Array of ty
   | Tuple of ty list
   | Record of fields
-  (* Nominal: two declarations with identical fields are different types. The
-     type arguments come first and the instantiated fields ride along, so a
-     field access needs no lookup. *)
   | Named of string * ty list * fields
-  (* Nominal, and its variants live in the declaration table rather than in the
-     type: nothing reaches a variant except by matching. *)
   | Sum of string * ty list
   | Fn of ty list * ty * row
-  (* Quantified, not unresolved. Reaching codegen means the call site was never
-     monomorphized. *)
+  (* Quantified, not unresolved. Reaching codegen means a call site was missed. *)
   | Generic of int
 
 (* Ordered by strength: [Any] admits everything, [Numeric] the least. *)
@@ -56,9 +47,8 @@ and tv =
   | Unbound of int * kind
   | Link of infer_ty
 
-(* A row is a list of labels ending in either [REmpty] (closed) or a variable
-   (open). Unification rewrites the tail to admit a label, which is what lets a
-   pure function be passed where an effectful one is expected. *)
+(* Labels ending in [REmpty] (closed) or a variable (open). Rewriting an open
+   tail is what lets a pure function pass where an effectful one is expected. *)
 and infer_row =
   | REmpty
   | RCons of string * infer_row
@@ -68,8 +58,6 @@ and rv =
   | RUnbound of int
   | RLink of infer_row
 
-(* The same shape as an effect row, carrying a type per label. An open tail is
-   what lets a function accept any record that has the field it reads. *)
 and infer_fields =
   | FEmpty
   | FCons of string * infer_ty * infer_fields
@@ -79,8 +67,7 @@ and fv =
   | FUnbound of int
   | FLink of infer_fields
 
-(* Variables listed here are copied by [instantiate]; every other variable in
-   [body] stays shared with the enclosing scope. *)
+(* Copied by [instantiate]; every other variable in [body] stays shared. *)
 type scheme =
   { quantified : int list
   ; quantified_rows : int list
@@ -223,8 +210,6 @@ and string_of_ty (t : ty) : string =
       (string_of_ty ret)
   | Generic id -> Printf.sprintf "'%d" id
 
-(* The name an `impl` writes to reach this type. A structural type has none,
-   which is why a method cannot be declared on a bare record or tuple. *)
 let type_name (t : ty) : string option =
   match t with
   | Int -> Some "int"
@@ -236,9 +221,6 @@ let type_name (t : ty) : string option =
   | Named (name, _, _) | Sum (name, _) -> Some name
   | Tuple _ | Record _ | Fn _ | Generic _ -> None
 
-(* The same, before inference has finished. A receiver only has to be nominal
-   enough to name, not fully resolved: the element type of the array a method is
-   called on is nobody's business but the method's. *)
 let infer_type_name (t : infer_ty) : string option =
   match repr t with
   | IInt -> Some "int"
@@ -259,9 +241,8 @@ let rec row_occurs id (r : infer_row) =
   | RVar { contents = RLink _ } -> assert false
   | RCons (_, rest) -> row_occurs id rest
 
-(* Produce what remains of [r] after removing one occurrence of [label]. An open
-   tail grows a new link rather than failing, which is how a row variable comes
-   to admit an effect it did not previously mention. *)
+(* What remains of [r] after removing one [label]. An open tail grows a link
+   rather than failing, which is how a row comes to admit a new effect. *)
 let rec rewrite_row label (r : infer_row) : infer_row =
   match repr_row r with
   | RCons (l, rest) when String.equal l label -> rest
@@ -297,9 +278,6 @@ let rec fields_occurs id (f : infer_fields) =
   | FVar { contents = FLink _ } -> assert false
   | FCons (_, _, rest) -> fields_occurs id rest
 
-(* What remains of [f] after removing [label], along with the type it had. An
-   open tail grows the field rather than failing, which is what lets a function
-   read a field from any record that has one. *)
 let rec rewrite_fields label (f : infer_fields) : infer_ty * infer_fields =
   match repr_fields f with
   | FCons (l, ty, rest) when String.equal l label -> ty, rest
@@ -380,8 +358,7 @@ and unify (a : infer_ty) (b : infer_ty) : unit =
   | IInt, IInt | IFloat, IFloat | IStr, IStr | IBool, IBool | IUnit, IUnit -> ()
   | IArray a, IArray b -> unify a b
   | IRecord a, IRecord b -> unify_fields a b
-  (* Nominal, so the name decides; the fields follow from the arguments, which
-     is why only those are unified. *)
+  (* The fields follow from the arguments, so only those are unified. *)
   | INamed (a, xs, _), INamed (b, ys, _)
     when String.equal a b && List.length xs = List.length ys -> List.iter2 unify xs ys
   | ISum (a, xs), ISum (b, ys)
@@ -492,8 +469,7 @@ let free_field_vars (t : infer_ty) : int list =
   walk t;
   !acc
 
-(* [env_vars] and [env_rows] are the enclosing scope's free sets: anything in
-   them stays shared. *)
+(* Anything free in the enclosing scope stays shared. *)
 let generalize ~env_vars ~env_rows ~env_fields body =
   { quantified =
       free_vars body |> List.map fst |> List.filter (fun id -> not (List.mem id env_vars))
@@ -503,9 +479,7 @@ let generalize ~env_vars ~env_rows ~env_fields body =
   ; body
   }
 
-(* [bound] pins quantified variables in advance, which is what writing
-   `f<int>(x)` does: the parameter is decided before the arguments are checked
-   rather than recovered from them. *)
+(* [bound] pins variables in advance, which is what `f<int>(x)` does. *)
 let instantiate ?(bound = []) (s : scheme) : infer_ty =
   if s.quantified = [] && s.quantified_rows = [] && s.quantified_fields = []
   then s.body
@@ -580,9 +554,6 @@ let var_id (t : infer_ty) =
   | IVar { contents = Unbound (id, _) } -> id
   | other -> error "Not a type variable: %s." (string_of_infer_ty other)
 
-(* Copy [t], replacing each variable named in [mapping]. This is what a
-   declaration's parameters are for: `type Pair<A, B>` stores one variable per
-   parameter, and every use of `Pair` replaces them with that use's arguments. *)
 let rec substitute mapping (t : infer_ty) : infer_ty =
   match repr t with
   | IVar { contents = Unbound (id, _) } as original ->
@@ -606,8 +577,6 @@ and substitute_fields mapping (f : infer_fields) : infer_fields =
     FCons (label, substitute mapping ty, substitute_fields mapping rest)
   | other -> other
 
-(* The resolved type, but only when nothing is still being inferred. Used where
-   a lookup needs a concrete type and must not force a defaulting decision. *)
 let rec concrete_all (args : infer_ty list) : ty list option =
   List.fold_right
     (fun a acc -> Option.bind acc (fun acc -> Option.map (fun a -> a :: acc) (concrete a)))
@@ -677,8 +646,6 @@ and concrete (t : infer_ty) : ty option =
     Some (Fn (params, ret, List.sort String.compare (fst (labels_of_infer_row row))))
   | IVar _ -> None
 
-(* Back the other way, for a rule that has a concrete type in hand and needs to
-   unify against it. *)
 let rec of_ty (t : ty) : infer_ty =
   match t with
   | Int -> IInt
@@ -706,14 +673,12 @@ let rec of_ty (t : ty) : infer_ty =
 
 (* ---- resolve ---- *)
 
-(* An unconstrained row is closed to empty, so a pure function prints as
-   `(int) -> int` rather than exposing its row variable. *)
+(* An unconstrained row closes, so a pure function does not print its row. *)
 let resolve_row (r : infer_row) : row =
   let labels, _ = labels_of_infer_row r in
   List.sort String.compare labels
 
-(* Numeric variables still unbound default to int, so `fn double(x) { return x + x; }`
-   is `(int) -> int`. The rest were never constrained at all and are polymorphic. *)
+(* Unbound numeric variables default to int; the rest stay polymorphic. *)
 let rec resolve (t : infer_ty) : ty =
   match repr t with
   | IInt -> Int
@@ -726,8 +691,6 @@ let rec resolve (t : infer_ty) : ty =
   | ISum (name, args) -> Sum (name, List.map resolve args)
   | IRecord f | INamed (_, _, f) ->
     let rec collect f =
-      (* An unconstrained tail closes, the way an unconstrained effect row
-         does. *)
       match repr_fields f with
       | FEmpty | FVar _ -> []
       | FCons (label, ty, rest) -> (label, resolve ty) :: collect rest

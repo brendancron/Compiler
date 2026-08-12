@@ -3,9 +3,8 @@ type span =
   ; col : int
   }
 
-(* ['ann] is [unit] until type checking, [Types.ty] after. The fragments below
-   are parameterized over their child node type, so each tree costs a few lines
-   rather than a re-declaration of every constructor. *)
+(* Each fragment below is parameterized over its child node type, so a tree
+   costs a few lines rather than a re-declaration of every constructor. *)
 type ('a, 'ann) node =
   { it : 'a
   ; span : span
@@ -31,8 +30,6 @@ type binop =
   | Greater
   | Greater_equal
 
-(* What the parser records when an annotation is written. They are optional
-   everywhere; inference fills in the rest. *)
 type type_expr = (type_expr_kind, unit) node
 
 and type_expr_kind =
@@ -40,7 +37,6 @@ and type_expr_kind =
   | Ty_app of string * type_expr list
   | Ty_tuple of type_expr list
   | Ty_record of (string * type_expr) list
-  (* The row is the written one, so an omitted `<...>` means pure. *)
   | Ty_fn of type_expr list * type_expr * string list
 
 type param =
@@ -48,8 +44,7 @@ type param =
   ; ty : type_expr option
   }
 
-(* A `<>` entry. A bare name is a type parameter, recovered from the call; an
-   annotated one is a value known at compile time and written at the call. *)
+(* Annotated means a value parameter, bare means a type parameter. *)
 type comptime_param =
   { cp_name : string
   ; cp_ty : type_expr option
@@ -108,7 +103,6 @@ type 'e logic =
   | `Or of 'e * 'e
   ]
 
-(* What a variant carries. *)
 type 'a payload =
   | P_none
   | P_tuple of 'a list
@@ -116,28 +110,22 @@ type 'a payload =
 
 type 'e compound = [ `Compound of binop * string * 'e ]
 
-(* Indexing is a primitive: it survives every pass, and [Resolve] only decides
-   whether a given operand type keeps it or turns it into a call. *)
 type 'e indexing =
   [ `Index of 'e * 'e
   | `Index_assign of 'e * 'e * 'e
   ]
 
-(* Positional, fixed length, mixed types. Both forms are primitives. *)
 type 'e tuple =
   [ `Tuple of 'e list
   | `Tuple_get of 'e * int
   ]
 
-(* A record literal and the two ways to reach a field. All primitives. *)
 type 'e record =
   [ `Record_lit of (string * 'e) list
   | `Field of 'e * string
   | `Field_assign of 'e * string * 'e
   ]
 
-(* Lowered by [Resolve] into a plain record literal: nominal identity is a
-   compile-time notion, and the value is a record either way. *)
 type 'e nominal =
   [ `New of string * (string * 'e) list
   | `New_variant of string * string * 'e payload
@@ -148,29 +136,22 @@ type variant =
   ; v_payload : type_expr payload
   }
 
-(* A declaration binds a name to fields or to variants; which one the body is
-   decides whether the type is a product or a sum. It has no runtime meaning,
-   so the CPS pass erases it alongside effect declarations. *)
 type type_body =
   | T_fields of (string * type_expr) list
   | T_variants of variant list
 
 type type_defs = [ `Type_decl of string * string list * type_body ]
 
-(* An operator declaration is an ordinary function under a name derived from
-   the operator and its operand types; [Resolve] turns it into one. *)
 type 's op_defs = [ `Op_decl of binop * param list * signature * 's list ]
 
-(* A method declared without a body: what an `impl` of the trait must supply. *)
 type method_sig =
   { ms_name : string
   ; ms_params : param list
   ; ms_signature : signature
   }
 
-(* [md_ann] is the method's own type once there is one. It has to be recorded
-   here rather than left to the enclosing node: the CPS pass reads a function's
-   effect row off its annotation, and one impl holds several functions. *)
+(* [md_ann] cannot be left to the enclosing node: the CPS pass reads a
+   function's effect row off its annotation, and one impl holds several. *)
 type ('s, 'ann) method_def =
   { md_name : string
   ; md_params : param list
@@ -179,30 +160,21 @@ type ('s, 'ann) method_def =
   ; md_ann : 'ann
   }
 
-(* An `impl` with no trait names none: the methods belong to the type alone.
-   [Resolve] turns each into an ordinary function taking the receiver first. *)
 type ('s, 'ann) method_defs =
   [ `Trait_decl of string * method_sig list
   | `Impl_decl of string option * string * string list * ('s, 'ann) method_def list
   ]
 
-(* Which function this is depends on the receiver's type, so it survives until
-   the checker has one. *)
 type 'e method_call = [ `Method_call of 'e * string * 'e list ]
 
-(* An argument in a `<>` list. A bare name parses as a type, since that is what
-   most of them are; whoever knows the declaration reinterprets one that names a
-   value parameter. *)
+(* A bare name parses as [Ct_type] whichever it is; whoever knows the
+   declaration reinterprets one that names a value parameter. *)
 type 'e comptime_arg =
   | Ct_type of type_expr
   | Ct_value of 'e
 
-(* Comptime arguments written out where inference has nothing to recover them
-   from. Value arguments are gone after monomorphization and type arguments
-   after checking, so nothing downstream carries either. *)
 type 'e comptime_call = [ `Comptime_call of 'e * 'e comptime_arg list * 'e list ]
 
-(* A pattern names a variant and binds what it carries. *)
 type pattern =
   | Pat_variant of string * string * string payload
   | Pat_wild
@@ -210,22 +182,12 @@ type pattern =
 type ('e, 's) matching = [ `Match of 'e * (pattern * 's list) list ]
 
 
-(* What the container is comes from context, so this cannot be lowered until
-   the checker has run. [Resolve] turns it into an [`Array_lit] or a call. *)
 type 'e collection = [ `Collection_lit of 'e list ]
 
-(* The primitive the others are built from. *)
 type 'e array_lit = [ `Array_lit of 'e list ]
 
-(* A constructed variant, once the type name has done its work in the checker.
-   A positional payload is keyed "0", "1", … so one shape covers both. *)
 type 'e variant_lit = [ `Variant of string * (string * 'e) list ]
 
-(* Eliminated by the CPS pass, which is why the interpreter has no handler
-   stack: by the time it runs, these are ordinary closures and calls. *)
-(* A `run` may name a handler declared elsewhere. Both forms exist in the parsed
-   tree; desugaring resolves the named ones, so later trees carry only
-   [handler]. *)
 type 's handler_clause =
   | Inline of 's handler
   | Named of string
@@ -238,7 +200,6 @@ type ('e, 's, 'h) effects =
   | `Resume of 'e option
   ]
 
-(* Eliminated by [Reflect], which needs the checker's annotations to do it. *)
 type 'e reflect = [ `Typeof of 'e ]
 
 type ('e, 's) stmts =
@@ -287,8 +248,6 @@ and stmt_kind =
 
 type program = stmt list
 
-(* No [`For]. [`Compound] survives: whether `x += v` updates in place or
-   rebuilds depends on the type, so only [Resolve] can decide it. *)
 type desugared_expr = (desugared_expr_kind, unit) node
 
 and desugared_expr_kind =
@@ -318,7 +277,6 @@ and desugared_stmt_kind =
   | (desugared_expr, desugared_stmt) matching
   ]
 
-(* Same constructors, every node carrying a resolved type. *)
 type typed_expr = (typed_expr_kind, Types.ty) node
 
 and typed_expr_kind =
@@ -347,7 +305,6 @@ and typed_stmt_kind =
   | (typed_expr, typed_stmt) matching
   ]
 
-(* No [`Compound]: every operator is now a primitive or a call. *)
 type resolved_expr = (resolved_expr_kind, Types.ty) node
 
 and resolved_expr_kind =
@@ -372,7 +329,6 @@ and resolved_stmt_kind =
   | (resolved_expr, resolved_stmt) matching
   ]
 
-(* No [`Typeof]: the interpreter cannot be handed one. *)
 type reflected_expr = (reflected_expr_kind, Types.ty) node
 
 and reflected_expr_kind =
@@ -396,7 +352,6 @@ and reflected_stmt_kind =
   | (reflected_expr, reflected_stmt) matching
   ]
 
-(* No effect constructs: the CPS pass has turned them into closures and calls. *)
 type cps_expr = (cps_expr_kind, Types.ty) node
 
 and cps_expr_kind =
@@ -471,7 +426,6 @@ let map_op_defs (fs : 's1 -> 's2) (o : 's1 op_defs) : 's2 op_defs =
   | `Op_decl (op, params, signature, body) ->
     `Op_decl (op, params, signature, List.map fs body)
 
-(* The name an operator is compiled under. *)
 let op_name op lhs rhs =
   let symbol =
     match op with
@@ -488,7 +442,6 @@ let op_name op lhs rhs =
   in
   Printf.sprintf "__op_%s_%s_%s" symbol lhs rhs
 
-(* The name a method is compiled under. *)
 let method_name type_name method_ = Printf.sprintf "%s__%s" type_name method_
 
 let map_comptime_arg (f : 'a -> 'b) (a : 'a comptime_arg) : 'b comptime_arg =
@@ -544,8 +497,8 @@ let map_variant_lit (f : 'a -> 'b) (e : 'a variant_lit) : 'b variant_lit =
   match e with
   | `Variant (name, fields) -> `Variant (name, List.map (fun (l, v) -> l, f v) fields)
 
-(* A positional payload is stored under "0", "1", … so one runtime shape serves
-   both tuple and field variants. *)
+(* Positional payloads are keyed "0", "1", … so one runtime shape serves both
+   tuple and field variants. *)
 let payload_fields (p : 'a payload) : (string * 'a) list =
   match p with
   | P_none -> []

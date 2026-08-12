@@ -1,14 +1,12 @@
-(* Inference cannot finish a node's type when it first visits it — in
+(* A node's type is not finished when it is first visited — in
    `fn f(x) { return x + 1; }`, `x` is only pinned at the `+` — so the tree is
-   built with mutable types and converted once everything is known. *)
+   built with mutable types and converted once. *)
 
 type error =
   { span : Ast.span
   ; message : string
   }
 
-(* [Types.Type_error] is raised deep in unification with no idea where it is;
-   this is the same failure once a caller has attached a location. *)
 exception Located of error
 
 type checked_expr = (checked_expr_kind, Types.infer_ty) Ast.node
@@ -48,16 +46,10 @@ type ctx =
   { registry : Registry.t
   ; mutable return_type : Types.infer_ty option
   ; mutable saw_return : bool
-  (* The row of the enclosing function or run block. Effectful calls rewrite it
-     to admit their label; it stays open until generalization closes it. *)
   ; mutable row : Types.infer_row
-  (* The operation an enclosing `ctl` arm is handling, if any — what `resume`
-     checks its argument against. *)
   ; mutable resume_type : Types.infer_ty option
   }
 
-(* Operations declared by `effect` blocks, keyed by operation name and by the
-   effect that owns them. *)
 type effect_info =
   { ops : (string, Ast.op_decl) Hashtbl.t
   ; declared : (string, Ast.op_decl list) Hashtbl.t
@@ -65,18 +57,12 @@ type effect_info =
 
 let ctx_effects = { ops = Hashtbl.create 16; declared = Hashtbl.create 8 }
 
-(* Declared nominal types, by name. The variables are the declaration's
-   parameters, and every use of the type replaces them with that use's
-   arguments — so the fields and payloads recorded here are written in terms of
-   them and are never used directly. *)
 type decl =
   | Product of Types.infer_ty list * Types.infer_fields
   | Sum of Types.infer_ty list * (string * Types.infer_ty Ast.payload) list
 
 let ctx_types : (string, decl) Hashtbl.t = Hashtbl.create 16
 
-(* Type parameters of the declaration being checked. Saved and restored around
-   each one, since a `T` in one signature is unrelated to a `T` in another. *)
 let ctx_type_params : (string, Types.infer_ty) Hashtbl.t = Hashtbl.create 8
 
 let decl_params = function
@@ -87,11 +73,10 @@ let params_of_decl name =
   | Some decl -> decl_params decl
   | None -> []
 
-(* What replaces a declaration's parameters in one use of it. *)
 let instance vars args = List.map2 (fun v a -> Types.var_id v, a) vars args
 
-(* The type parameters a named function was hoisted with, so the body and any
-   call that writes them out are talking about the same variables. *)
+(* Keyed by compiled name, so the body and a call that writes the parameters out
+   get the same variables rather than two sets that never meet. *)
 let ctx_fn_params : (string, (string * Types.infer_ty) list) Hashtbl.t =
   Hashtbl.create 16
 
@@ -110,9 +95,6 @@ let with_type_params assoc f =
         saved)
     f
 
-(* Declared traits, and every method that exists, keyed by the type it was
-   declared on. The name it compiles to is derived, so only membership is
-   stored. *)
 let ctx_traits : (string, Ast.method_sig list) Hashtbl.t = Hashtbl.create 8
 let ctx_methods : (string * string, unit) Hashtbl.t = Hashtbl.create 32
 
@@ -191,7 +173,6 @@ let env_free_field_vars env =
 let fail span fmt =
   Printf.ksprintf (fun message -> raise (Located { span; message })) fmt
 
-(* Blames [span] rather than the enclosing statement. *)
 let unify_at span expected actual =
   try Types.unify expected actual with
   | Types.Type_error message -> raise (Located { span; message })
@@ -225,8 +206,6 @@ let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
       , infer_ty_of_annotation ret
       , row_of_labels row )
 
-(* A declared type applied to its arguments. The declaration is written in terms
-   of its parameters, so an instance is those parameters replaced. *)
 and named_type span name args =
   match Hashtbl.find_opt ctx_types name with
   | None -> fail span "Unknown type '%s'." name
@@ -245,12 +224,9 @@ and named_type span name args =
        Types.INamed (name, args, Types.substitute_fields (instance vars args) fields)
      | Sum _ -> Types.ISum (name, args))
 
-(* A written row is closed: `(int) -> unit` is a promise of purity. *)
 and row_of_labels labels =
   List.fold_right (fun label rest -> Types.RCons (label, rest)) labels Types.REmpty
 
-(* A bare name in `<>` is a type parameter; an annotated one is a value, which
-   monomorphization has to substitute before the body can be checked. *)
 let type_params_of span (comptime : Ast.comptime_param list) =
   List.map
     (fun (p : Ast.comptime_param) ->
@@ -270,8 +246,7 @@ let annotated_or_fresh = function
 (* ---- the value restriction ---- *)
 
 (* Generalizing a binding that is later assigned is unsound: every use
-   instantiates fresh, so `var f = someGenericFn; f = otherFn;` would check and
-   then misbehave. Hence both this and the never-assigned test below. *)
+   instantiates fresh, so `var f = someGenericFn; f = otherFn;` would check. *)
 let is_syntactic_value (e : Ast.desugared_expr) =
   match e.Ast.it with
   | #Ast.lit | `Var _ -> true
@@ -357,13 +332,8 @@ let assigned_names body =
 
 (* ---- inference ---- *)
 
-(* No HM type describes "any number of arguments of any type", so calls to these
-   are checked structurally and a bare reference gets an unconstrained type. *)
 let variadic_builtins = [ "print" ]
 
-(* A nominal type carries its fields, so the label is looked up rather than
-   unified into place. Anything else unifies against an open row, which is what
-   makes a field read work on any record that has one. *)
 let field_of (target : checked_expr) label =
   match Types.repr target.Ast.ann with
   | Types.INamed (name, _, fields) ->
@@ -384,8 +354,6 @@ let field_of (target : checked_expr) label =
       target.Ast.ann;
     ty
 
-(* The element type of something being indexed, with a message that names the
-   type rather than showing a bare variable. *)
 let element_of (target : checked_expr) =
   match Types.concrete target.Ast.ann with
   | Some (Types.Array elem) -> Types.of_ty elem
@@ -396,9 +364,6 @@ let element_of (target : checked_expr) =
     unify_at target.Ast.span (Types.IArray elem) target.Ast.ann;
     elem
 
-(* Shared by `Binop` and `Compound`. Operands agree; then the registry answers
-   if both are known, and a constraint stands in for the answer if they are
-   not. *)
 let binop_result registry (op : Ast.binop) a b =
   match Types.concrete a, Types.concrete b with
   | Some lhs, Some rhs ->
@@ -411,9 +376,8 @@ let binop_result registry (op : Ast.binop) a b =
          (Types.string_of_ty lhs)
          (Types.string_of_ty rhs))
   | _ ->
-    (* Nothing to look up, so fall back to the rule every builtin follows:
-       operands agree and the operator constrains them. An asymmetric operator
-       can only be found once both types are known. *)
+    (* Unifying here would make an asymmetric operator unreachable, so it only
+       happens when there is nothing to look up. *)
     Types.unify a b;
     Types.unify a (Types.fresh_with (Registry.constraint_of op));
     Registry.unresolved_result op a
@@ -454,8 +418,6 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     let a = infer_expr env ctx a in
     let b = infer_expr env ctx b in
     node (binop_result ctx.registry op a.Ast.ann b.Ast.ann) (`Binop (op, a, b))
-  (* `x op= v` types as `x = x op v` does. Whether it stays that way is
-     [Resolve]'s decision, not the checker's. *)
   | `Compound (op, name, v) ->
     (match lookup env name with
      | None -> fail span "Undefined variable '%s'." name
@@ -489,14 +451,10 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
         Types.unify
           callee_node.Ast.ann
           (Types.IFn (List.map (fun (a : checked_expr) -> a.Ast.ann) args, ret, row));
-        (* Whatever the callee performs, the caller performs too. *)
         Types.unify_row row ctx.row;
         ret
     in
     node result (`Call (callee_node, args))
-  (* Written where inference has nothing to recover the parameters from. The
-     arguments pin the callee's variables before the ordinary arguments are
-     checked; what survives is an ordinary call. *)
   | `Comptime_call (callee, comptime_args, args) ->
     let name =
       match callee.Ast.it with
@@ -527,8 +485,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
             fail span "A comptime argument to '%s' is not known at compile time." name)
         comptime_args
     in
-    (* A parameter the body already pinned is no longer a variable to bind, so
-       the written argument is checked against it instead. *)
+    (* A parameter the body already pinned is no longer a variable to bind. *)
     let bound, pinned =
       List.fold_left2
         (fun (bound, pinned) (_, var) written ->
@@ -552,9 +509,6 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       (Types.IFn (List.map (fun (a : checked_expr) -> a.Ast.ann) args, ret, row));
     Types.unify_row row ctx.row;
     node ret (`Call (callee_node, args))
-  (* Dispatch is by the receiver's type, which must therefore be known here.
-     Nothing defers it: a method on a value whose type is still a variable has
-     no answer until monomorphization. *)
   | `Method_call (receiver, name, args) ->
     let receiver = infer_expr env ctx receiver in
     let args = List.map (infer_expr env ctx) args in
@@ -579,8 +533,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       | Some scheme -> Types.instantiate scheme
       | None -> missing ()
     in
-    (* Unification would report the arity failure as a type mismatch on a
-       function nobody wrote. *)
+    (* Unification would report this as a mismatch on a function nobody wrote. *)
     (match Types.repr fn with
      | Types.IFn (params, _, _) when List.length params <> List.length args + 1 ->
        fail
@@ -600,10 +553,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
          , row ));
     Types.unify_row row ctx.row;
     node ret (`Method_call (receiver, name, args))
-  (* The operand is checked for its type but never evaluated. *)
   | `Typeof e -> node Types.IStr (`Typeof (infer_expr env ctx e))
-  (* Every element agrees, and with only arrays so far the container is not in
-     question. *)
   | `Collection_lit items ->
     let elem = Types.fresh () in
     let items = List.map (infer_expr env ctx) items in
@@ -611,8 +561,6 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       (fun (i : checked_expr) -> unify_at i.Ast.span elem i.Ast.ann)
       items;
     node (Types.IArray elem) (`Collection_lit items)
-  (* The arguments are variables the written fields pin down, which is how
-     `new Pair { first: 1, second: "a" }` comes out a `Pair<int, string>`. *)
   | `New (name, fields) ->
     (match Hashtbl.find_opt ctx_types name with
      | None | Some (Sum _) -> fail span "Unknown record type '%s'." name
@@ -686,8 +634,6 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
             fields
             Types.FEmpty))
       (`Record_lit fields)
-  (* Unifying against an open row rather than a known type is what lets a
-     function read a field from any record that has one. *)
   | `Field (target, label) ->
     let target = infer_expr env ctx target in
     node (field_of target label) (`Field (target, label))
@@ -701,12 +647,9 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     node
       (Types.ITuple (List.map (fun (i : checked_expr) -> i.Ast.ann) items))
       (`Tuple items)
-  (* The index is part of the syntax, so the element type is known exactly
-     rather than being unified into place. *)
   | `Tuple_get (target, index) ->
     let target = infer_expr env ctx target in
-    (* The arity is what the lookup needs, and a tuple has that as soon as it is
-       known to be one — the elements may still be variables. *)
+    (* Arity is all the lookup needs, and the elements may still be variables. *)
     (match Types.repr target.Ast.ann with
      | Types.ITuple items ->
        (match List.nth_opt items index with
@@ -737,13 +680,9 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     let index = infer_expr env ctx index in
     let v = infer_expr env ctx v in
     unify_at index.Ast.span Types.IInt index.Ast.ann;
-    (* The element type leads, so a mismatch reads as the container expecting
-       what it holds rather than the other way round. *)
     unify_at v.Ast.span (element_of target) v.Ast.ann;
     node v.Ast.ann (`Index_assign (target, index, v))
 
-(* Operators are registered before anything is checked, so a use may precede
-   the declaration and the checker can answer from the table. *)
 and declare_ops registry (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
@@ -793,8 +732,6 @@ and declare_ops registry (body : Ast.desugared_stmt list) =
       | _ -> ())
     body
 
-(* Traits are registered before impls so an impl can be held to one, and both
-   before hoisting, which reads the signatures they introduce. *)
 and declare_traits (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
@@ -858,8 +795,6 @@ and declare_impls (body : Ast.desugared_stmt list) =
       | _ -> ())
     body
 
-(* `Array` is the one type an impl may name without naming its element type,
-   which is what makes a method over any array expressible. *)
 and self_ty span type_name params =
   if String.equal type_name "Array"
   then Types.IArray (Types.fresh ())
@@ -876,8 +811,6 @@ and self_ty span type_name params =
            | None -> Types.fresh ())
          params)
 
-(* Type declarations are registered before anything is hoisted, because a
-   function's signature may name one and hoisting reads signatures. *)
 and declare_types (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
@@ -912,9 +845,6 @@ and declare_types (body : Ast.desugared_stmt list) =
       | _ -> ())
     body
 
-(* Binding every function before any body is checked is what lets them call each
-   other in any order. The binding stays monomorphic until its own declaration
-   is reached. *)
 and hoist env (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
@@ -992,6 +922,8 @@ and hoist env (body : Ast.desugared_stmt list) =
       | _ -> ())
     body
 
+(* This order is load-bearing: hoisting reads signatures, which may name a
+   declared type or a trait, and a use may precede its declaration. *)
 and infer_block env ctx (body : Ast.desugared_stmt list) : checked_stmt list =
   declare_types body;
   declare_traits body;
@@ -1014,7 +946,6 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     let init =
       match init with
       | None ->
-        (* The evaluator gives an uninitialized variable unit. *)
         Types.unify declared Types.IUnit;
         None
       | Some e ->
@@ -1059,8 +990,6 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     with_type_params
       (Option.value ~default:[] (Hashtbl.find_opt ctx_fn_params name))
       (fun () ->
-    (* Recover the type [hoist] chose, so recursive calls in the body unify
-       against the same variables. *)
     let param_types, declared_ret, declared_row =
       match lookup env name with
       | Some { Types.body = Types.IFn (ps, r, row); _ } -> ps, r, row
@@ -1079,10 +1008,8 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     and saved_row = ctx.row in
     ctx.return_type <- Some declared_ret;
     ctx.saw_return <- false;
-    (* The body's effects accumulate into the row hoisting chose for it. *)
     ctx.row <- declared_row;
     let body = infer_block scope ctx body in
-    (* Falling off the end yields unit. *)
     if not ctx.saw_return then Types.unify declared_ret Types.IUnit;
     ctx.return_type <- saved_return;
     ctx.saw_return <- saved_saw;
@@ -1101,10 +1028,7 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
          ~env_fields:(env_free_field_vars env)
          fn_type);
     Ast.annotated span fn_type (`Fn (name, params, signature, body)))
-  (* Registered by [declare_types] before anything was hoisted. *)
   | `Type_decl (name, params, body) -> node (`Type_decl (name, params, body))
-  (* Checked as the function it becomes; the registry entry was made by
-     [declare_ops]. *)
   | `Op_decl (op, params, signature, body) ->
     let scope = new_env (Some env) in
     let param_types =
@@ -1131,10 +1055,7 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
       span
       (Types.IFn (param_types, declared_ret, declared_row))
       (`Op_decl (op, params, signature, body))
-  (* Read by [declare_impls]; it introduces no binding of its own. *)
   | `Trait_decl (name, methods) -> node (`Trait_decl (name, methods))
-  (* Each method is checked as the function it becomes, with `self` bound to the
-     type the impl names. *)
   | `Impl_decl (trait, type_name, params, methods) ->
     let methods =
       List.map
@@ -1204,8 +1125,6 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     let variants =
       match Hashtbl.find_opt ctx_types sum with
       | Some (Sum (vars, variants)) ->
-        (* A pattern binds what this instance of the type carries, not what the
-           declaration carries. *)
         let mapping = instance vars sum_args in
         List.map
           (fun (name, payload) ->
@@ -1257,14 +1176,10 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     List.iter
       (fun (o : Ast.op_decl) ->
         Hashtbl.replace ctx_effects.ops o.Ast.op_name o;
-        (* An operation is callable like a function whose row is its own effect,
-           so calling it is what puts the label in the caller's row. *)
         let params =
           List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) o.Ast.op_params
         in
         let ret = annotated_or_fresh o.Ast.op_ret in
-        (* The row is open in its tail: performing an operation adds its label
-           to whatever the caller already performs rather than closing it. *)
         let op_type = Types.IFn (params, ret, Types.RCons (name, Types.fresh_row ())) in
         bind
           env
@@ -1315,13 +1230,9 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     let scope = new_env (Some env) in
     let body = infer_block scope ctx body in
     ctx.row <- saved_row;
-    (* Each `handle` peels one occurrence of its label; what is left over is
-       performed by the run block as a whole. *)
     let remaining =
       List.fold_left
         (fun row (h : Ast.desugared_stmt Ast.handler) ->
-          (* A handler for an effect the block never performs is redundant, not
-             an error. *)
           try Types.rewrite_row h.Ast.handled row with
           | Types.Type_error _ -> row)
         body_row
@@ -1390,7 +1301,6 @@ and infer_handler env ctx assigned (h : Ast.desugared_stmt Ast.handler)
     ctx.resume_type <- (match a.Ast.arm_kind with
                         | Ast.Op_ctl -> Some (annotated_or_fresh op.Ast.op_ret)
                         | Ast.Op_fn -> None);
-    (* A `fn` arm's value is what the operation returns. *)
     ctx.return_type <- Some (annotated_or_fresh op.Ast.op_ret);
     ctx.saw_return <- false;
     let body = List.map (infer_stmt scope ctx assigned) a.Ast.arm_body in
@@ -1445,10 +1355,9 @@ let rec resolve_stmt (s : checked_stmt) : Ast.typed_stmt =
 
 (* ---- entry point ---- *)
 
-(* A builtin performs nothing, but writing that as a closed row would close the
-   caller's: a call unifies the two. Quantifying it instead gives every call site
-   a row of its own, which is what generalization does for a pure function
-   written in Cronyx. *)
+(* A closed row here would close the caller's, since a call unifies the two.
+   Quantifying gives every call site its own, as generalization does for a pure
+   function written in Cronyx. *)
 let pure params ret =
   let row = Types.fresh_row () in
   let scheme_of body =
@@ -1464,7 +1373,6 @@ let globals () =
   let env = new_env None in
   bind env "str" (pure [ Types.fresh () ] Types.IStr);
   bind env "clock" (pure [] Types.IFloat);
-  (* See [variadic_builtins]. *)
   let beta = Types.fresh () in
   bind
     env
@@ -1491,8 +1399,6 @@ let check ~registry (program : Ast.desugared_stmt list)
     }
   in
   let errors = ref [] in
-  (* A failure here escapes the per-statement handler below, so it is caught
-     with the rest. *)
   (try
      declare_types program;
      declare_traits program;
@@ -1511,7 +1417,6 @@ let check ~registry (program : Ast.desugared_stmt list)
           None)
       program
   in
-  (* Nothing encloses the top level, so anything still in its row is unhandled. *)
   let errors =
     match Types.resolve_row ctx.row with
     | [] -> !errors

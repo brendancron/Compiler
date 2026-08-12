@@ -77,13 +77,11 @@ let rec string_of_value = function
   | Closure c -> Printf.sprintf "<fn/%d>" (List.length c.params)
   | Native (name, _, _) -> Printf.sprintf "<native %s>" name
 
-(* Conditions must be bool: there is no truthiness in Cronyx. *)
 let as_bool span = function
   | Bool b -> b
   | v -> fail span "Expected a bool condition, got %s." (type_name v)
 
-(* Closures are never compared, so this avoids OCaml's structural comparison
-   raising on functional values. *)
+(* OCaml's structural comparison raises on functional values. *)
 let rec values_equal a b =
   match a, b with
   (* Arrays have identity, so equality is identity. *)
@@ -101,8 +99,7 @@ let rec values_equal a b =
   | Unit, Unit -> true
   | _ -> false
 
-(* Mixed operands cannot reach here: the type checker rejects `int + float` and
-   there is no implicit widening. *)
+(* Mixed operands cannot reach here: there is no implicit widening. *)
 let eval_binop span (op : Ast.binop) a b =
   match op, a, b with
   | Ast.Add, Int x, Int y -> Int (x + y)
@@ -315,7 +312,6 @@ let globals out =
   define env "clock" (Native ("clock", Some 0, fun _ -> Float (Sys.time ())));
   env
 
-(* [out] is where `print` writes; tests capture it into a buffer. *)
 let run ?(out = print_string) (program : Ast.cps_stmt list) : (unit, error) result =
   let env = globals out in
   try
