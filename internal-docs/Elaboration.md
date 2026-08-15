@@ -130,6 +130,24 @@ ring[0] = 5;
 
 Both forms are implemented. `[]=` is a separate operator rather than a three-operand `[]` because it reads as an assignment; arity is what separates the two `[]` forms below.
 
+### Slicing is indexing by a range
+
+`a[i:j]` is `a[r]` where `r` is a `Range`, so there is no slice operator — a type joins in by declaring one more `[]` entry:
+
+```cronyx
+op [](self: Ring, r: Range) -> List<int> { return self.items[r]; }
+```
+
+Entries are keyed by **what indexes them**, which is what lets one type be read by an `int` and sliced by a `Range`. A type declaring a single entry answers for any index, so a container indexed by its own key type still works without naming that type twice.
+
+`Range` is a sum — `Between`, `From`, `To`, `All` — rather than a pair with sentinels, so `a[2:]` has no end bound rather than an end bound meaning *no*.
+
+**A slice copies.** A view would have to say how long it lives, and nothing in the language does; a fresh collection has no aliasing to reason about.
+
+**A bound counted from the end is the entry's business, not the language's.** `a[-1:]` works because the prelude's entries resolve a negative bound against `self.len()` — written once, inside the operator, where the length is known. `Desugar` could not do it: it does not know the receiver has a `len`. So a type opts in, and one that does not pays no test.
+
+The prelude resolves negatives in a `Range` and not in a plain `[int]`: a bound is a position you are naming, an index is a lookup, and `a[-1]` from a computed expression is more often a mistake than an intention. `core/slices/negative_index` is the runtime case that pins it.
+
 ## Literals
 
 A literal has no type of its own — it proposes candidates and the expected type picks one. That is the same table, keyed in the opposite direction: operators resolve forwards from operand types to a result, literals resolve backwards from a target type to a constructor.

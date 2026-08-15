@@ -16,10 +16,6 @@ Decisions taken deliberately later, with the reason.
 
 **Negative indexing and range slicing.** `nums[-1]` counts from the end and `nums[1:3]` takes a subrange, both exercised by `tests/core/slices`. Neither is in the design. Negative indexing is an entry in the indexing table; a range needs a range type or a second index form, and a decision about whether the result shares storage with its source or copies.
 
-**`defer`.** `tests/core/defer` runs statements on scope exit, in reverse order, including on the return path. Interacts with effects: a deferred statement that performs one, or that runs while a continuation is being abandoned by an aborting handler, has no defined behaviour yet.
-
-**`embed`.** `tests/core/embed` exists and has not been discussed. Reading a file at compile time is a metaprocessing capability, so it belongs with the sandbox question about what the evaluator permits.
-
 **Verify does not check effect rows.** It compares each node against its children, and a row belongs to a function reached through a name. The call-site row bug — a callee annotated with effects it does not perform, given evidence it has no parameter for — was exactly the kind it was built to catch and could not see; it was found by running a program, and fixed as step 11 of [Remediation of Builtins](Remediation%20of%20Builtins.md).
 
 **A deferred method call's result type rests on its uses.** When a receiver is a type parameter, the call is checked for the method's existence and its result is a fresh variable, pinned by whatever the caller does with it. `"x " + item.summarize()` pins it to string; a result nobody constrains is not checked against the impl until the copy is made, and not at all if no copy is. Specialization could re-check each copy against the declared method type.

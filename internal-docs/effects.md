@@ -194,6 +194,19 @@ fn pick(n: int) -> int {
 
 Only a program whose handler was not tail-resumptive could reach it, which is why no fixture had — `effects/recover` is this shape with a `resume`, and passes. `effects/nested_return` is the one that would have caught it. A statement holding a `return` is now converted whether or not anything in it suspends, which is what makes the two continuations differ in the first place.
 
+## How a row prints
+
+Between the arrow and the result, and naming effects rather than operations:
+
+```
+(int) -> <io> unit
+(int, int) -> <Yield<int>> unit
+```
+
+Koka writes an effect in the same place, `(a) -> e b`, and for the same reason: the effect belongs to the arrow, not to what the arrow returns.
+
+**Operations are not what a row holds.** `effect io { ctl emit(…); ctl request(…); }` is one entry however many of its operations a function performs — what a row records is what has to be handled, and a handler covers a whole effect. The four `reflection/typeof_effect_*` fixtures were written against the other guess, listing `<emit, request>` postfix, and one of them contradicted its own comment.
+
 ## What each translation costs
 
 Two translations, chosen per effect. **Evidence passing** hands each operation's handler down as an extra parameter; the call is direct and the shape of the surrounding code is untouched. **CPS** rewrites control flow so a continuation can be captured. Only the second is expensive, and only the second restricts where an effect may appear.

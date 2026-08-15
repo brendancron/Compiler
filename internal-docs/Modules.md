@@ -96,6 +96,14 @@ Where it differs is that a non-declaration in an imported unit is **rejected**, 
 
 **A local shadows a namespace.** If a unit binds `math` as a variable, `math.add` is a field or method access on that value, not the module. The alias table is consulted only when nothing else in scope has the name.
 
+## `embed` reads a file where the program is put together
+
+`embed("data.bin")` becomes the file's contents. The loader does it, because the loader is what knows where the source that wrote it lives — the path resolves against that file's directory, the way an `import` does, not against wherever the compiler was run from.
+
+**It yields bytes, not a string.** `Array<byte>`, undecoded: what is embedded need not be text, and a program that wants text says so. Held as one node rather than an octet apiece, so embedding a megabyte costs one literal instead of a million.
+
+A file that is not there is a load error naming it, at the span of the call.
+
 ## Spans carry a file
 
 `Ast.span` was `{ line; col }`, and concatenating four units would have made `[3:5]` name nothing. It now carries the file, threaded through the *token* so that no `span_of_token` call site changed. `Ast.locate ~entry` prints a bare `[3:5]` while a span is in the unit being compiled and `[lib.cx 2:12]` once it is not, rendered relative to the entry's directory.

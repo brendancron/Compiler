@@ -186,6 +186,16 @@ It also settles the receiver's type where nothing else had. `[1, 2, 3].each()` h
 
 That is what makes an imported function reachable through a dot: `import { map } from "…"` renames the declaration to `List#map`, and the resolved name carries the rename to where the fallback needs it.
 
+**A variadic parameter is homogeneous, and the call site is what fills it.** `fn max(first: int, rest: ...int)` declares an ordinary `Array<int>` parameter; `Desugar` collects everything past the fixed arguments into an array literal, so nothing after that pass knows the call was written any other way.
+
+Homogeneous is what makes it free. C#'s `params object[]` needs a universal supertype and a way back out of it; every argument here is the same `T`, so there is nothing to box and nothing to recover. A call that wants mixed types passes an explicit array, or several arguments.
+
+Three rules. **Only the last parameter** may be variadic — anything after it has no boundary to be collected up to, and it is a parse error. **It always wraps**, so passing an `Array<T>` where a `...T` is declared makes a one-element array rather than being passed through; a spread would be a separate decision. And a function takes **either** a variadic parameter **or** a trailing block, since the block is itself appended as a final argument.
+
+**A function is in scope for the whole block it was written in.** The checker hoisted declarations already, so a call above one type checked and then failed at runtime with *Undefined variable* — the types promising something the runtime did not keep. The interpreter now defines a block's functions before executing it, at every scope rather than only the top level, which is what the checker was already assuming.
+
+Only functions. A `var` is a statement, and its initializer runs where it is written, so a function referring to one declared later is still rejected — by the checker, before anything runs.
+
 **Comparison operators are ordinary entries.** Their result type comes from the entry rather than being fixed to `bool` — see [Elaboration](Elaboration.md).
 
 **`var x;` with no initializer is `unit`.** There is no null, so a declaration without a value cannot leave a hole to be filled in later. A record in particular can never be absent, which is the headache this avoids.

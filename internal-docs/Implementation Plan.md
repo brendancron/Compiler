@@ -28,18 +28,20 @@ The tags a step can discharge are `Step "..."`; the rest will not be fixed by fi
 
 | Tag | Count | Meaning |
 |---|---|---|
-| `Unplanned` | 13 | no design anywhere yet |
-| `Step "10 · Modules"` | 4 | `stdlib/regex`, `toml` and the two automata — unread, and none of them on modules |
-| `Backend` | 9 | `compile/*`, which needs an LLVM path this bootstrap has not got |
-| `Rewrite` | 10 | predate a syntax decision — `struct`, `enum`, `fn(int): int` |
-| `Deferred` | 8 | taken later on purpose; see [TODO](TODO.md) |
+| `Parked` | 9 | `compile/*`. Native compilation is out of scope for this bootstrap — not waiting on anything, not being worked on |
+| `Unplanned` | 6 | no design anywhere yet |
 
 
-**Only one step still holds fixtures**, and those four were never waiting on modules — see below. Step 9's last one, `effects/logic/multi_guard`, turned out not to be about iteration: `resume` inside a loop works now, and what it shows is a delimitation bug recorded with the [effects design](effects.md#known-bug-multi-shot-resumption-re-runs-what-follows-the-block). `core/for_tuple` was tagged with them and wants tuple destructuring in a binding, which is a language feature and no part of this.
+
+**No fixture is waiting on a step.** Steps 8 through 12 are done, and everything they were tagged with is discharged, retired, or turned out to be waiting on something else. Two categories are left.
+
+`Parked` is native compilation, deliberately not being worked on.
+
+`Unplanned` is six fixtures, and they split two ways. **Three want a decision, not code**: `builtins/conversions` needs [fallibility](Remediation%20of%20Builtins.md#fallibility) settled for `to_int`, and `builtins/readfile` and `writefile` need to know what IO is once `print` becomes an effect. **Three want a feature**: GADTs, `async`, and tuple destructuring in a binding.
+
+**Five fixtures were retired rather than fixed**, each describing something the language decided against: an array-of-records sample with no expected output, `free(p)` with no memory model to want it, two trailing lambdas written `{ x, y -> … }` where a trailing block takes one parameter called `it`, and a record literal that named a type nothing declared — which is what `records/nominal` now covers, with `new` and a declaration.
 
 **Step 8 never had a tag**: no fixture under `tests/` was waiting on `Set` or `Map`, so finishing it discharged nothing here — its fixtures were written with the feature, which is what that step's entry now records.
-
-Four of the fixtures step 12 was tagged with were never waiting on it. Two predate a syntax decision (`[int]`, `enum`) and four expect an effect row printed as its operations, `(int) -> unit <yield>`, where the compiler prints the row's name — a rendering question about effects, not about what a type answers, and undecided either way.
 
 ## 8 · List, Set and Map — done
 
@@ -172,6 +174,26 @@ Reify became real here, as step 5 predicted, though narrowly: only a value with 
 
 The scanner emits `AMP_AMP` and `PIPE_PIPE`, the parser takes each at the level `and`/`or` had, and both build the same `And`/`Or` node, so short-circuiting and precedence come from one implementation. `core/operators/precedence` is what checks that: comparisons bind tighter, `!` binds tightest, arithmetic precedes comparison.
 
+## `defer`
+
+Zig's, not Go's: **block-scoped**, so an inner block runs its own when it ends rather than waiting for the function. Reverse order, and it runs however the block is left — falling off the end, `return`, or an aborting handler unwinding through it.
+
+The statement runs when the block is left, so it reads what a variable holds *then*, not what it held where the `defer` was written. Inside a loop body that means once per iteration, after the increment.
+
+**It is the interpreter's, not a desugaring.** A block collects what it defers as it walks, and runs them on the way out — including out of an exception, which is what makes `return` and an effect unwind behave the same without either being special-cased. Desugaring would have had to find every exit itself.
+
+**A deferred statement runs after an aborting handler's arm, not before.** The arm runs where the operation was performed; only then does the stack unwind, and the deferred statement is on the way out. `core/defer/defer_effect` pins the order.
+
+## Variadic parameters
+
+`fn max(first: int, rest: ...int)`, filled by the call site — see [the type system](type-system.md#settled). `print` is *not* variadic: it takes one argument, and several are written as one string until interpolation exists.
+
+## Slicing
+
+`a[i:j]` is indexing by a `Range`, so it reuses `op []` and any type can support it — see [Elaboration](Elaboration.md#slicing-is-indexing-by-a-range). Registry entries are now keyed by what indexes them rather than one per type, which is what makes `[]` properly overloadable.
+
+Negative bounds are resolved inside the entry, where the length is known, so they are the prelude's policy rather than a language rule. `core/slices/*` and `core/strings/string_slice` are the fixtures.
+
 ## Uniform function call syntax
 
 `x.f(y)` is `f(x, y)` where the receiver's type declares no method `f`, across a module boundary as well as within one — see [the type system](type-system.md#settled) for the rule and for why a method call carries two names. `core/ufcs/*` are the fixtures, and `stdlib/list` is written through it:
@@ -182,7 +204,7 @@ nums.map() { it * 2 }.filter() { it > 4 }.fold(0, (a, b) => a + b)
 
 ## Not covered by the design
 
-`core/slices`, `core/defer`, `core/embed` and `core/resolution` exercise behaviour no document describes. Each is either a feature to design or a fixture to retire — see [TODO](TODO.md), where all four are recorded with what deciding them would involve.
+Everything `tests/` describes is now either built, retired, or parked. `core/slices` is [slicing](#slicing) and `core/embed` is [embedding](Modules.md#embed-reads-a-file-where-the-program-is-put-together); both are built.
 
 The `Unplanned` tag is 13 fixtures. It has lost seven: `core/math/modulus` to `%` and `core/strings/string_starts_ends` to the prelude during the stdlib port, `core/builtins/ord` once a `char` became a code point, three `core/functions/trailing_*` to function values, and `effects/logic/*` to the effects work.
 

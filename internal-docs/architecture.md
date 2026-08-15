@@ -31,6 +31,18 @@ Every pass that constructs nodes invents their type annotations rather than gett
 
 The case that makes it necessary rather than tidy is effect rows. `CPS` decides what to convert by reading the row off a call's annotation, so a synthesized call carrying an empty row is skipped, and the program performs an unhandled effect at runtime with no compiler error anywhere.
 
+## Reading a program the compiler built
+
+`--dump-code` prints the tree as Cronyx after `Metaprocess`, which is where a `meta` block has run and what a `gen` produced is ordinary source. It is how to see a deriver's output — `derive Named for Dog;` becomes an `impl` you can read, rather than something inferred from what the program does.
+
+The Rust bootstrap has the same thing as `--dump-runtime-code`, over its `RuntimeAst`.
+
+**It is not a formatter.** Comments are not in the tree, so they are not in the output, and every binary operator is parenthesised because nothing here has a precedence table to decide which parentheses are spare. What it promises is that parsing the output gives the same tree back.
+
+**That promise is checked.** Every fixture is parsed, printed, parsed again and printed again, and the two printings must agree. It found six bugs the first time it ran: a `'` unescaped inside a char literal, a wildcard import losing its `/*`, a second `handle` clause emitting a brace the first had already closed, an empty payload printed as `()`, and a deriver whose name is `derive#Named` in the tree with no `for` clause to write it back.
+
+It is also the answer to a mechanical rewrite of source going wrong — a sweep that corrupts a construct it did not understand shows up as a program that no longer prints the same way twice, which is how `buffer<int, 16>(1)` becoming two arguments would have been caught.
+
 ## `Reflect` answers a type's questions
 
 `Reflect` runs after checking, because that is when a node carries the annotation it reflects, and before evaluation, so the interpreter never sees one. It replaces each question asked of a type with the answer, and erases itself.
