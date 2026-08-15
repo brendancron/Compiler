@@ -1,0 +1,9 @@
+type Bag<T> { items: Array<T> }
+
+op []<T>(items: Array<T>) -> Bag<T> {
+    return new Bag { items: items };
+}
+
+op []<T>(other: Array<T>) -> Bag<T> {
+    return new Bag { items: other };
+}

@@ -1,7 +1,26 @@
 type span =
-  { line : int
+  { file : string
+  ; line : int
   ; col : int
   }
+
+(* A location is printed bare while it is in the unit being compiled, and
+   qualified once it is not — so a single-file program reads as it always has
+   and an error inside an import says where it came from. *)
+let locate ~entry (s : span) =
+  if String.equal s.file entry || String.equal s.file ""
+  then Printf.sprintf "[%d:%d]" s.line s.col
+  else (
+    (* Relative to whatever is being compiled: the absolute path is correct and
+       unreadable, and every unit of one program shares most of it. *)
+    let root = Filename.dirname entry ^ "/" in
+    let shown =
+      if String.length s.file > String.length root
+         && String.equal (String.sub s.file 0 (String.length root)) root
+      then String.sub s.file (String.length root) (String.length s.file - String.length root)
+      else s.file
+    in
+    Printf.sprintf "[%s %d:%d]" shown s.line s.col)
 
 (* Each fragment below is parameterized over its child node type, so a tree
    costs a few lines rather than a re-declaration of every constructor. *)
@@ -23,6 +42,7 @@ type binop =
   | Sub
   | Mul
   | Div
+  | Mod
   | Equal
   | Not_equal
   | Less
@@ -60,6 +80,9 @@ type signature =
 type op_kind =
   | Op_fn (* resumes automatically with the arm's value *)
   | Op_ctl (* resumes only via `resume`, and may do so more than once *)
+  (* Never resumes. What that buys is the result type: nothing is ever handed
+     back, so each call site may read it as whatever it needs. *)
+  | Op_final
 
 type op_decl =
   { op_name : string
@@ -83,8 +106,13 @@ and 's arm =
 type lit =
   [ `Int of int
   | `Float of float
-  | `Str of string
+  | `Str of Uchar.t array
+  | `Char of Uchar.t
   | `Bool of bool
+  (* An identifier as a value. Nothing in the surface syntax writes one:
+     reflection is where they come from, which is what keeps a name a name
+     rather than any string a program happened to build. *)
+  | `Name of string
   ]
 
 type 'e vars =
@@ -143,7 +171,15 @@ type type_body =
 
 type type_defs = [ `Type_decl of string * string list * type_body ]
 
-type 's op_defs = [ `Op_decl of binop * param list * signature * 's list ]
+(* [Op_index] covers both `[…]` forms: one parameter builds a value from a
+   literal, two read an element. Writing is `[]=`, which reads as an
+   assignment and cannot be confused with either. *)
+type op_ref =
+  | Op_binary of binop
+  | Op_index
+  | Op_index_set
+
+type 's op_defs = [ `Op_decl of op_ref * param list * signature * 's list ]
 
 type method_sig =
   { ms_name : string
@@ -166,7 +202,12 @@ type ('s, 'ann) method_defs =
   | `Impl_decl of string option * string * string list * ('s, 'ann) method_def list
   ]
 
-type 'e method_call = [ `Method_call of 'e * string * 'e list ]
+(* Written, then what the name resolves to as an ordinary function. The two
+   differ once a unit is renamed: whether `xs.map()` reaches a method or a
+   function is a typing question, and what `map` names in the file it was
+   written in is a loading one, so the node carries both answers and each pass
+   uses the one it can give. *)
+type 'e method_call = [ `Method_call of 'e * string * string * 'e list ]
 
 (* A bare name parses as [Ct_type] whichever it is; whoever knows the
    declaration reinterprets one that names a value parameter. *)
@@ -185,7 +226,48 @@ type ('e, 's) matching = [ `Match of 'e * (pattern * 's list) list ]
 
 type 'e collection = [ `Collection_lit of 'e list ]
 
+(* The contiguous block every other container is built from. A literal and an
+   index are written for any container and stay that way until [Resolve] knows
+   which one they meant; these are what the array ones become. *)
+type 'e arrays =
+  [ `Array_lit of 'e list
+  | `Array_new of 'e * 'e
+  | `Array_get of 'e * 'e
+  | `Array_set of 'e * 'e * 'e
+  | `Array_len of 'e
+  ]
+
+(* Immutable, so there is no setter: an index reads and nothing writes. *)
+type 'e strings =
+  [ `Str_get of 'e * 'e
+  | `Str_len of 'e
+  ]
+
 type 'e variant_lit = [ `Variant of string * (string * 'e) list ]
+
+(* `Wildcard` never survives loading: it expands to one `Qualified` per file. *)
+type import =
+  | Qualified of string
+  | Aliased of string * string
+  | Selective of string list * string
+  | Wildcard of string
+
+type imports = [ `Import of import ]
+
+(* Compiled and run where it stands, then removed. Its statements are a program
+   of their own, which is why metaprocessing is compilation calling itself. *)
+type 's meta_blocks =
+  [ `Meta of 's list
+  (* Captured as syntax, not run: what follows `gen` is emitted where the
+     enclosing block stood. *)
+  | `Gen of 's
+  (* Every call to one runs while compiling and is replaced by what it
+     produced, so it has no runtime form. *)
+  | `Meta_fn of string * param list * signature * 's list
+  (* `derive A, B for X` — one call per trait to whatever registered a deriver
+     for it, which is what a `meta fn … for A` did. *)
+  | `Derive of string list * string
+  ]
 
 type 's handler_clause =
   | Inline of 's handler
@@ -194,12 +276,19 @@ type 's handler_clause =
 type 's handler_defs = [ `Handler_decl of string * 's handler ]
 
 type ('e, 's, 'h) effects =
-  [ `Effect_decl of string * op_decl list
+  (* The parameters an effect's operations share. One operation could leave a
+     return unannotated and get the same variable; naming it is what lets two
+     of them agree on it. *)
+  [ `Effect_decl of string * string list * op_decl list
   | `Run of 's list * 'h list
   | `Resume of 'e option
   ]
 
 type 'e reflect = [ `Typeof of 'e ]
+
+(* Syntax that is captured rather than run. It reaches the metaprocessor and no
+   further: what a program keeps is whatever the captured syntax became. *)
+type 'e quote = [ `Code of 'e ]
 
 type ('e, 's) stmts =
   [ `Expr of 'e
@@ -211,8 +300,24 @@ type ('e, 's) stmts =
   | `Return of 'e option
   ]
 
+(* A function with no name. Its body is statements, so this is the one
+   expression that holds them — which is why every stage's expression and
+   statement are one recursive group. *)
+type ('e, 's) lambdas = [ `Lambda of param list * signature * 's list ]
+
+(* How a handler that never resumes leaves: `Abort` unwinds to the `Scope` the
+   `run` block became. A continuation would be the general answer and is what
+   the rest of this costs, so an effect that only ever aborts does not pay
+   for one. *)
+type 's aborts =
+  [ `Scope of 's list
+  | `Abort
+  ]
+
 type ('e, 's) loops =
-  [ `For of 's option * 'e option * 'e option * 's ]
+  [ `For of 's option * 'e option * 'e option * 's
+  | `For_in of string * 'e * 's
+  ]
 
 type expr = (expr_kind, unit) node
 
@@ -230,12 +335,16 @@ and expr_kind =
   | expr comptime_call
   | expr method_call
   | expr reflect
+  | expr quote
+  | (expr, stmt) lambdas
   ]
 
-type stmt = (stmt_kind, unit) node
+and stmt = (stmt_kind, unit) node
 
 and stmt_kind =
   [ (expr, stmt) stmts
+  | imports
+  | stmt meta_blocks
   | (expr, stmt) loops
   | (expr, stmt, stmt handler_clause) effects
   | stmt handler_defs
@@ -263,9 +372,10 @@ and desugared_expr_kind =
   | desugared_expr comptime_call
   | desugared_expr method_call
   | desugared_expr reflect
+  | (desugared_expr, desugared_stmt) lambdas
   ]
 
-type desugared_stmt = (desugared_stmt_kind, unit) node
+and desugared_stmt = (desugared_stmt_kind, unit) node
 
 and desugared_stmt_kind =
   [ (desugared_expr, desugared_stmt) stmts
@@ -289,11 +399,14 @@ and typed_expr_kind =
   | typed_expr record
   | typed_expr nominal
   | typed_expr collection
+  | typed_expr arrays
+  | typed_expr strings
   | typed_expr method_call
   | typed_expr reflect
+  | (typed_expr, typed_stmt) lambdas
   ]
 
-type typed_stmt = (typed_stmt_kind, Types.ty) node
+and typed_stmt = (typed_stmt_kind, Types.ty) node
 
 and typed_stmt_kind =
   [ (typed_expr, typed_stmt) stmts
@@ -313,11 +426,14 @@ and resolved_expr_kind =
   | resolved_expr logic
   | resolved_expr tuple
   | resolved_expr record
+  | resolved_expr arrays
+  | resolved_expr strings
   | resolved_expr variant_lit
   | resolved_expr reflect
+  | (resolved_expr, resolved_stmt) lambdas
   ]
 
-type resolved_stmt = (resolved_stmt_kind, Types.ty) node
+and resolved_stmt = (resolved_stmt_kind, Types.ty) node
 
 and resolved_stmt_kind =
   [ (resolved_expr, resolved_stmt) stmts
@@ -335,10 +451,13 @@ and reflected_expr_kind =
   | reflected_expr logic
   | reflected_expr tuple
   | reflected_expr record
+  | reflected_expr arrays
+  | reflected_expr strings
   | reflected_expr variant_lit
+  | (reflected_expr, reflected_stmt) lambdas
   ]
 
-type reflected_stmt = (reflected_stmt_kind, Types.ty) node
+and reflected_stmt = (reflected_stmt_kind, Types.ty) node
 
 and reflected_stmt_kind =
   [ (reflected_expr, reflected_stmt) stmts
@@ -356,14 +475,18 @@ and cps_expr_kind =
   | cps_expr logic
   | cps_expr tuple
   | cps_expr record
+  | cps_expr arrays
+  | cps_expr strings
   | cps_expr variant_lit
+  | (cps_expr, cps_stmt) lambdas
   ]
 
-type cps_stmt = (cps_stmt_kind, Types.ty) node
+and cps_stmt = (cps_stmt_kind, Types.ty) node
 
 and cps_stmt_kind =
   [ (cps_expr, cps_stmt) stmts
   | (cps_expr, cps_stmt) matching
+  | cps_stmt aborts
   ]
 
 let map_vars (f : 'a -> 'b) (e : 'a vars) : 'b vars =
@@ -421,23 +544,59 @@ let map_op_defs (fs : 's1 -> 's2) (o : 's1 op_defs) : 's2 op_defs =
   | `Op_decl (op, params, signature, body) ->
     `Op_decl (op, params, signature, List.map fs body)
 
-let op_name op lhs rhs =
+(* A name the compiler makes up. `#` is not in any identifier the scanner can
+   produce, so a generated name is unforgeable and a user's `fn List__len`
+   cannot collide with a method's. Always two parts or more, or the separator
+   would not appear and the name would be one a program could write. *)
+let generated parts =
+  match parts with
+  | [] | [ _ ] -> invalid_arg "Ast.generated: a generated name needs two parts"
+  | parts -> String.concat "#" parts
+
+(* Registration is by trait rather than by the name written, so every deriver
+   may be called `derive` and a second one for the same trait collides. *)
+let deriver_name trait = generated [ "derive"; trait ]
+
+let deriver_trait name =
+  let prefix = deriver_name "" in
+  let n = String.length prefix in
+  if String.length name > n && String.equal (String.sub name 0 n) prefix
+  then Some (String.sub name n (String.length name - n))
+  else None
+
+let op_name op (operands : string list) =
   let symbol =
     match op with
-    | Add -> "add"
-    | Sub -> "sub"
-    | Mul -> "mul"
-    | Div -> "div"
-    | Equal -> "eq"
-    | Not_equal -> "ne"
-    | Less -> "lt"
-    | Less_equal -> "le"
-    | Greater -> "gt"
-    | Greater_equal -> "ge"
+    | Op_index -> "index"
+    | Op_index_set -> "index_set"
+    | Op_binary Add -> "add"
+    | Op_binary Sub -> "sub"
+    | Op_binary Mul -> "mul"
+    | Op_binary Div -> "div"
+    | Op_binary Mod -> "mod"
+    | Op_binary Equal -> "eq"
+    | Op_binary Not_equal -> "ne"
+    | Op_binary Less -> "lt"
+    | Op_binary Less_equal -> "le"
+    | Op_binary Greater -> "gt"
+    | Op_binary Greater_equal -> "ge"
   in
-  Printf.sprintf "__op_%s_%s_%s" symbol lhs rhs
+  generated ("op" :: symbol :: operands)
 
-let method_name type_name method_ = Printf.sprintf "%s__%s" type_name method_
+let type_head (t : type_expr option) =
+  match t with
+  | Some { it = Ty_name n; _ } | Some { it = Ty_app (n, _); _ } -> n
+  | _ -> "_"
+
+(* A literal entry is identified by what it builds; every other operator by its
+   operands. Two containers built from the same array type would otherwise
+   mangle to one name and the later declaration would answer for both. *)
+let op_entry_name op (params : param list) (signature : signature) =
+  match op, params with
+  | Op_index, [ _ ] -> op_name op [ type_head signature.ret ]
+  | _ -> op_name op (List.map (fun (p : param) -> type_head p.ty) params)
+
+let method_name type_name method_ = generated [ type_name; method_ ]
 
 let map_comptime_arg (f : 'a -> 'b) (a : 'a comptime_arg) : 'b comptime_arg =
   match a with
@@ -452,8 +611,8 @@ let map_comptime_call (f : 'a -> 'b) (e : 'a comptime_call) : 'b comptime_call =
 
 let map_method_call (f : 'a -> 'b) (e : 'a method_call) : 'b method_call =
   match e with
-  | `Method_call (receiver, name, args) ->
-    `Method_call (f receiver, name, List.map f args)
+  | `Method_call (receiver, name, as_function, args) ->
+    `Method_call (f receiver, name, as_function, List.map f args)
 
 let map_method_def (fs : 's1 -> 's2) (fa : 'a1 -> 'a2) (m : ('s1, 'a1) method_def)
   : ('s2, 'a2) method_def
@@ -484,6 +643,19 @@ let map_collection (f : 'a -> 'b) (e : 'a collection) : 'b collection =
   match e with
   | `Collection_lit items -> `Collection_lit (List.map f items)
 
+let map_strings (f : 'a -> 'b) (e : 'a strings) : 'b strings =
+  match e with
+  | `Str_get (target, index) -> `Str_get (f target, f index)
+  | `Str_len target -> `Str_len (f target)
+
+let map_arrays (f : 'a -> 'b) (e : 'a arrays) : 'b arrays =
+  match e with
+  | `Array_lit items -> `Array_lit (List.map f items)
+  | `Array_new (length, fill) -> `Array_new (f length, f fill)
+  | `Array_get (target, index) -> `Array_get (f target, f index)
+  | `Array_set (target, index, v) -> `Array_set (f target, f index, f v)
+  | `Array_len target -> `Array_len (f target)
+
 let map_variant_lit (f : 'a -> 'b) (e : 'a variant_lit) : 'b variant_lit =
   match e with
   | `Variant (name, fields) -> `Variant (name, List.map (fun (l, v) -> l, f v) fields)
@@ -499,6 +671,14 @@ let payload_fields (p : 'a payload) : (string * 'a) list =
 let map_reflect (f : 'a -> 'b) (e : 'a reflect) : 'b reflect =
   match e with
   | `Typeof v -> `Typeof (f v)
+
+let map_lambdas (fs : 'a -> 'b) (e : ('e, 'a) lambdas) : ('e, 'b) lambdas =
+  match e with
+  | `Lambda (params, signature, body) -> `Lambda (params, signature, List.map fs body)
+
+let map_quote (f : 'a -> 'b) (e : 'a quote) : 'b quote =
+  match e with
+  | `Code v -> `Code (f v)
 
 let map_stmts (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) stmts)
   : ('e2, 's2) stmts
@@ -519,6 +699,7 @@ let map_loops (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) loops)
   match s with
   | `For (init, cond, step, body) ->
     `For (Option.map fs init, Option.map fe cond, Option.map fe step, fs body)
+  | `For_in (name, iterable, body) -> `For_in (name, fe iterable, fs body)
 
 let map_arm (fs : 's1 -> 's2) (a : 's1 arm) : 's2 arm =
   { arm_name = a.arm_name
@@ -538,7 +719,7 @@ let map_effects
   : ('e2, 's2, 'h2) effects
   =
   match s with
-  | `Effect_decl (name, ops) -> `Effect_decl (name, ops)
+  | `Effect_decl (name, params, ops) -> `Effect_decl (name, params, ops)
   | `Run (body, handlers) -> `Run (List.map fs body, List.map fh handlers)
   | `Resume e -> `Resume (Option.map fe e)
 
@@ -547,6 +728,7 @@ let string_of_binop = function
   | Sub -> "-"
   | Mul -> "*"
   | Div -> "/"
+  | Mod -> "%"
   | Equal -> "=="
   | Not_equal -> "!="
   | Less -> "<"
@@ -554,11 +736,17 @@ let string_of_binop = function
   | Greater -> ">"
   | Greater_equal -> ">="
 
+let string_of_op = function
+  | Op_binary op -> string_of_binop op
+  | Op_index -> "[]"
+  | Op_index_set -> "[]="
+
 let binop_of_token : Token.token_type -> binop option = function
   | Token.Plus -> Some Add
   | Token.Minus -> Some Sub
   | Token.Star -> Some Mul
   | Token.Slash -> Some Div
+  | Token.Percent -> Some Mod
   | Token.Equal_equal -> Some Equal
   | Token.Bang_equal -> Some Not_equal
   | Token.Less -> Some Less
@@ -572,4 +760,4 @@ let unop_of_token : Token.token_type -> unop option = function
   | Token.Bang -> Some Not
   | _ -> None
 
-let span_of_token (t : Token.token) = { line = t.line; col = t.col }
+let span_of_token (t : Token.token) = { file = t.file; line = t.line; col = t.col }

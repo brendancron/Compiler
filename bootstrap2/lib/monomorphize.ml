@@ -29,7 +29,22 @@ type state =
   ; mutable pending : (string * desugared_stmt) list
   }
 
-let is_value (p : comptime_param) = p.cp_ty <> None
+(* A trait name after the colon is a bound on a type parameter, not the type of
+   a value parameter, and this pass runs before anything knows which names are
+   traits — so it collects them itself. *)
+let traits : (string, unit) Hashtbl.t = Hashtbl.create 8
+
+let rec note_traits (s : desugared_stmt) =
+  match s.it with
+  | `Trait_decl (name, _) -> Hashtbl.replace traits name ()
+  | `Block body | `Fn (_, _, _, body) -> List.iter note_traits body
+  | _ -> ()
+
+let is_value (p : comptime_param) =
+  match p.cp_ty with
+  | None -> false
+  | Some { it = Ty_name name; _ } -> not (Hashtbl.mem traits name)
+  | Some _ -> true
 
 let split (signature : signature) =
   List.partition is_value signature.comptime
@@ -38,7 +53,8 @@ let rec key_of (e : desugared_expr) =
   match e.it with
   | `Int n -> string_of_int n
   | `Float n -> Printf.sprintf "%h" n
-  | `Str s -> Printf.sprintf "%S" s
+  | `Str s -> Printf.sprintf "%S" (Utf8.encode s)
+  | `Char c -> Printf.sprintf "'%d'" (Uchar.to_int c)
   | `Bool b -> string_of_bool b
   | `Unop (Neg, inner) -> "-" ^ key_of inner
   | _ -> assert false (* [literal_of] admitted it *)
@@ -53,6 +69,8 @@ let rec subst_expr env (e : desugared_expr) : desugared_expr =
   let it : desugared_expr_kind =
     match e.it with
     | `Var name when List.mem_assoc name env -> (List.assoc name env).it
+    | `Lambda (params, signature, body) ->
+      `Lambda (params, signature, List.map (subst_stmt env) body)
     | #lit as l -> l
     | #vars as v -> (map_vars (subst_expr env) v :> desugared_expr_kind)
     | #ops as o -> (map_ops (subst_expr env) o :> desugared_expr_kind)
@@ -138,13 +156,15 @@ let copy_name state name key =
   | Some existing -> existing, false
   | None ->
     let index = Hashtbl.length state.copies in
-    let fresh = Printf.sprintf "%s__%d" name index in
+    let fresh = generated [ name; string_of_int index ] in
     Hashtbl.replace state.copies (name, key) fresh;
     fresh, true
 
 let rec expr state (e : desugared_expr) : desugared_expr =
   let it : desugared_expr_kind =
     match e.it with
+    | `Lambda (params, signature, body) ->
+      `Lambda (params, signature, List.map (stmt state) body)
     | `Comptime_call (callee, comptime_args, args) ->
       let args = List.map (expr state) args in
       (match callee.it with
@@ -263,6 +283,8 @@ let program (p : desugared_stmt list) : (desugared_stmt list, error) result =
     ; pending = []
     }
   in
+  Hashtbl.reset traits;
+  List.iter note_traits p;
   List.iter (collect state) p;
   if Hashtbl.length state.templates = 0
   then Ok p

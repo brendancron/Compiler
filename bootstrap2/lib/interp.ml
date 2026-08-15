@@ -2,6 +2,16 @@ open Value
 
 exception Return_value of value * Ast.span
 
+(* A handler that never resumes; caught by the `Scope` its `run` became. *)
+exception Aborted
+
+let compare_ordered op x y =
+  match op with
+  | Ast.Less -> x < y
+  | Ast.Less_equal -> x <= y
+  | Ast.Greater -> x > y
+  | _ -> x >= y
+
 let as_bool span = function
   | Bool b -> b
   | v -> fail span "Expected a bool condition, got %s." (type_name v)
@@ -11,12 +21,15 @@ let eval_binop span (op : Ast.binop) a b =
   match op, a, b with
   | Ast.Add, Int x, Int y -> Int (x + y)
   | Ast.Add, Float x, Float y -> Float (x +. y)
-  | Ast.Add, Str x, Str y -> Str (x ^ y)
+  | Ast.Add, Str x, Str y -> Str (Array.append x y)
   | Ast.Sub, Int x, Int y -> Int (x - y)
   | Ast.Sub, Float x, Float y -> Float (x -. y)
   | Ast.Mul, Int x, Int y -> Int (x * y)
   | Ast.Mul, Float x, Float y -> Float (x *. y)
   | Ast.Div, Int _, Int 0 -> fail span "Division by zero."
+  | Ast.Mod, Int _, Int 0 -> fail span "Division by zero."
+  | Ast.Mod, Int x, Int y -> Int (x mod y)
+  | Ast.Mod, Float x, Float y -> Float (Float.rem x y)
   | Ast.Div, Int x, Int y -> Int (x / y)
   | Ast.Div, Float x, Float y -> Float (x /. y)
   | Ast.Less, Int x, Int y -> Bool (x < y)
@@ -27,6 +40,11 @@ let eval_binop span (op : Ast.binop) a b =
   | Ast.Greater, Float x, Float y -> Bool (x > y)
   | Ast.Greater_equal, Int x, Int y -> Bool (x >= y)
   | Ast.Greater_equal, Float x, Float y -> Bool (x >= y)
+  (* A scalar value orders by code point, an octet by its byte. *)
+  | (Ast.Less | Ast.Less_equal | Ast.Greater | Ast.Greater_equal), Chr x, Chr y ->
+    Bool (compare_ordered op (Uchar.to_int x) (Uchar.to_int y))
+  | (Ast.Less | Ast.Less_equal | Ast.Greater | Ast.Greater_equal), Byte x, Byte y ->
+    Bool (compare_ordered op (Char.code x) (Char.code y))
   | Ast.Equal, _, _ -> Bool (values_equal a b)
   | Ast.Not_equal, _, _ -> Bool (not (values_equal a b))
   | _ ->
@@ -36,12 +54,46 @@ let eval_binop span (op : Ast.binop) a b =
       (type_name a)
       (type_name b)
 
+let as_array span = function
+  | Array items -> items
+  | v -> fail span "Expected an array, got %s." (type_name v)
+
+let as_text span = function
+  | Str scalars -> scalars
+  | v -> fail span "Expected a string, got %s." (type_name v)
+
+let as_index span = function
+  | Int i -> i
+  | v -> fail span "Expected an int index, got %s." (type_name v)
+
+let in_bounds span items i =
+  if i < 0 || i >= Array.length items
+  then fail span "Index %d is out of bounds for length %d." i (Array.length items);
+  i
+
 let rec eval env (e : Ast.cps_expr) : value =
   let span = e.Ast.span in
   match e.Ast.it with
+  | `Lambda (params, _, body) ->
+    let names = List.map (fun (p : Ast.param) -> p.Ast.name) params in
+    Fn
+      { name = "fn"
+      ; arity = Some (List.length names)
+      ; apply =
+          (fun _ args ->
+            let frame = new_env (Some env) in
+            List.iter2 (define frame) names args;
+            (try
+               List.iter (exec frame) body;
+               Unit
+             with
+             | Return_value (v, _) -> v))
+      }
   | `Int n -> Int n
   | `Float n -> Float n
   | `Str s -> Str s
+  | `Name n -> Name n
+  | `Char c -> Chr c
   | `Bool b -> Bool b
   | `Var name ->
     (match lookup env name with
@@ -60,19 +112,45 @@ let rec eval env (e : Ast.cps_expr) : value =
      | Float n -> Float (-.n)
      | v -> fail span "Cannot negate %s." (type_name v))
   | `Unop (Ast.Not, a) -> Bool (not (as_bool span (eval env a)))
-  | `Binop (op, a, b) -> eval_binop span op (eval env a) (eval env b)
+  | `Binop (op, a, b) ->
+    let a = eval env a in
+    let b = eval env b in
+    eval_binop span op a b
   | `And (a, b) ->
     if as_bool span (eval env a) then Bool (as_bool span (eval env b)) else Bool false
   | `Or (a, b) ->
     if as_bool span (eval env a) then Bool true else Bool (as_bool span (eval env b))
   | `Call (callee, args) ->
     let f = eval env callee in
-    call span f (List.map (eval env) args)
-  | `Tuple items -> Tuple (List.map (eval env) items)
+    call span f (eval_all env args)
+  | `Tuple items -> Tuple (eval_all env items)
+  | `Array_lit items -> Array (Array.of_list (eval_all env items))
+  | `Array_new (length, fill) ->
+    let length = eval env length in
+    let fill = eval env fill in
+    (match length with
+     | Int n when n >= 0 -> Array (Array.make n fill)
+     | Int _ -> fail span "An array's length must not be negative."
+     | v -> fail span "Expected an int length, got %s." (type_name v))
+  | `Array_get (target, index) ->
+    let items = as_array target.Ast.span (eval env target) in
+    let i = as_index index.Ast.span (eval env index) in
+    items.(in_bounds index.Ast.span items i)
+  | `Array_set (target, index, v) ->
+    let items = as_array target.Ast.span (eval env target) in
+    let i = as_index index.Ast.span (eval env index) in
+    let value = eval env v in
+    items.(in_bounds index.Ast.span items i) <- value;
+    value
+  | `Array_len target -> Int (Array.length (as_array target.Ast.span (eval env target)))
+  | `Str_get (target, index) ->
+    let scalars = as_text target.Ast.span (eval env target) in
+    let i = as_index index.Ast.span (eval env index) in
+    Chr scalars.(in_bounds index.Ast.span scalars i)
+  | `Str_len target -> Int (Array.length (as_text target.Ast.span (eval env target)))
   | `Record_lit fields ->
-    Record (List.map (fun (l, v) -> l, ref (eval env v)) fields)
-  | `Variant (name, fields) ->
-    Variant (name, List.map (fun (l, v) -> l, eval env v) fields)
+    Record (List.map (fun (l, v) -> l, ref v) (eval_labeled env fields))
+  | `Variant (name, fields) -> Variant (name, eval_labeled env fields)
   | `Field (target, label) ->
     (match eval env target with
      | Record fields ->
@@ -81,19 +159,35 @@ let rec eval env (e : Ast.cps_expr) : value =
         | None -> fail span "No field '%s'." label)
      | v -> fail span "Cannot take a field of %s." (type_name v))
   | `Field_assign (target, label, v) ->
+    let target = eval env target in
     let value = eval env v in
-    (match eval env target with
+    (match target with
      | Record fields ->
        (match List.assoc_opt label fields with
         | Some cell ->
           cell := value;
           value
         | None -> fail span "No field '%s'." label)
-     | v -> fail span "Cannot take a field of %s." (type_name v))
+     | other -> fail span "Cannot take a field of %s." (type_name other))
   | `Tuple_get (target, index) ->
     (match eval env target with
      | Tuple items -> List.nth items index
      | v -> fail span "Cannot take a field of %s." (type_name v))
+(* OCaml leaves the order of an application's arguments and of [List.map]
+   unspecified, and evaluates both right to left in practice. Every operand list
+   a program can observe the order of is sequenced here instead. *)
+and eval_all env = function
+  | [] -> []
+  | e :: rest ->
+    let v = eval env e in
+    v :: eval_all env rest
+
+and eval_labeled env = function
+  | [] -> []
+  | (label, e) :: rest ->
+    let v = eval env e in
+    (label, v) :: eval_labeled env rest
+
 and call span f args =
   match f with
   | Fn f ->
@@ -108,6 +202,11 @@ and exec env (s : Ast.cps_stmt) : unit =
   let span = s.Ast.span in
   match s.Ast.it with
   | `Expr e -> ignore (eval env e)
+  (* A handler that never resumes leaves by unwinding to the block it was
+     installed on. Nothing catches this in between: a function's own handler
+     is for `return`. *)
+  | `Scope body -> (try List.iter (exec env) body with Aborted -> ())
+  | `Abort -> raise Aborted
   | `Var_decl (name, _, init) ->
     let v =
       match init with

@@ -1,30 +1,31 @@
-import "../../../stdlib/collections/List";
-import "../../../stdlib/lang/Option";
+import { map, filter, fold, any, all, find, concat, reverse, flat_map, join }
+    from "../../../stdlib/collections/List";
+import { Option } from "../../../stdlib/lang/Option";
 
 var nums = [1, 2, 3, 4, 5];
 
-var doubled = List.map(nums) { it * 2 };
+var doubled = nums.map() { it * 2 };
 print(doubled[0]);
 print(doubled[4]);
 
-var sum = List.fold(nums, 0, fn(acc, x) { return acc + x; });
+var sum = nums.fold(0, (acc, x) => acc + x);
 print(sum);
 
-print(List.any(nums) { it > 4 });
-print(List.all(nums) { it > 0 });
+print(nums.any() { it > 4 });
+print(nums.all() { it > 0 });
 
-var rev = List.reverse(nums);
+var rev = nums.reverse();
 print(rev[0]);
 print(rev[4]);
 
 var words = ["hello", "world"];
-print(List.join(words, ", "));
+print(words.join(", "));
 
-var big = List.filter(nums) { it > 3 };
+var big = nums.filter() { it > 3 };
 print(big[0]);
 print(big[1]);
 
-var found = List.find(nums) { it > 3 };
+var found = nums.find() { it > 3 };
 match found {
     Option::Some(v) => { print(v); }
     Option::None    => { print("none"); }
@@ -32,10 +33,10 @@ match found {
 
 var a = [1, 2];
 var b = [3, 4];
-var c = List.concat(a, b);
+var c = a.concat(b);
 print(c[0]);
 print(c[3]);
 
-var flat = List.flat_map([[1, 2], [3, 4]], fn(xs) { return xs; });
+var flat = [[1, 2], [3, 4]].flat_map((xs) => xs);
 print(flat[0]);
 print(flat[3]);

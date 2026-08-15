@@ -5,7 +5,7 @@ fn greet(name: string) { log("hi " + name); tick(); }
 fn indirect() { greet("x"); }
 fn pure_fn(n: int): int { return n + 1; }
 
-print(typeof(log));
-print(typeof(greet));
-print(typeof(indirect));
-print(typeof(pure_fn));
+print(typeof(log).name);
+print(typeof(greet).name);
+print(typeof(indirect).name);
+print(typeof(pure_fn).name);

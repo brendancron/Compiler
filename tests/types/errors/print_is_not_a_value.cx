@@ -1,0 +1,2 @@
+var p = print;
+var n: int = p;

@@ -1,0 +1,12 @@
+// An `impl` answers first, so a method cannot be shadowed by whatever
+// function a program happens to have in scope.
+type Dog { name: string }
+
+impl Dog {
+    fn speak(self) -> string { return "method"; }
+}
+
+fn speak(d: Dog) -> string { return "function"; }
+
+var rex = new Dog { name: "rex" };
+print(rex.speak(), speak(rex));

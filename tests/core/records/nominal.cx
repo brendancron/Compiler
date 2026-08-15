@@ -10,11 +10,11 @@ type Pixel {
 }
 
 var p = new Point { x: 1, y: 2 };
-print(p.x, p.y, typeof(p));
+print(p.x, p.y, typeof(p).name);
 p.x = 9;
 print(p.x);
 
 fn shift(q: Point) -> Point {
     return new Point { x: q.x + 1, y: q.y };
 }
-print(shift(p).x, typeof(shift));
+print(shift(p).x, typeof(shift).name);

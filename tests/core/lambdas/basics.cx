@@ -1,0 +1,18 @@
+fn apply(g: (int) -> int, v: int) -> int { return g(v); }
+
+print(apply((x) => x * 2, 21));
+print(apply((x) => { return x + 1; }, 41));
+
+var add = (a, b) => a + b;
+print(add(2, 3));
+
+// The body sees what stood where the value was written.
+var factor = 10;
+var scale = (v) => v * factor;
+print(scale(7));
+
+var clamp = (v) => {
+    if (v < 0) { return 0; }
+    return v;
+};
+print(clamp(0 - 5), clamp(5));

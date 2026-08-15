@@ -11,6 +11,9 @@ type token_type =
   | Plus
   | Semicolon
   | Slash
+  | Percent
+  | Amp_amp
+  | Pipe_pipe
   | Star
   | Colon
   | Colon_colon
@@ -30,15 +33,18 @@ type token_type =
   | Minus_equal
   | Star_equal
   | Slash_equal
+  | Percent_equal
   | Arrow
+  | Fat_arrow
   (* Literals. *)
   | Identifier of string
   | String of string
+  | Char of Uchar.t
   | Int of int
   | Float of float
   (* Keywords. *)
-  | And
   | Ctl
+  | Final
   | Effect
   | Else
   | False
@@ -46,8 +52,12 @@ type token_type =
   | For
   | If
   | Impl
+  | Import
+  | Meta
+  | Gen
+  | Code
+  | Derive
   | Op
-  | Or
   | Handle
   | Handler
   | Resume
@@ -67,11 +77,12 @@ type token_type =
 type token =
   { token_type : token_type
   ; lexeme : string
+  ; file : string (* the unit it was read from, carried so spans have one *)
   ; line : int (* 1-based *)
   ; col : int (* 1-based, counted from the start of `line` *)
   }
 
-let make token_type ~lexeme ~line ~col = { token_type; lexeme; line; col }
+let make token_type ~lexeme ~file ~line ~col = { token_type; lexeme; file; line; col }
 
 let token_type_to_string = function
   | Left_paren -> "LEFT_PAREN"
@@ -85,6 +96,9 @@ let token_type_to_string = function
   | Plus -> "PLUS"
   | Semicolon -> "SEMICOLON"
   | Slash -> "SLASH"
+  | Percent -> "PERCENT"
+  | Amp_amp -> "AMP_AMP"
+  | Pipe_pipe -> "PIPE_PIPE"
   | Star -> "STAR"
   | Colon -> "COLON"
   | Colon_colon -> "COLON_COLON"
@@ -103,13 +117,16 @@ let token_type_to_string = function
   | Minus_equal -> "MINUS_EQUAL"
   | Star_equal -> "STAR_EQUAL"
   | Slash_equal -> "SLASH_EQUAL"
+  | Percent_equal -> "PERCENT_EQUAL"
   | Arrow -> "ARROW"
+  | Fat_arrow -> "FAT_ARROW"
   | Identifier _ -> "IDENTIFIER"
   | String _ -> "STRING"
+  | Char _ -> "CHAR"
   | Int _ -> "INT"
   | Float _ -> "FLOAT"
-  | And -> "AND"
   | Ctl -> "CTL"
+  | Final -> "FINAL"
   | Effect -> "EFFECT"
   | Else -> "ELSE"
   | False -> "FALSE"
@@ -117,8 +134,12 @@ let token_type_to_string = function
   | For -> "FOR"
   | If -> "IF"
   | Impl -> "IMPL"
+  | Import -> "IMPORT"
+  | Meta -> "META"
+  | Gen -> "GEN"
+  | Code -> "CODE"
+  | Derive -> "DERIVE"
   | Op -> "OP"
-  | Or -> "OR"
   | Handle -> "HANDLE"
   | Handler -> "HANDLER"
   | Resume -> "RESUME"
@@ -142,6 +163,10 @@ let float_to_string n =
 let literal_to_string = function
   | Identifier name -> name
   | String s -> s
+  | Char c ->
+    let buf = Buffer.create 4 in
+    Buffer.add_utf_8_uchar buf c;
+    Buffer.contents buf
   | Int n -> string_of_int n
   | Float n -> float_to_string n
   | _ -> "null"

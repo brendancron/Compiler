@@ -1,7 +1,9 @@
 type value =
   | Int of int
   | Float of float
-  | Str of string
+  | Str of Uchar.t array
+  | Byte of char
+  | Chr of Uchar.t
   | Bool of bool
   | Unit
   | Tuple of value list
@@ -14,6 +16,12 @@ type value =
   (* One callable form. Whether the body is Cronyx or OCaml is the business of
      whoever built it. *)
   | Fn of fn
+  (* Syntax a meta program built. It never outlives metaprocessing: what the
+     program keeps is what the syntax became. *)
+  | Code of Ast.expr
+  (* An identifier, kept apart from a string so that only what reflection
+     handed out can be spliced into a name position. *)
+  | Name of string
 
 and fn =
   { name : string
@@ -52,10 +60,14 @@ let type_name = function
   | Int _ -> "int"
   | Float _ -> "float"
   | Str _ -> "string"
+  | Byte _ -> "byte"
+  | Chr _ -> "char"
   | Bool _ -> "bool"
   | Unit -> "unit"
   | Array _ -> "array"
   | Fn _ -> "fn"
+  | Code _ -> "code"
+  | Name _ -> "name"
 
 let rec string_of_value = function
   | Array items ->
@@ -70,24 +82,72 @@ let rec string_of_value = function
     ^ " }"
   | Int n -> string_of_int n
   | Float n -> Token.float_to_string n
-  | Str s -> s
+  | Str s -> Utf8.encode s
+  | Byte b -> String.make 1 b
+  | Chr c ->
+    let buf = Buffer.create 4 in
+    Buffer.add_utf_8_uchar buf c;
+    Buffer.contents buf
   | Bool b -> string_of_bool b
   | Unit -> "unit"
   | Fn f -> Printf.sprintf "<fn %s>" f.name
+  | Code e -> Printf.sprintf "<code %s>" (Printer.string_of_expr e)
+  | Name n -> n
 
-(* OCaml's structural comparison raises on functional values. *)
-let rec values_equal a b =
+(* Structural, and written out because OCaml's own comparison raises on
+   functional values. A pair already under comparison counts as equal: that is
+   what makes a cyclic value terminate, and it is the coinductive reading of
+   "equal" rather than a shortcut. *)
+let rec equal_with seen a b =
+  if List.exists (fun (x, y) -> x == a && y == b) seen
+  then true
+  else (
+    let seen = (a, b) :: seen in
+    match a, b with
+    | Array x, Array y ->
+      x == y
+      || (Array.length x = Array.length y
+          &&
+          let rec from i = i >= Array.length x || (equal_with seen x.(i) y.(i) && from (i + 1)) in
+          from 0)
+    | Record x, Record y ->
+      x == y
+      || (List.length x = List.length y
+          && List.for_all
+               (fun (label, cell) ->
+                 match List.assoc_opt label y with
+                 | Some other -> equal_with seen !cell !other
+                 | None -> false)
+               x)
+    | Tuple x, Tuple y ->
+      List.length x = List.length y && List.for_all2 (equal_with seen) x y
+    | Variant (n, a), Variant (m, b) ->
+      String.equal n m
+      && List.length a = List.length b
+      && List.for_all2 (fun (_, x) (_, y) -> equal_with seen x y) a b
+    | Int x, Int y -> x = y
+    | Float x, Float y -> Float.equal x y
+    | Str x, Str y -> x = y
+    | Byte x, Byte y -> Char.equal x y
+    | Chr x, Chr y -> Uchar.equal x y
+    | Bool x, Bool y -> x = y
+    | Unit, Unit -> true
+    | _ -> false)
+
+let values_equal a b = equal_with [] a b
+
+(* Identity, for the values that have one. A scalar cannot be mutated, so
+   nothing can tell two equal ones apart and there is no identity to ask about. *)
+let rec same a b =
   match a, b with
   | Array x, Array y -> x == y
-  | Tuple x, Tuple y -> List.length x = List.length y && List.for_all2 values_equal x y
   | Record x, Record y -> x == y
+  | Fn x, Fn y -> x == y
+  | Code x, Code y -> x == y
+  | Name x, Name y -> String.equal x y
+  | Tuple x, Tuple y -> List.length x = List.length y && List.for_all2 same x y
   | Variant (n, a), Variant (m, b) ->
     String.equal n m
     && List.length a = List.length b
-    && List.for_all2 (fun (_, x) (_, y) -> values_equal x y) a b
-  | Int x, Int y -> x = y
-  | Float x, Float y -> Float.equal x y
-  | Str x, Str y -> String.equal x y
-  | Bool x, Bool y -> x = y
-  | Unit, Unit -> true
-  | _ -> false
+    && List.for_all2 (fun (_, x) (_, y) -> same x y) a b
+  | a, b -> values_equal a b

@@ -1,0 +1,16 @@
+var s = "héllo wörld";
+print(s.len());
+print(s.chars().len());
+print(s.bytes().len());
+
+var e = 'é';
+print(e, typeof(e).name);
+print(e == 'é', e == 'e');
+print(s.chars()[1] == e);
+
+print(s.split(' '));
+print(s.contains("wör"));
+print("  héllo  ".trim());
+
+var raw: Array<byte> = "hé".bytes();
+print(raw.len(), typeof(raw).name);

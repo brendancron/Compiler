@@ -1,15 +1,15 @@
 var xs = [1, 2, 3];
 xs[0] = 9;
 print(xs[0], xs[2]);
-print(typeof(xs));
+print(typeof(xs).name);
 
 var grid = [[1, 2], [3, 4]];
 grid[0][1] = 7;
 print(grid[0][1], grid[1][0]);
-print(typeof(grid));
+print(typeof(grid).name);
 
 var names: Array<string> = ["a", "b"];
-print(names[1], typeof(names));
+print(names[1], typeof(names).name);
 
 fn first(a: Array<int>) -> int { return a[0]; }
-print(first(xs), typeof(first));
+print(first(xs), typeof(first).name);

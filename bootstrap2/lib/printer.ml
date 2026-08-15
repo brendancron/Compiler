@@ -40,7 +40,8 @@ let rec string_of_expr (e : Ast.expr) : string =
   match e.Ast.it with
   | `Int n -> string_of_int n
   | `Float n -> Token.float_to_string n
-  | `Str s -> Printf.sprintf "%S" s
+  | `Str s -> Printf.sprintf "%S" (Utf8.encode s)
+  | `Char c -> Printf.sprintf "'%s'" (Token.literal_to_string (Token.Char c))
   | `Bool b -> string_of_bool b
   | `Var name -> name
   | `Assign (name, v) -> Printf.sprintf "(set %s %s)" name (string_of_expr v)
@@ -68,7 +69,7 @@ let rec string_of_expr (e : Ast.expr) : string =
       (string_of_expr callee)
       (String.concat ", " (List.map comptime comptime_args))
       (String.concat "" (List.map (fun a -> " " ^ string_of_expr a) args))
-  | `Method_call (receiver, name, args) ->
+  | `Method_call (receiver, name, _, args) ->
     Printf.sprintf
       "(. %s %s%s)"
       (string_of_expr receiver)
@@ -77,6 +78,10 @@ let rec string_of_expr (e : Ast.expr) : string =
   | `And (a, b) -> Printf.sprintf "(and %s %s)" (string_of_expr a) (string_of_expr b)
   | `Or (a, b) -> Printf.sprintf "(or %s %s)" (string_of_expr a) (string_of_expr b)
   | `Typeof e -> Printf.sprintf "(typeof %s)" (string_of_expr e)
+  | `Code e -> Printf.sprintf "(code %s)" (string_of_expr e)
+  | `Lambda (params, _, _) ->
+    Printf.sprintf "(fn (%s) ...)" (String.concat " " (List.map string_of_param params))
+  | `Name n -> n
   | `Collection_lit items ->
     Printf.sprintf "[%s]" (String.concat " " (List.map string_of_expr items))
   | `Tuple items ->
@@ -129,6 +134,24 @@ let rec write_stmt buf indent (s : Ast.stmt) =
   in
   match s.Ast.it with
   | `Expr e -> line "%s%s\n" pad (string_of_expr e)
+  | `Meta body -> nested "meta" body
+  | `Gen inner -> nested "gen" [ inner ]
+  | `Derive (traits, ty) ->
+    line "%s(derive %s for %s)\n" pad (String.concat ", " traits) ty
+  | `Meta_fn (name, params, _, body) ->
+    nested
+      (Printf.sprintf "meta fn %s (%s)" name (String.concat " " (List.map string_of_param params)))
+      body
+  | `Import decl ->
+    let shown =
+      match decl with
+      | Ast.Qualified path -> Printf.sprintf "%S" path
+      | Ast.Aliased (path, alias) -> Printf.sprintf "%S as %s" path alias
+      | Ast.Selective (names, path) ->
+        Printf.sprintf "{%s} from %S" (String.concat " " names) path
+      | Ast.Wildcard dir -> Printf.sprintf "%S/*" dir
+    in
+    line "%s(import %s)\n" pad shown
   | `Var_decl (name, ty, init) ->
     line "%s(var %s%s %s)\n" pad name (annotation ty) (opt_expr init)
   | `Block body -> nested "block" body
@@ -151,11 +174,13 @@ let rec write_stmt buf indent (s : Ast.stmt) =
           | Some labels -> string_of_row labels))
       body
   | `Return value -> line "%s(return %s)\n" pad (opt_expr value)
+  | `For_in (name, iterable, body) ->
+    nested (Printf.sprintf "for %s in %s" name (string_of_expr iterable)) [ body ]
   | `For (init, cond, step, body) ->
     line "%s(for %s %s\n" pad (opt_expr cond) (opt_expr step);
     List.iter (write_stmt buf (indent + 1)) (Option.to_list init @ [ body ]);
     line "%s)\n" pad
-  | `Effect_decl (name, ops) ->
+  | `Effect_decl (name, _, ops) ->
     line
       "%s(effect %s%s)\n"
       pad
@@ -180,7 +205,7 @@ let rec write_stmt buf indent (s : Ast.stmt) =
     nested
       (Printf.sprintf
          "op %s (%s)"
-         (Ast.string_of_binop op)
+         (Ast.string_of_op op)
          (String.concat " " (List.map string_of_param params)))
       body
   | `Type_decl (name, params, body) ->
@@ -231,8 +256,12 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
   let body =
     match e.Ast.it with
     | `Int n -> string_of_int n
+    | `Lambda (params, _, _) ->
+      Printf.sprintf "(fn (%s) ...)" (String.concat " " (List.map string_of_param params))
+    | `Name n -> n
     | `Float n -> Token.float_to_string n
-    | `Str s -> Printf.sprintf "%S" s
+    | `Str s -> Printf.sprintf "%S" (Utf8.encode s)
+    | `Char c -> Printf.sprintf "'%s'" (Token.literal_to_string (Token.Char c))
     | `Bool b -> string_of_bool b
     | `Var name -> name
     | `Assign (name, v) -> Printf.sprintf "(set %s %s)" name (string_of_typed_expr v)
@@ -255,7 +284,7 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
       Printf.sprintf "(or %s %s)" (string_of_typed_expr a) (string_of_typed_expr b)
     | `Compound (op, name, v) ->
       Printf.sprintf "(%s= %s %s)" (string_of_binop op) name (string_of_typed_expr v)
-    | `Method_call (receiver, name, args) ->
+    | `Method_call (receiver, name, as_function, args) ->
       Printf.sprintf
         "(. %s %s%s)"
         (string_of_typed_expr receiver)
@@ -313,6 +342,27 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
         (string_of_typed_expr t)
         (string_of_typed_expr i)
         (string_of_typed_expr v)
+    | `Array_lit items ->
+      Printf.sprintf
+        "(array %s)"
+        (String.concat " " (List.map string_of_typed_expr items))
+    | `Array_new (length, fill) ->
+      Printf.sprintf
+        "(array-new %s %s)"
+        (string_of_typed_expr length)
+        (string_of_typed_expr fill)
+    | `Array_get (t, i) ->
+      Printf.sprintf "(array-get %s %s)" (string_of_typed_expr t) (string_of_typed_expr i)
+    | `Array_set (t, i, v) ->
+      Printf.sprintf
+        "(array-set %s %s %s)"
+        (string_of_typed_expr t)
+        (string_of_typed_expr i)
+        (string_of_typed_expr v)
+    | `Array_len t -> Printf.sprintf "(array-len %s)" (string_of_typed_expr t)
+    | `Str_get (t, i) ->
+      Printf.sprintf "(str-get %s %s)" (string_of_typed_expr t) (string_of_typed_expr i)
+    | `Str_len t -> Printf.sprintf "(str-len %s)" (string_of_typed_expr t)
   in
   Printf.sprintf "%s:%s" body ty
 
@@ -346,7 +396,7 @@ let rec write_typed_stmt buf indent (s : Ast.typed_stmt) =
          (String.concat " " (List.map (fun (p : Ast.param) -> p.Ast.name) params)))
       body
   | `Return value -> line "%s(return %s)\n" pad (opt_typed_expr value)
-  | `Effect_decl (name, _) -> line "%s(effect %s)\n" pad name
+  | `Effect_decl (name, _, _) -> line "%s(effect %s)\n" pad name
   | `Run (body, handlers) ->
     nested
       (Printf.sprintf
@@ -356,7 +406,7 @@ let rec write_typed_stmt buf indent (s : Ast.typed_stmt) =
   | `Resume value -> line "%s(resume %s)\n" pad (opt_typed_expr value)
   | `Type_decl (name, _, _) -> line "%s(type %s)\n" pad name
   | `Op_decl (op, _, _, body) ->
-    nested (Printf.sprintf "op %s" (Ast.string_of_binop op)) body
+    nested (Printf.sprintf "op %s" (Ast.string_of_op op)) body
   | `Trait_decl (name, _) -> line "%s(trait %s)\n" pad name
   | `Impl_decl (trait, type_name, _, methods) ->
     nested

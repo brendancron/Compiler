@@ -22,6 +22,11 @@ let expect span what expected actual =
       (Types.string_of_ty expected)
       (Types.string_of_ty actual)
 
+let element span (t : Types.ty) =
+  match t with
+  | Types.Named (name, [ elem ], _) when String.equal name Types.array_name -> elem
+  | other -> fail span "An array is annotated %s." (Types.string_of_ty other)
+
 let rec expr (e : Ast.cps_expr) : unit =
   let span = e.Ast.span
   and ann = e.Ast.ann in
@@ -29,6 +34,8 @@ let rec expr (e : Ast.cps_expr) : unit =
   | `Int _ -> expect span "An int literal" Types.Int ann
   | `Float _ -> expect span "A float literal" Types.Float ann
   | `Str _ -> expect span "A string literal" Types.Str ann
+  | `Name _ -> expect span "A name" Types.name ann
+  | `Char _ -> expect span "A char literal" Types.Chr ann
   | `Bool _ -> expect span "A bool literal" Types.Bool ann
   | `Var _ -> ()
   | `Assign (_, v) ->
@@ -46,7 +53,7 @@ let rec expr (e : Ast.cps_expr) : unit =
     expr b;
     expect b.Ast.span "Both operands" a.Ast.ann b.Ast.ann;
     (match op with
-     | Ast.Add | Ast.Sub | Ast.Mul | Ast.Div ->
+     | Ast.Add | Ast.Sub | Ast.Mul | Ast.Div | Ast.Mod ->
        expect span "An arithmetic result" a.Ast.ann ann
      | Ast.Equal | Ast.Not_equal | Ast.Less | Ast.Less_equal | Ast.Greater
      | Ast.Greater_equal -> expect span "A comparison" Types.Bool ann)
@@ -109,11 +116,59 @@ let rec expr (e : Ast.cps_expr) : unit =
         | None -> fail span "A tuple has no field %d." index)
      | other ->
        fail target.Ast.span "Taking a field of %s." (Types.string_of_ty other))
+  | `Array_lit items ->
+    List.iter expr items;
+    let elem = element span ann in
+    List.iter
+      (fun (i : Ast.cps_expr) -> expect i.Ast.span "An array element" elem i.Ast.ann)
+      items
+  | `Array_new (length, fill) ->
+    expr length;
+    expr fill;
+    expect length.Ast.span "An array's length" Types.Int length.Ast.ann;
+    expect fill.Ast.span "An array's fill value" (element span ann) fill.Ast.ann
+  | `Array_get (target, index) ->
+    expr target;
+    expr index;
+    expect index.Ast.span "An index" Types.Int index.Ast.ann;
+    expect span "An element" (element target.Ast.span target.Ast.ann) ann
+  | `Array_set (target, index, v) ->
+    expr target;
+    expr index;
+    expr v;
+    expect index.Ast.span "An index" Types.Int index.Ast.ann;
+    let elem = element target.Ast.span target.Ast.ann in
+    expect v.Ast.span "An assigned element" elem v.Ast.ann;
+    expect span "An index assignment" elem ann
+  | `Str_get (target, index) ->
+    expr target;
+    expr index;
+    expect target.Ast.span "An indexed string" Types.Str target.Ast.ann;
+    expect index.Ast.span "An index" Types.Int index.Ast.ann;
+    expect span "A character" Types.Chr ann
+  | `Str_len target ->
+    expr target;
+    expect target.Ast.span "A measured string" Types.Str target.Ast.ann;
+    expect span "A length" Types.Int ann
+  | `Array_len target ->
+    expr target;
+    ignore (element target.Ast.span target.Ast.ann);
+    expect span "A length" Types.Int ann
   | `Variant (_, fields) ->
     List.iter (fun (_, v) -> expr v) fields;
     (match ann with
      | Types.Sum _ -> ()
      | other -> fail span "A variant is annotated %s." (Types.string_of_ty other))
+  (* Its own annotation is the function type it evaluates to; the body is
+     verified the way any other body is. *)
+  | `Lambda (params, _, body) ->
+    (match ann with
+     | Types.Fn (declared, _, _) when List.length declared = List.length params ->
+       List.iter stmt body
+     | Types.Fn _ ->
+       fail span "A lambda of %d parameter(s) is annotated %s." (List.length params)
+         (Types.string_of_ty ann)
+     | other -> fail span "A lambda is annotated %s." (Types.string_of_ty other))
   | `Call (callee, args) ->
     expr callee;
     List.iter expr args;
@@ -132,17 +187,17 @@ let rec expr (e : Ast.cps_expr) : unit =
          params
          args;
        expect span "A call" ret ann
-     (* A generic callee has not been monomorphized; nothing to check yet. *)
-     | Types.Generic _ -> ()
      | other ->
        fail
          callee.Ast.span
          "A callee is annotated %s, which is not a function."
          (Types.string_of_ty other))
 
-let rec stmt (s : Ast.cps_stmt) : unit =
+and stmt (s : Ast.cps_stmt) : unit =
   match s.Ast.it with
   | `Expr e -> expr e
+  | `Scope body -> List.iter stmt body
+  | `Abort -> ()
   | `Var_decl (_, _, init) -> Option.iter expr init
   | `Block body -> List.iter stmt body
   | `If (cond, then_branch, else_branch) ->

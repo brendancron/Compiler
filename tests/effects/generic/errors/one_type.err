@@ -1,0 +1,2 @@
+[8:12] Expected string, got int.
+[1:1] Unhandled effect(s): Store<int>.

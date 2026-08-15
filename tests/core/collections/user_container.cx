@@ -1,0 +1,40 @@
+type Ring<T> {
+    items: Array<T>,
+    head: int
+}
+
+op []<T>(items: Array<T>) -> Ring<T> {
+    return new Ring { items: items, head: 0 };
+}
+
+op []<T>(r: Ring<T>, i: int) -> T {
+    var at = r.head + i;
+    while (at >= r.items.len()) {
+        at = at - r.items.len();
+    }
+    return r.items[at];
+}
+
+op []=<T>(r: Ring<T>, i: int, v: T) -> T {
+    var at = r.head + i;
+    while (at >= r.items.len()) {
+        at = at - r.items.len();
+    }
+    r.items[at] = v;
+    return v;
+}
+
+var ring: Ring<int> = [1, 2, 3];
+print(ring[0], ring[1], ring[4]);
+
+ring.head = 1;
+print(ring[0], ring[2]);
+
+ring[0] = 9;
+print(ring[0], typeof(ring).name);
+
+var words: Ring<string> = ["a", "b"];
+print(words[3], typeof(words).name);
+
+var also: List<int> = [7, 8];
+print(also.len(), also[1], ring[0]);

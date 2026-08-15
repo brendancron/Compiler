@@ -1,5 +1,6 @@
 type error =
-  { line : int
+  { file : string
+  ; line : int
   ; col : int
   ; message : string
   }
@@ -30,7 +31,7 @@ let matches s token_types =
   if List.exists (check s) token_types then Some (advance s) else None
 
 let error s (tok : Token.token) message =
-  s.errors <- { line = tok.line; col = tok.col; message } :: s.errors;
+  s.errors <- { file = tok.Token.file; line = tok.line; col = tok.col; message } :: s.errors;
   Parse_error
 
 let consume s token_type message =
@@ -95,6 +96,15 @@ let rec type_expr s : Ast.type_expr =
     Ast.at sp (Ast.Ty_record fields)
   | Token.Identifier name ->
     ignore (advance s);
+    (* `geom.Point` — a type belonging to another unit, spelled the way a value
+       from one is. The loader resolves the pair; nothing after it sees a dot. *)
+    let name =
+      if check s Token.Dot
+      then (
+        ignore (advance s);
+        name ^ "." ^ consume_identifier s "Expected a type name after '.'.")
+      else name
+    in
     if check s Token.Less
     then (
       ignore (advance s);
@@ -211,11 +221,12 @@ and assignment s : Ast.expr =
   | Token.Minus_equal -> target (Some Ast.Sub) (advance s)
   | Token.Star_equal -> target (Some Ast.Mul) (advance s)
   | Token.Slash_equal -> target (Some Ast.Div) (advance s)
+  | Token.Percent_equal -> target (Some Ast.Mod) (advance s)
   | _ -> left
 
 and or_expr s : Ast.expr =
   let rec loop left =
-    match matches s [ Token.Or ] with
+    match matches s [ Token.Pipe_pipe ] with
     | Some _ ->
       let right = and_expr s in
       loop (Ast.at left.Ast.span (`Or (left, right)))
@@ -225,7 +236,7 @@ and or_expr s : Ast.expr =
 
 and and_expr s : Ast.expr =
   let rec loop left =
-    match matches s [ Token.And ] with
+    match matches s [ Token.Amp_amp ] with
     | Some _ ->
       let right = equality s in
       loop (Ast.at left.Ast.span (`And (left, right)))
@@ -253,7 +264,7 @@ and comparison s : Ast.expr =
     term
 
 and term s : Ast.expr = binary_level s [ Token.Minus; Token.Plus ] factor
-and factor s : Ast.expr = binary_level s [ Token.Slash; Token.Star ] unary
+and factor s : Ast.expr = binary_level s [ Token.Slash; Token.Star; Token.Percent ] unary
 
 and unary s : Ast.expr =
   match Ast.unop_of_token (peek s).Token.token_type with
@@ -309,12 +320,27 @@ and call s : Ast.expr =
        | Token.Int n ->
          ignore (advance s);
          loop (Ast.at callee.Ast.span (`Tuple_get (callee, n)))
-       | Token.Identifier label ->
+       (* A keyword is an ordinary word after a dot, since nothing else may
+          stand there — which is what lets a module export `new`. *)
+       | _ when Scanner.keyword (peek s).Token.lexeme <> None ->
+         let label = (peek s).Token.lexeme in
          ignore (advance s);
          (match matches s [ Token.Left_paren ] with
           | Some _ ->
             loop
-              (Ast.at callee.Ast.span (`Method_call (callee, label, arguments s)))
+              (Ast.at
+                 callee.Ast.span
+                 (`Method_call (callee, label, label, trailing_lambda s (arguments s))))
+          | None -> loop (Ast.at callee.Ast.span (`Field (callee, label))))
+       | Token.Identifier _ ->
+         let label = (peek s).Token.lexeme in
+         ignore (advance s);
+         (match matches s [ Token.Left_paren ] with
+          | Some _ ->
+            loop
+              (Ast.at
+                 callee.Ast.span
+                 (`Method_call (callee, label, label, trailing_lambda s (arguments s))))
           | None -> loop (Ast.at callee.Ast.span (`Field (callee, label))))
        | _ -> raise (error s (peek s) "Expected a field after '.'."))
     | _ -> callee
@@ -381,8 +407,43 @@ and arguments s : Ast.expr list =
   ignore (consume s Token.Right_paren "Expected ')' after arguments.");
   args
 
+(* `f(xs) { it * 2 }` — a block after a call is a one-parameter function value
+   passed last, and `it` is what that parameter is called. *)
+and trailing_lambda s args : Ast.expr list =
+  if not (check s Token.Left_brace && not s.no_brace)
+  then args
+  else (
+    let sp = Ast.span_of_token (peek s) in
+    ignore (advance s);
+    (* `{ it * 2 }` is the value and `{ var t = it; return t; }` is a body.
+       Which one it is takes trying: an expression filling the braces exactly
+       is the first, anything else the second. *)
+    let mark = s.current
+    and errors = s.errors in
+    let restore () =
+      s.current <- mark;
+      s.errors <- errors;
+      block s
+    in
+    let body =
+      match expression s with
+      | value when check s Token.Right_brace ->
+        ignore (advance s);
+        [ { Ast.it = `Return (Some value); span = value.Ast.span; ann = () } ]
+      | _ -> restore ()
+      | exception Parse_error -> restore ()
+    in
+    args
+    @ [ Ast.at
+          sp
+          (`Lambda
+             ( [ { Ast.name = "it"; ty = None } ]
+             , { Ast.ret = None; row = None; comptime = [] }
+             , body ))
+      ])
+
 and finish_call s callee : Ast.expr =
-  Ast.at callee.Ast.span (`Call (callee, arguments s))
+  Ast.at callee.Ast.span (`Call (callee, trailing_lambda s (arguments s)))
 
 (* Assumes the '{' has been consumed; consumes the closing '}'. *)
 and record_fields s : (string * Ast.expr) list =
@@ -403,6 +464,41 @@ and record_fields s : (string * Ast.expr) list =
   ignore (consume s Token.Right_brace "Expected '}' after fields.");
   fields
 
+and starts_lambda s =
+  let depth = ref 0
+  and at = ref s.current
+  and answer = ref false
+  and looking = ref true in
+  while !looking do
+    (match s.tokens.(!at).Token.token_type with
+     | Token.Left_paren -> incr depth
+     | Token.Right_paren ->
+       decr depth;
+       if !depth = 0
+       then (
+         answer := s.tokens.(!at + 1).Token.token_type = Token.Fat_arrow;
+         looking := false)
+     | Token.Eof -> looking := false
+     | _ -> ());
+    incr at
+  done;
+  !answer
+
+and lambda s sp : Ast.expr =
+  ignore (consume s Token.Left_paren "Expected '(' before parameters.");
+  let params = parameters s in
+  ignore (consume s Token.Fat_arrow "Expected '=>' after parameters.");
+  let body =
+    if check s Token.Left_brace
+    then (
+      ignore (advance s);
+      block s)
+    else (
+      let e = expression s in
+      [ { Ast.it = `Return (Some e); span = e.Ast.span; ann = () } ])
+  in
+  Ast.at sp (`Lambda (params, { Ast.ret = None; row = None; comptime = [] }, body))
+
 and primary s : Ast.expr =
   let tok = peek s in
   let sp = Ast.span_of_token tok in
@@ -415,7 +511,10 @@ and primary s : Ast.expr =
     Ast.at sp (`Float n)
   | Token.String str ->
     ignore (advance s);
-    Ast.at sp (`Str str)
+    Ast.at sp (`Str (Utf8.decode str))
+  | Token.Char c ->
+    ignore (advance s);
+    Ast.at sp (`Char c)
   | Token.True ->
     ignore (advance s);
     Ast.at sp (`Bool true)
@@ -431,9 +530,24 @@ and primary s : Ast.expr =
     let e = expression s in
     ignore (consume s Token.Right_paren "Expected ')' after typeof operand.");
     Ast.at sp (`Typeof e)
+  | Token.Code ->
+    ignore (advance s);
+    ignore (consume s Token.Left_paren "Expected '(' after 'code'.");
+    let e = expression s in
+    ignore (consume s Token.Right_paren "Expected ')' after the captured expression.");
+    Ast.at sp (`Code e)
   | Token.New ->
     ignore (advance s);
     let name = consume_identifier s "Expected a type name after 'new'." in
+    (* `new geom.Point { … }`, matching how the type is written in an
+       annotation. `::` still separates a sum type from its variant. *)
+    let name =
+      if check s Token.Dot
+      then (
+        ignore (advance s);
+        name ^ "." ^ consume_identifier s "Expected a type name after '.'.")
+      else name
+    in
     if check s Token.Colon_colon
     then (
       ignore (advance s);
@@ -497,6 +611,7 @@ and primary s : Ast.expr =
     in
     ignore (consume s Token.Right_bracket "Expected ']' after collection items.");
     Ast.at sp (`Collection_lit items)
+  | Token.Left_paren when starts_lambda s -> lambda s sp
   | Token.Left_paren ->
     ignore (advance s);
     let saved = s.no_brace in
@@ -521,7 +636,9 @@ and primary s : Ast.expr =
 
 (* ---- statements ---- *)
 
-let rec declaration s : Ast.stmt option =
+(* One group with the expressions, because a function value is an expression
+   whose body is statements. *)
+and declaration s : Ast.stmt option =
   try
     let tok = peek s in
     let sp = Ast.span_of_token tok in
@@ -550,6 +667,63 @@ let rec declaration s : Ast.stmt option =
     | Token.Impl ->
       ignore (advance s);
       Some (impl_decl s sp)
+    | Token.Import ->
+      ignore (advance s);
+      Some (import_decl s sp)
+    | Token.Derive ->
+      ignore (advance s);
+      let rec traits acc =
+        let name = consume_identifier s "Expected a trait name." in
+        match matches s [ Token.Comma ] with
+        | Some _ -> traits (name :: acc)
+        | None -> List.rev (name :: acc)
+      in
+      let traits = traits [] in
+      ignore (consume s Token.For "Expected 'for' after the traits to derive.");
+      let target = consume_identifier s "Expected the type to derive for." in
+      ignore (consume s Token.Semicolon "Expected ';' after a derive.");
+      Some (Ast.at sp (`Derive (traits, target)))
+    | Token.Meta ->
+      ignore (advance s);
+      (* Braces are a block of statements, not part of the form: `meta` runs
+         whatever follows it, one statement or many. *)
+      if check s Token.Fn
+      then (
+        ignore (advance s);
+        (* `for Trait` is what registers it, so the name written is free to be
+           `derive` for every deriver. *)
+        (* Every deriver is called `derive`, which is the keyword, so the name
+           is read here rather than as an ordinary identifier. *)
+        let read_name s =
+          match matches s [ Token.Derive ] with
+          | Some _ -> "derive"
+          | None -> consume_identifier s "Expected function name."
+        in
+        let before_body s name =
+          match matches s [ Token.For ] with
+          | None -> name
+          | Some _ ->
+            Ast.deriver_name (consume_identifier s "Expected a trait name after 'for'.")
+        in
+        match (fn_decl ~read_name ~before_body s sp).Ast.it with
+        | `Fn (name, params, signature, body) ->
+          Some (Ast.at sp (`Meta_fn (name, params, signature, body)))
+        | _ -> None)
+      else if check s Token.Left_brace
+      then (
+        ignore (advance s);
+        Some (Ast.at sp (`Meta (block s))))
+      else (
+        match declaration s with
+        | Some inner -> Some (Ast.at sp (`Meta [ inner ]))
+        | None -> None)
+    | Token.Gen ->
+      ignore (advance s);
+      (* Whatever may stand at this position may be generated, so a `gen` takes
+         a declaration as readily as a statement. *)
+      (match declaration s with
+       | Some inner -> Some (Ast.at sp (`Gen inner))
+       | None -> None)
     | _ -> Some (statement s)
   with
   | Parse_error ->
@@ -574,12 +748,25 @@ and parameters s : Ast.param list =
   ignore (consume s Token.Right_paren "Expected ')' after parameters.");
   params
 
-and fn_decl s sp : Ast.stmt =
-  let name = consume_identifier s "Expected function name." in
+and fn_decl
+  ?(read_name =
+    fun s ->
+      (* `new` is the constructor convention, and in declaration position it
+         cannot be read as the operator. No other keyword is allowed here. *)
+      match matches s [ Token.New ] with
+      | Some _ -> "new"
+      | None -> consume_identifier s "Expected function name.")
+  ?(before_body = fun _ name -> name)
+  s
+  sp
+  : Ast.stmt
+  =
+  let name = read_name s in
   let comptime = comptime_params s in
   ignore (consume s Token.Left_paren "Expected '(' after function name.");
   let params = parameters s in
   let signature = signature ~comptime s in
+  let name = before_body s name in
   ignore (consume s Token.Left_brace "Expected '{' before function body.");
   Ast.at sp (`Fn (name, params, signature, block s))
 
@@ -663,6 +850,22 @@ and while_stmt s sp : Ast.stmt =
 
 and for_stmt s sp : Ast.stmt =
   ignore (consume s Token.Left_paren "Expected '(' after 'for'.");
+  (* `in` is not a keyword, so the two forms are told apart by lookahead. *)
+  let iterates =
+    s.current + 1 < Array.length s.tokens
+    &&
+    match (peek s).Token.token_type, s.tokens.(s.current + 1).Token.token_type with
+    | Token.Identifier _, Token.Identifier "in" -> true
+    | _ -> false
+  in
+  if iterates
+  then (
+    let name = consume_identifier s "Expected a loop variable." in
+    ignore (advance s);
+    let iterable = expression s in
+    ignore (consume s Token.Right_paren "Expected ')' after the iterable.");
+    Ast.at sp (`For_in (name, iterable, statement s)))
+  else (
   let init =
     let tok = peek s in
     match tok.Token.token_type with
@@ -678,7 +881,45 @@ and for_stmt s sp : Ast.stmt =
   ignore (consume s Token.Semicolon "Expected ';' after loop condition.");
   let step = if check s Token.Right_paren then None else Some (expression s) in
   ignore (consume s Token.Right_paren "Expected ')' after for clauses.");
-  Ast.at sp (`For (init, cond, step, statement s))
+  Ast.at sp (`For (init, cond, step, statement s)))
+
+(* `as` and `from` are ordinary identifiers, matched by text, so neither
+   becomes a word a program cannot use for something else. *)
+and import_decl s sp : Ast.stmt =
+  let text tok =
+    match tok.Token.token_type with
+    | Token.String path -> path
+    | _ -> raise (error s tok "Expected a quoted path.")
+  in
+  let decl =
+    if check s Token.Left_brace
+    then (
+      ignore (advance s);
+      let rec names acc =
+        let name = consume_identifier s "Expected an imported name." in
+        match matches s [ Token.Comma ] with
+        | Some _ -> names (name :: acc)
+        | None -> List.rev (name :: acc)
+      in
+      let names = names [] in
+      ignore (consume s Token.Right_brace "Expected '}' after the imported names.");
+      (match (peek s).Token.token_type with
+       | Token.Identifier "from" -> ignore (advance s)
+       | _ -> raise (error s (peek s) "Expected 'from' after the imported names."));
+      Ast.Selective (names, text (advance s)))
+    else (
+      let path = text (advance s) in
+      match (peek s).Token.token_type with
+      | Token.Identifier "as" ->
+        ignore (advance s);
+        Ast.Aliased (path, consume_identifier s "Expected a name after 'as'.")
+      | _ ->
+        (match String.length path >= 2 && String.sub path (String.length path - 2) 2 = "/*" with
+         | true -> Ast.Wildcard (String.sub path 0 (String.length path - 2))
+         | false -> Ast.Qualified path))
+  in
+  ignore (matches s [ Token.Semicolon ]);
+  Ast.at sp (`Import decl)
 
 and op_kind s : Ast.op_kind =
   match (peek s).Token.token_type with
@@ -688,10 +929,15 @@ and op_kind s : Ast.op_kind =
   | Token.Ctl ->
     ignore (advance s);
     Ast.Op_ctl
-  | _ -> raise (error s (peek s) "Expected 'fn' or 'ctl'.")
+  | Token.Final ->
+    ignore (advance s);
+    ignore (consume s Token.Ctl "Expected 'ctl' after 'final'.");
+    Ast.Op_final
+  | _ -> raise (error s (peek s) "Expected 'fn', 'ctl' or 'final ctl'.")
 
 and effect_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected effect name." in
+  let params = type_params s in
   ignore (consume s Token.Left_brace "Expected '{' after effect name.");
   let rec loop acc =
     if check s Token.Right_brace || is_at_end s
@@ -724,14 +970,19 @@ and effect_decl s sp : Ast.stmt =
   in
   let ops = loop [] in
   ignore (consume s Token.Right_brace "Expected '}' after effect operations.");
-  Ast.at sp (`Effect_decl (name, ops))
+  Ast.at sp (`Effect_decl (name, params, ops))
 
 and op_decl s sp : Ast.stmt =
   let tok = advance s in
   let op =
-    match Ast.binop_of_token tok.Token.token_type with
-    | Some op -> op
-    | None -> raise (error s tok "Expected an operator after 'op'.")
+    match tok.Token.token_type with
+    | Token.Left_bracket ->
+      ignore (consume s Token.Right_bracket "Expected ']' after '['.");
+      if matches s [ Token.Equal ] <> None then Ast.Op_index_set else Ast.Op_index
+    | other ->
+      (match Ast.binop_of_token other with
+       | Some op -> Ast.Op_binary op
+       | None -> raise (error s tok "Expected an operator after 'op'."))
   in
   let comptime = comptime_params s in
   ignore (consume s Token.Left_paren "Expected '(' after the operator.");
@@ -979,8 +1230,7 @@ and match_stmt s sp : Ast.stmt =
           in
           Ast.Pat_variant (ty, variant, payload)
       in
-      ignore (consume s Token.Equal "Expected '=>' after a pattern.");
-      ignore (consume s Token.Greater "Expected '=>' after a pattern.");
+      ignore (consume s Token.Fat_arrow "Expected '=>' after a pattern.");
       ignore (consume s Token.Left_brace "Expected '{' after '=>'.");
       loop ((pattern, block s) :: acc))
   in

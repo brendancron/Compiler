@@ -1,0 +1,15 @@
+// The inner block handles one instantiation and the outer another, so which
+// handler catches a `yield` follows from what it was instantiated at.
+effect Yield<T> { ctl yield(v: T): unit; }
+
+run {
+    run {
+        yield(1);
+        yield(2);
+    } handle Yield {
+        ctl yield(x) { print("inner", x); resume; }
+    }
+    yield("done");
+} handle Yield {
+    ctl yield(s) { print("outer", s); resume; }
+}

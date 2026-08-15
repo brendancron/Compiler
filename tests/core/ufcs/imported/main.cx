@@ -1,0 +1,25 @@
+// A dot reaches a function brought in by name, and an `impl` still answers
+// first — the two are decided in different places, so the node carries both
+// the name written and what it resolves to as a function.
+import { Point, describe, shifted, doubled } from "shapes";
+
+var here = new Point { x: 1, y: 2 };
+print(here.describe(), describe(here));
+print(here.shifted(3).x, shifted(here, 3).x);
+print(2.doubled(), 2.doubled().doubled());
+
+type Marker { label: string }
+
+impl Marker {
+    fn describe(self) -> string { return "method"; }
+}
+
+var m = new Marker { label: "m" };
+print(m.describe());
+
+// A name bound locally resolves the way a reference to it would.
+fn shadowed() -> int {
+    var doubled = (n: int) => 0 - n;
+    return 5.doubled();
+}
+print(shadowed(), 5.doubled());

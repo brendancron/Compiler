@@ -2,18 +2,19 @@ trait ToString {
     fn to_string(self) -> string;
 }
 
-fn int_to_string(n) {
+fn int_to_string(n: int) -> string {
     if (n == 0) { return "0"; }
-    var neg = n < 0;
-    if (neg) { n = 0 - n; }
+    var rest = n;
+    var negative = n < 0;
+    if (negative) { rest = 0 - n; }
     var digits = "0123456789";
-    var s = "";
-    while (n > 0) {
-        s = digits[n % 10] + s;
-        n = n / 10;
+    var out = "";
+    while (rest > 0) {
+        out = str(digits[rest % 10]) + out;
+        rest = rest / 10;
     }
-    if (neg) { s = "-" + s; }
-    return s;
+    if (negative) { out = "-" + out; }
+    return out;
 }
 
 impl ToString for int {

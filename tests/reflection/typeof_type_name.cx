@@ -1,0 +1,17 @@
+// A bare name is a value's type if one answers to it, and the declared type
+// otherwise, so a type nothing holds can still be reflected on.
+type Dog { name: string, age: int }
+type Card { Damage(int), Skip }
+
+print(typeof(Dog).name, typeof(Card).name);
+print(typeof(int).name, typeof(string).name);
+
+var rex = new Dog { name: "rex", age: 3 };
+print(typeof(rex).name == typeof(Dog).name);
+
+match typeof(Card).shape {
+    TypeShape::Sum(named, variants) => { print(str(named), variants.len()); }
+    TypeShape::Product(named, fields) => {}
+    TypeShape::Scalar => {}
+    TypeShape::Other => {}
+}

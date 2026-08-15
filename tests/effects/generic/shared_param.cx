@@ -1,0 +1,18 @@
+// Two operations naming the same parameter agree on it; a call site is what
+// settles what it is.
+effect Store<T> {
+    fn put(v: T);
+    fn take(): T;
+}
+
+fn round_trip(v: int) -> int {
+    put(v);
+    return take();
+}
+
+run {
+    print(round_trip(7));
+} handle Store {
+    fn put(v) { print("put", v); }
+    fn take() { return 99; }
+}

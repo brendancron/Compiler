@@ -12,4 +12,4 @@ fn range(low: int, high: int) {
     }
 }
 
-print(typeof(range));
+print(typeof(range).name);

@@ -1,38 +1,32 @@
+// One effect at two instantiations. The row entry carries what it was
+// instantiated at, so `Yield<int>` and `Yield<string>` are different effects
+// to handle and a program may hold both.
 effect Yield<T> {
     ctl yield(value: T): unit;
 }
 
-fn range(low, high) {
+fn range(low: int, high: int) {
     var i = low;
     while (i < high) {
         yield(i);
-        i += 1;
+        i = i + 1;
     }
 }
 
-fn each_word(s) {
-    var words = s.split(" ");
-    var i = 0;
-    while (i < words.len()) {
-        yield(words[i]);
-        i += 1;
+fn each_word(text: string) {
+    for (word in text.split(' ')) {
+        yield(word);
     }
 }
 
 run {
     range(1, 4);
 } handle Yield {
-    ctl yield(x) {
-        print(x);
-        resume;
-    }
+    ctl yield(x) { print(x); resume; }
 }
 
 run {
     each_word("hello world foo");
 } handle Yield {
-    ctl yield(w) {
-        print(w);
-        resume;
-    }
+    ctl yield(w) { print(w); resume; }
 }

@@ -1,0 +1,23 @@
+type Box<T> { v: T }
+
+impl Box<T> {
+    fn get(self) -> T {
+        return self.v;
+    }
+
+    fn same(self) -> T {
+        return self.v;
+    }
+}
+
+var a = new Box { v: 1 };
+var b = new Box { v: "s" };
+print(a.get(), b.get());
+print(a.same(), b.same());
+
+var xs: List<int> = [1, 2];
+var ys: List<string> = ["x"];
+xs.push(3);
+ys.push("y");
+print(xs.len(), ys.len());
+print(xs[2], ys[1]);

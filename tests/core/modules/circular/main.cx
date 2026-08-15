@@ -1,10 +1,8 @@
 import "peer";
 
-// main defines hello(); peer defines run() which calls main.hello()
-// Circular import — both files import each other
-
+// Both files import each other; peer.start() calls back into main.hello().
 fn hello() {
     print("hello");
 }
 
-peer.run();
+peer.start();

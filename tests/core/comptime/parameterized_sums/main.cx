@@ -33,12 +33,12 @@ match nothing {
     Option::None    => { print("none"); }
 }
 
-print(typeof(some_int));
-print(typeof(some_str));
+print(typeof(some_int).name);
+print(typeof(some_str).name);
 
 var boxed = new Box { value: 7 };
 print(boxed.get());
-print(typeof(boxed));
+print(typeof(boxed).name);
 
 print(identity<int>(5));
 print(identity<string>("x"));

@@ -11,4 +11,4 @@ fn ping_pong(n: int) {
     emit(r);
 }
 
-print(typeof(ping_pong));
+print(typeof(ping_pong).name);

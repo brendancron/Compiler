@@ -1,5 +1,5 @@
-fn map_val(x: int, f: fn(int): int): int {
+fn map_val(x: int, f: (int) -> int) -> int {
     return f(x);
 }
-print(map_val(3) { x -> x * x });
+print(map_val(3) { it * it });
 print(map_val(5) { it + 1 });

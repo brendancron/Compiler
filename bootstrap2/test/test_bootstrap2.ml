@@ -17,6 +17,18 @@ let cases =
   ; "tests/core/control/else"
   ; "tests/core/control/if_else_chain"
   ; "tests/core/control/while"
+  ; "tests/core/control/for_in"
+  ; "tests/core/modules/main"
+  ; "tests/core/modules/alias/main"
+  ; "tests/core/modules/multi_export/main"
+  ; "tests/core/modules/qualified/main"
+  ; "tests/core/modules/same_dir/main"
+  ; "tests/core/modules/selective/main"
+  ; "tests/core/modules/wildcard/main"
+  ; "tests/core/modules/circular/main"
+  ; "tests/core/modules/types/main"
+  ; "tests/stdlib/math/math"
+  ; "tests/stdlib/error/error"
   ; "tests/core/control/for_c"
   ; "tests/core/operators/comparison"
   ; "tests/core/operators/compound_assign"
@@ -29,6 +41,7 @@ let cases =
   ; "tests/core/functions/greeting"
   ; "tests/core/functions/return"
   ; "tests/core/functions/closure"
+  ; "tests/core/functions/evaluation_order"
   ; "tests/types/inference/annotations"
   ; "tests/types/inference/numeric_defaulting"
   ; "tests/types/inference/polymorphism"
@@ -38,6 +51,7 @@ let cases =
   ; "tests/reflection/typeof_primitives"
   ; "tests/reflection/typeof_fn"
   ; "tests/effects/rows/inferred_rows"
+  ; "tests/effects/rows/builtin_in_effectful_fn"
   ; "tests/effects/log/log"
   ; "tests/effects/ask/ask"
   ; "tests/effects/multi_handle/multi_handle"
@@ -49,16 +63,68 @@ let cases =
   ; "tests/effects/stream/stream"
   ; "tests/core/arrays/basics"
   ; "tests/core/arrays/identity"
+  ; "tests/core/arrays/methods"
   ; "tests/core/lists/index_access"
   ; "tests/core/lists/index_assign"
+  ; "tests/core/lists/list"
   ; "tests/core/lists/list_methods"
+  ; "tests/core/collections/user_container"
+  ; "tests/core/collections/set"
+  ; "tests/core/collections/map"
+  ; "tests/core/collections/narrowing"
   ; "tests/core/strings/string_methods"
+  ; "tests/core/strings/escapes"
+  ; "tests/core/strings/string_index"
+  ; "tests/core/chars/basics"
+  ; "tests/core/chars/unicode"
   ; "tests/core/operators/not_index"
+  ; "tests/core/operators/structural_equality"
   ; "tests/core/tuples/tuple_basic"
   ; "tests/reflection/typeof_tuple"
   ; "tests/core/tuples/typed"
   ; "tests/core/records/structural"
   ; "tests/reflection/typeof_record"
+  ; "tests/reflection/shape_product"
+  ; "tests/reflection/shape_sum"
+  ; "tests/reflection/shape_scalar"
+  ; "tests/core/math/modulus"
+  ; "tests/stdlib/list/list"
+  ; "tests/core/lambdas/basics"
+  ; "tests/core/lambdas/trailing"
+  ; "tests/core/ufcs/basics"
+  ; "tests/core/ufcs/impl_wins"
+  ; "tests/core/ufcs/with_lambda"
+  ; "tests/core/ufcs/imported/main"
+  ; "tests/stdlib/fallible/fallible"
+  ; "tests/effects/generic/shared_param"
+  ; "tests/effects/generic/generic"
+  ; "tests/effects/generic/nested"
+  ; "tests/core/operators/precedence"
+  ; "tests/core/operators/logical_symbols"
+  ; "tests/core/operators/logical"
+  ; "tests/effects/final/abort"
+  ; "tests/effects/final/in_loop"
+  ; "tests/effects/logic/simple_guard"
+  ; "tests/effects/logic/multi_guard"
+  ; "tests/effects/multishot_sequel"
+  ; "tests/core/functions/trailing_foreach"
+  ; "tests/core/functions/trailing_after_args"
+  ; "tests/core/functions/trailing_it"
+  ; "tests/core/builtins/ord"
+  ; "tests/effects/nested_return"
+  ; "tests/stdlib/iterable/iterable"
+  ; "tests/stdlib/hashmap/hashmap"
+  ; "tests/stdlib/hashset/hashset"
+  ; "tests/core/strings/string_starts_ends"
+  ; "tests/stdlib/string/string"
+  ; "tests/stdlib/stringbuilder/stringbuilder"
+  ; "tests/stdlib/tostring/tostring"
+  ; "tests/reflection/typeof_type_name"
+  ; "tests/meta/code/fold"
+  ; "tests/meta/code/derive_eq"
+  ; "tests/meta/code/helper"
+  ; "tests/meta/derive/basic/main"
+  ; "tests/meta/derive/two_traits"
   ; "tests/core/records/nominal"
   ; "tests/core/enums/tuple_variants"
   ; "tests/core/enums/struct_variants"
@@ -70,6 +136,8 @@ let cases =
   ; "tests/core/traits/basic_impl/main"
   ; "tests/core/traits/multiple_impls/main"
   ; "tests/core/traits/inherent/main"
+  ; "tests/core/traits/generic_impl_two_methods/main"
+  ; "tests/core/traits/generic_impl_operator/main"
   ; "tests/core/traits/builtin_receiver/main"
   ; "tests/effects/methods/methods"
   ; "tests/core/comptime/type_params/main"
@@ -80,12 +148,34 @@ let cases =
   ; "tests/core/comptime/mixed_params/main"
   ; "tests/core/traits/trait_bound/main"
   ; "tests/core/comptime/inferred_constraints/main"
+  ; "tests/core/comptime/element_generic/main"
   ; "tests/meta/params/func"
+  ; "tests/meta/execution/basic"
+  ; "tests/meta/execution/nested"
+  ; "tests/meta/codegen/basic"
+  ; "tests/meta/codegen/env"
+  ; "tests/meta/codegen/sub1"
+  ; "tests/meta/codegen/gen_symbol"
+  ; "tests/meta/codegen/greeting"
+  ; "tests/meta/codegen/nested"
+  ; "tests/meta/codegen/gen_meta"
+  ; "tests/meta/functions/fib"
+  ; "tests/meta/functions/meta_fn"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
 let error_cases =
-  [ "tests/types/errors/mixed_numeric"
+  [ "tests/effects/errors/return_out_of_run"
+  ; "tests/effects/generic/errors/one_type"
+  ; "tests/effects/final/errors/resumes"
+  ; "tests/core/ufcs/errors/arity"
+  ; "tests/meta/derive/errors/no_deriver"
+  ; "tests/meta/derive/errors/two_derivers"
+  ; "tests/reflection/errors/no_such_name"
+  ; "tests/meta/code/errors/outside_meta"
+  ; "tests/meta/code/errors/not_a_name"
+  ; "tests/reflection/errors/not_a_value"
+  ; "tests/types/errors/mixed_numeric"
   ; "tests/types/errors/non_bool_condition"
   ; "tests/types/errors/undefined_variable"
   ; "tests/types/errors/arity"
@@ -93,6 +183,8 @@ let error_cases =
   ; "tests/types/errors/assign_mismatch"
   ; "tests/types/errors/unknown_type"
   ; "tests/types/errors/string_comparison"
+  ; "tests/types/errors/print_is_not_a_value"
+  ; "tests/types/errors/shadowed_print"
   ; "tests/effects/errors/unhandled"
   ; "tests/effects/errors/non_exhaustive"
   ; "tests/effects/errors/no_such_operation"
@@ -102,6 +194,11 @@ let error_cases =
   ; "tests/core/arrays/errors/mixed_elements"
   ; "tests/core/arrays/errors/not_indexable"
   ; "tests/core/arrays/errors/element_mismatch"
+  ; "tests/core/collections/errors/duplicate_container"
+  ; "tests/core/modules/errors/imported_type_error/main"
+  ; "tests/core/chars/errors/not_a_string"
+  ; "tests/core/chars/errors/char_is_not_a_byte"
+  ; "tests/core/strings/errors/immutable"
   ; "tests/core/tuples/errors/no_such_field"
   ; "tests/core/tuples/errors/unknown_arity"
   ; "tests/core/records/errors/no_such_field"
@@ -122,11 +219,18 @@ let error_cases =
   ; "tests/core/traits/errors/no_such_method"
   ; "tests/core/traits/errors/arity"
   ; "tests/core/traits/errors/unknown_method"
+  ; "tests/core/traits/errors/ambiguous_receiver"
+  ; "tests/core/traits/errors/generic_impl_no_operator"
   ; "tests/core/comptime/errors/type_arity"
   ; "tests/core/comptime/errors/comptime_arity"
   ; "tests/core/comptime/errors/not_comptime"
   ; "tests/core/comptime/errors/comptime_call"
   ]
+
+(* Programs that must be accepted and then fail while running, paired with a
+   .rt holding the diagnostic. Separate from error_cases because those never
+   reach the interpreter. *)
+let runtime_cases = [ "tests/core/collections/index_out_of_range" ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)
 let repo_root () =
@@ -152,72 +256,57 @@ let normalize s =
   String.trim (String.concat "\n" (String.split_on_char '\r' s |> List.filter (( <> ) "")))
 
 (* Run one program to completion, returning its stdout or the first error. *)
-let interpret source =
+let interpret path =
   let buf = Buffer.create 256 in
   let out = Buffer.add_string buf in
-  match Scanner.scan_tokens source with
-  | Error (e :: _) -> Error (Printf.sprintf "scan error [%d:%d] %s" e.line e.col e.message)
-  | Error [] -> Error "scan failed"
-  | Ok tokens ->
-    (match Parser.parse tokens with
-     | Error (e :: _) ->
-       Error (Printf.sprintf "parse error [%d:%d] %s" e.line e.col e.message)
-     | Error [] -> Error "parse failed"
+  let at (span : Ast.span) = Ast.locate ~entry:path span in
+  match Loader.program path with
+  | exception Loader.Failed e ->
+    Error (Printf.sprintf "load error %s %s" (at e.span) e.message)
+  | program ->
+    (match Metaprocess.program ~out program with
+     | Error e -> Error (Printf.sprintf "meta error %s %s" (at e.span) e.message)
      | Ok program ->
        (match Desugar.program (Prelude.program () @ program) with
         | Error e ->
           Error
-            (Printf.sprintf "desugar error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+            (Printf.sprintf "desugar error %s %s" (at e.span) e.message)
         | Ok desugared ->
         match Monomorphize.program desugared with
         | Error e ->
           Error
-            (Printf.sprintf
-               "comptime error [%d:%d] %s"
-               e.span.Ast.line
-               e.span.Ast.col
-               e.message)
+            (Printf.sprintf "comptime error %s %s" (at e.span) e.message)
         | Ok desugared ->
         let registry = Registry.builtins () in
-        Builtins.register registry;
         match Typecheck.check ~registry desugared with
         | Error (e :: _) ->
           Error
-            (Printf.sprintf "type error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+            (Printf.sprintf "type error %s %s" (at e.span) e.message)
         | Error [] -> Error "type check failed"
         | Ok typed ->
           match Resolve.program ~registry (Specialize.program typed) with
           | Error e ->
             Error
-              (Printf.sprintf
-                 "resolve error [%d:%d] %s"
-                 e.span.Ast.line
-                 e.span.Ast.col
-                 e.message)
+              (Printf.sprintf "resolve error %s %s" (at e.span) e.message)
           | Ok resolved ->
-          (match Cps.program (Reflect.program resolved) with
+          match Reflect.program resolved with
+          | Error e -> Error (Printf.sprintf "reflect error %s %s" (at e.span) e.message)
+          | Ok reflected ->
+          (match Cps.program reflected with
            | Error e ->
              Error
-               (Printf.sprintf "cps error [%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+               (Printf.sprintf "cps error %s %s" (at e.span) e.message)
            | Ok converted ->
              (match Verify.program converted with
               | Error e ->
                 Error
-                  (Printf.sprintf
-                     "verify error [%d:%d] %s"
-                     e.span.Ast.line
-                     e.span.Ast.col
-                     e.message)
+                  (Printf.sprintf "verify error %s %s" (at e.span) e.message)
               | Ok () ->
              match Interp.run (Builtins.env ~out) converted with
               | Ok () -> Ok (Buffer.contents buf)
               | Error e ->
                 Error
-                  (Printf.sprintf
-                     "runtime error [%d:%d] %s"
-                     e.span.Ast.line
-                     e.span.Ast.col
-                     e.message)))))
+                  (Printf.sprintf "runtime error %s %s" (at e.span) e.message)))))
 
 (* Why a fixture does not run yet. A step is one from the implementation plan;
    the rest will not be fixed by finishing it. *)
@@ -233,54 +322,20 @@ type blocker =
    rather than sitting unnoticed — which is how four of them came to be passing
    with nothing recording it. *)
 let expected_failing : (string * blocker) list =
-    (* 9 · Iteration *)
-  [ "tests/core/lists/list", Step "9 · Iteration"
-  ; "tests/effects/logic/multi_guard", Step "9 · Iteration"
-  ; "tests/effects/logic/simple_guard", Step "9 · Iteration"
     (* 10 · Modules *)
-  ; "tests/core/for_tuple/for_tuple", Step "10 · Modules"
-  ; "tests/core/modules/alias/main", Step "10 · Modules"
-  ; "tests/core/modules/circular/main", Step "10 · Modules"
-  ; "tests/core/modules/main", Step "10 · Modules"
-  ; "tests/core/modules/multi_export/main", Step "10 · Modules"
-  ; "tests/core/modules/qualified/main", Step "10 · Modules"
-  ; "tests/core/modules/same_dir/main", Step "10 · Modules"
-  ; "tests/core/modules/selective/main", Step "10 · Modules"
-  ; "tests/core/modules/wildcard/main", Step "10 · Modules"
+  [ "tests/core/for_tuple/for_tuple", Unplanned
   ; "tests/stdlib/automata/dfa/dfa", Step "10 · Modules"
   ; "tests/stdlib/automata/nfa/nfa", Step "10 · Modules"
-  ; "tests/stdlib/error/error", Step "10 · Modules"
-  ; "tests/stdlib/fallible/fallible", Step "10 · Modules"
-  ; "tests/stdlib/hashmap/hashmap", Step "10 · Modules"
-  ; "tests/stdlib/hashset/hashset", Step "10 · Modules"
-  ; "tests/stdlib/iterable/iterable", Step "10 · Modules"
-  ; "tests/stdlib/list/list", Step "10 · Modules"
-  ; "tests/stdlib/math/math", Step "10 · Modules"
   ; "tests/stdlib/regex/regex/regex", Step "10 · Modules"
-  ; "tests/stdlib/string/string", Step "10 · Modules"
-  ; "tests/stdlib/stringbuilder/stringbuilder", Step "10 · Modules"
   ; "tests/stdlib/toml/toml/toml", Step "10 · Modules"
-  ; "tests/stdlib/tostring/tostring", Step "10 · Modules"
     (* 11 · Metaprocessing *)
-  ; "tests/meta/codegen/basic", Step "11 · Metaprocessing"
-  ; "tests/meta/codegen/env", Step "11 · Metaprocessing"
-  ; "tests/meta/codegen/gen_meta", Step "11 · Metaprocessing"
-  ; "tests/meta/codegen/gen_symbol", Step "11 · Metaprocessing"
-  ; "tests/meta/codegen/greeting", Step "11 · Metaprocessing"
-  ; "tests/meta/codegen/nested", Step "11 · Metaprocessing"
-  ; "tests/meta/codegen/sub1", Step "11 · Metaprocessing"
-  ; "tests/meta/derive/basic/main", Step "11 · Metaprocessing"
-  ; "tests/meta/execution/basic", Step "11 · Metaprocessing"
-  ; "tests/meta/execution/nested", Step "11 · Metaprocessing"
-  ; "tests/meta/functions/fib", Step "11 · Metaprocessing"
-  ; "tests/meta/functions/meta_fn", Step "11 · Metaprocessing"
     (* 12 · typeof yields a Type *)
-  ; "tests/reflection/typeof_effect_ctl", Step "12 · typeof yields a Type"
-  ; "tests/reflection/typeof_effect_fn_vs_ctl", Step "12 · typeof yields a Type"
-  ; "tests/reflection/typeof_effect_multi", Step "12 · typeof yields a Type"
-  ; "tests/reflection/typeof_effect_transitive", Step "12 · typeof yields a Type"
-  ; "tests/reflection/typeof_enum", Step "12 · typeof yields a Type"
-  ; "tests/reflection/typeof_slice", Step "12 · typeof yields a Type"
+  ; "tests/reflection/typeof_effect_ctl", Unplanned
+  ; "tests/reflection/typeof_effect_fn_vs_ctl", Unplanned
+  ; "tests/reflection/typeof_effect_multi", Unplanned
+  ; "tests/reflection/typeof_effect_transitive", Unplanned
+  ; "tests/reflection/typeof_enum", Rewrite
+  ; "tests/reflection/typeof_slice", Rewrite
     (* Rewrite *)
   ; "tests/core/builtins/free", Rewrite
   ; "tests/core/enums/unit_variants", Rewrite
@@ -309,62 +364,57 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m8/gadt", Backend
     (* Unplanned *)
   ; "tests/core/builtins/conversions", Unplanned
-  ; "tests/core/builtins/ord", Unplanned
   ; "tests/core/builtins/readfile", Unplanned
   ; "tests/core/builtins/writefile", Unplanned
-  ; "tests/core/functions/trailing_after_args", Unplanned
-  ; "tests/core/functions/trailing_explicit_param", Unplanned
-  ; "tests/core/functions/trailing_foreach", Unplanned
-  ; "tests/core/functions/trailing_it", Unplanned
-  ; "tests/core/functions/trailing_multi_param", Unplanned
-  ; "tests/core/math/modulus", Unplanned
-  ; "tests/core/operators/logical", Unplanned
-  ; "tests/core/operators/logical_symbols", Unplanned
-  ; "tests/core/operators/precedence", Unplanned
-  ; "tests/core/strings/string_index", Unplanned
-  ; "tests/core/strings/string_starts_ends", Unplanned
+  ; "tests/core/functions/trailing_explicit_param", Rewrite
+  ; "tests/core/functions/trailing_multi_param", Rewrite
   ; "tests/core/structs/struct", Unplanned
   ; "tests/effects/async/async", Unplanned
-  ; "tests/effects/generic/generic", Unplanned
   ]
 
 (* Formats diagnostics the way a .err file spells them. *)
-let rejections source =
-  match Scanner.scan_tokens source with
-  | Error _ -> Error "scan failed"
-  | Ok tokens ->
-    (match Parser.parse tokens with
-     | Error _ -> Error "parse failed"
+let rejections path =
+  let at (span : Ast.span) = Ast.locate ~entry:path span in
+  match Loader.program path with
+  | exception Loader.Failed e -> Ok (Printf.sprintf "%s %s" (at e.span) e.message)
+  | program ->
+    (match Metaprocess.program ~out:(fun _ -> ()) program with
+     | Error e -> Ok (Printf.sprintf "%s %s" (at e.span) e.message)
      | Ok program ->
        (match Desugar.program (Prelude.program () @ program) with
         | Error e ->
-          Ok (Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+          Ok (Printf.sprintf "%s %s" (at e.span) e.message)
         | Ok desugared ->
         match Monomorphize.program desugared with
         | Error e ->
-          Ok (Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+          Ok (Printf.sprintf "%s %s" (at e.span) e.message)
         | Ok desugared ->
         let registry = Registry.builtins () in
-        Builtins.register registry;
         match Typecheck.check ~registry desugared with
         | Ok typed ->
           (match Resolve.program ~registry (Specialize.program typed) with
-           | Ok _ -> Error "expected an error, but the program checked"
+           | Ok resolved ->
+             (match Reflect.program resolved with
+              | Error e -> Ok (Printf.sprintf "%s %s" (at e.span) e.message)
+              | Ok reflected ->
+                (match Cps.program reflected with
+                 | Ok _ -> Error "expected an error, but the program checked"
+                 | Error e -> Ok (Printf.sprintf "%s %s" (at e.span) e.message)))
            | Error e ->
-             Ok (Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message))
+             Ok (Printf.sprintf "%s %s" (at e.span) e.message))
         | Error errors ->
           Ok
             (String.concat
                "\n"
                (List.map
                   (fun (e : Typecheck.error) ->
-                    Printf.sprintf "[%d:%d] %s" e.span.Ast.line e.span.Ast.col e.message)
+                    Printf.sprintf "%s %s" (at e.span) e.message)
                   errors))))
 
 let run_error_case root name =
   let path ext = Filename.concat root (name ^ ext) in
   let expected = read_file (path ".err") in
-  match rejections (read_file (path ".cx")) with
+  match rejections (path ".cx") with
   | Error message ->
     Printf.printf "FAIL %s\n  %s\n" name message;
     false
@@ -381,10 +431,46 @@ let run_error_case root name =
         (normalize actual);
       false)
 
+let run_runtime_case root name =
+  let path ext = Filename.concat root (name ^ ext) in
+  let expected = read_file (path ".rt") in
+  match interpret (path ".cx") with
+  | Ok _ ->
+    Printf.printf "FAIL %s\n  expected a runtime error, but the program ran\n" name;
+    false
+  | Error actual ->
+    (* A .rt may hold the whole `[line:col] message` or just the message. The
+       second form is for a diagnostic raised inside the prelude, whose line
+       number is not the user's and should not be pinned by a fixture. *)
+    let from mark =
+      match String.index_opt actual mark with
+      | Some at -> String.sub actual at (String.length actual - at)
+      | None -> actual
+    in
+    let actual =
+      if String.length (String.trim expected) > 0 && (String.trim expected).[0] = '['
+      then from '['
+      else (
+        match String.index_opt actual ']' with
+        | Some at -> String.trim (String.sub actual (at + 1) (String.length actual - at - 1))
+        | None -> actual)
+    in
+    if String.equal (normalize actual) (normalize expected)
+    then (
+      Printf.printf "ok   %s\n" name;
+      true)
+    else (
+      Printf.printf
+        "FAIL %s\n  --- expected ---\n%s\n  --- actual ---\n%s\n"
+        name
+        (normalize expected)
+        (normalize actual);
+      false)
+
 let run_case root name =
   let path ext = Filename.concat root (name ^ ext) in
   let expected = read_file (path ".txt") in
-  match interpret (read_file (path ".cx")) with
+  match interpret (path ".cx") with
   | Error message ->
     Printf.printf "FAIL %s\n  %s\n" name message;
     false
@@ -405,7 +491,7 @@ let run_case root name =
 let run_expected_failing root (name, blocker) =
   let path ext = Filename.concat root (name ^ ext) in
   let expected = if Sys.file_exists (path ".txt") then Some (read_file (path ".txt")) else None in
-  match interpret (read_file (path ".cx")), expected with
+  match interpret (path ".cx"), expected with
   | Ok actual, Some expected when String.equal (normalize actual) (normalize expected) ->
     Printf.printf
       "PASSES %s\n  now works; move it into `cases` (was waiting on %s)\n"
@@ -428,6 +514,7 @@ let () =
     let results =
       List.map (run_case root) cases
       @ List.map (run_error_case root) error_cases
+      @ List.map (run_runtime_case root) runtime_cases
       @ List.map (run_expected_failing root) expected_failing
     in
     let failed = List.length (List.filter not results) in

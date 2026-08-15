@@ -1,0 +1,49 @@
+// One statement, one deriver per trait, both generating for the same type.
+type Dog { name: string, age: int }
+
+trait Eq { fn eq(self, other: Dog) -> bool; }
+trait Show { fn show(self) -> string; }
+
+meta fn derive(shape: TypeShape) for Eq {
+    match shape {
+        TypeShape::Product(t, fields) => {
+            var check = code(true);
+            for (f in fields) {
+                var field = f.name;
+                check = code(check && self.field == other.field);
+            }
+            gen impl Eq for t {
+                fn eq(self, other: t) -> bool { return check; }
+            }
+        }
+        TypeShape::Sum(t, variants) => {}
+        TypeShape::Scalar => {}
+        TypeShape::Other => {}
+    }
+}
+
+meta fn derive(shape: TypeShape) for Show {
+    match shape {
+        TypeShape::Product(t, fields) => {
+            var label = str(t);
+            var text = code(label);
+            for (f in fields) {
+                var field = f.name;
+                text = code(text + " " + str(self.field));
+            }
+            gen impl Show for t {
+                fn show(self) -> string { return text; }
+            }
+        }
+        TypeShape::Sum(t, variants) => {}
+        TypeShape::Scalar => {}
+        TypeShape::Other => {}
+    }
+}
+
+derive Eq, Show for Dog;
+
+var rex = new Dog { name: "rex", age: 3 };
+var older = new Dog { name: "rex", age: 4 };
+print(rex.eq(rex), rex.eq(older));
+print(rex.show());

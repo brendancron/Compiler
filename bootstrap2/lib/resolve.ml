@@ -22,14 +22,8 @@ let rec record (s : Ast.typed_stmt) =
           (row_of m.Ast.md_ann);
         List.iter record m.Ast.md_body)
       methods
-  | `Op_decl (op, params, _, body) ->
-    (match params with
-     | [ lhs; rhs ] ->
-       Hashtbl.replace
-         declared_rows
-         (Ast.op_name op (operand lhs) (operand rhs))
-         (row_of s.Ast.ann)
-     | _ -> ());
+  | `Op_decl (op, params, signature, body) ->
+    Hashtbl.replace declared_rows (Ast.op_entry_name op params signature) (row_of s.Ast.ann);
     List.iter record body
   | `Block body | `Fn (_, _, _, body) -> List.iter record body
   | `If (_, then_branch, else_branch) ->
@@ -47,12 +41,6 @@ let rec record (s : Ast.typed_stmt) =
   | `Match (_, cases) -> List.iter (fun (_, body) -> List.iter record body) cases
   | _ -> ()
 
-and operand (p : Ast.param) =
-  match p.Ast.ty with
-  | Some { Ast.it = Ast.Ty_name n; _ } -> n
-  | Some { Ast.it = Ast.Ty_app (n, _); _ } -> n
-  | _ -> "_"
-
 type error =
   { span : Ast.span
   ; message : string
@@ -65,7 +53,11 @@ let fail span fmt =
 
 let accessor registry (target : Ast.resolved_expr) pick =
   match Option.bind (Types.type_name target.Ast.ann) (Registry.indexed registry) with
-  | Some entry -> pick entry
+  | Some entry ->
+    (match pick entry with
+     | Some name -> name
+     | None ->
+       fail target.Ast.span "%s cannot be assigned into." (Types.string_of_ty target.Ast.ann))
   | None ->
     fail target.Ast.span "Cannot index %s." (Types.string_of_ty target.Ast.ann)
 
@@ -90,7 +82,7 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
        | Some { Registry.emit = Registry.Call name; _ } ->
          `Call (fn_ref span name [ a; b ] ann, [ a; b ])
        | _ -> `Binop (op, a, b))
-    | `Method_call (receiver, name, args) ->
+    | `Method_call (receiver, name, _, args) ->
       let receiver = expr registry receiver in
       let args = List.map (expr registry) args in
       let owner =
@@ -102,47 +94,61 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
             "Cannot call '%s': the receiver's type is not known here."
             name
       in
-      let all = receiver :: args in
-      `Call (fn_ref span (Ast.method_name owner name) all ann, all)
+      (* A receiver the checker could not name is only known to be an array
+         here, so the length intrinsic is selected in both places. *)
+      if String.equal name Types.array_len && args = [] && Types.is_array receiver.Ast.ann
+      then `Array_len receiver
+      else if String.equal name Types.array_len && args = [] && receiver.Ast.ann = Types.Str
+      then `Str_len receiver
+      else (
+        let all = receiver :: args in
+        `Call (fn_ref span (Ast.method_name owner name) all ann, all))
     | `Collection_lit items ->
       let items = List.map (expr registry) items in
-      let build name = Registry.container registry name in
-      let default = !Types.default_container in
-      (match Types.type_name ann, build default with
-       | Some name, Some primitive ->
-         (match build name with
-          | None ->
-            fail span "%s cannot be built from a literal." (Types.string_of_ty ann)
-          (* The primitive is built directly; anything else is built from one. *)
-          | Some make when String.equal name default ->
-            `Call (fn_ref span make items ann, items)
-          | Some make ->
-            let held =
-              match ann with
-              | Types.Named (_, args, _) -> args
-              | other -> [ other ]
-            in
-            let elements : Ast.resolved_expr =
-              { Ast.it = `Call (fn_ref span primitive items (Types.opaque default held), items)
-              ; span
-              ; ann = Types.opaque default held
-              }
-            in
-            `Call (fn_ref span make [ elements ] ann, [ elements ]))
-       | _ -> fail span "%s cannot be built from a literal." (Types.string_of_ty ann))
+      if Types.is_array ann
+      then `Array_lit items
+      else (
+        let unbuildable () =
+          fail span "%s cannot be built from a literal." (Types.string_of_ty ann)
+        in
+        match Types.type_name ann with
+        | None -> unbuildable ()
+        (* Anything but an array is built from one holding its elements, and
+           what it holds comes from the entry rather than from its arity. *)
+        | Some name ->
+          (match Registry.container registry name, Registry.container_element registry name (Types.of_ty ann) with
+           | Some make, Some element ->
+             let elements : Ast.resolved_expr =
+               { Ast.it = `Array_lit items
+               ; span
+               ; ann = Types.array (Types.resolve element)
+               }
+             in
+             `Call (fn_ref span make.Registry.entry [ elements ] ann, [ elements ])
+           | _ -> unbuildable ()))
     | `Index (target, index) ->
       let target = expr registry target
       and index = expr registry index in
-      let name = accessor registry target (fun entry -> entry.Registry.get) in
-      `Call (fn_ref span name [ target; index ] ann, [ target; index ])
+      if target.Ast.ann = Types.Str
+      then `Str_get (target, index)
+      else if Types.is_array target.Ast.ann
+      then `Array_get (target, index)
+      else (
+        let name = accessor registry target (fun entry -> entry.Registry.get) in
+        `Call (fn_ref span name [ target; index ] ann, [ target; index ]))
     | `Index_assign (target, index, v) ->
       let target = expr registry target
       and index = expr registry index
       and v = expr registry v in
-      let args = [ target; index; v ] in
-      let name = accessor registry target (fun entry -> entry.Registry.set) in
-      `Call (fn_ref span name args ann, args)
+      if Types.is_array target.Ast.ann
+      then `Array_set (target, index, v)
+      else (
+        let args = [ target; index; v ] in
+        let name = accessor registry target (fun entry -> entry.Registry.set) in
+        `Call (fn_ref span name args ann, args))
     | #Ast.lit as l -> l
+    | #Ast.arrays as a -> (Ast.map_arrays (expr registry) a :> Ast.resolved_expr_kind)
+    | #Ast.strings as s -> (Ast.map_strings (expr registry) s :> Ast.resolved_expr_kind)
     | #Ast.vars as v -> (Ast.map_vars (expr registry) v :> Ast.resolved_expr_kind)
     | #Ast.ops as o -> (Ast.map_ops (expr registry) o :> Ast.resolved_expr_kind)
     | #Ast.logic as l -> (Ast.map_logic (expr registry) l :> Ast.resolved_expr_kind)
@@ -156,8 +162,17 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
         (variant, List.map (fun (l, v) -> l, expr registry v) (Ast.payload_fields payload))
     | #Ast.record as r ->
       (Ast.map_record (expr registry) r :> Ast.resolved_expr_kind)
+    | `Lambda (params, signature, body) ->
+      `Lambda (params, signature, List.concat_map (stmt registry) body)
     | #Ast.reflect as r ->
       (Ast.map_reflect (expr registry) r :> Ast.resolved_expr_kind)
+  in
+  (* A deferred method call carries whatever type its caller pinned, and the
+     receiver was only recognized as an array above. *)
+  let ann =
+    match it with
+    | `Array_len _ | `Str_len _ -> Types.Int
+    | _ -> ann
   in
   { Ast.it; span; ann }
 
@@ -189,16 +204,9 @@ and stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =
          :> Ast.resolved_stmt_kind)
     ]
   | `Op_decl (op, params, signature, body) ->
-    (match params with
-     | [ lhs; rhs ] ->
-       [ node
-           (`Fn
-             ( Ast.op_name op (operand lhs) (operand rhs)
-             , params
-             , signature
-             , block registry body ))
-       ]
-     | _ -> [])
+    [ node
+        (`Fn (Ast.op_entry_name op params signature, params, signature, block registry body))
+    ]
   | `Impl_decl (_, type_name, _, methods) ->
     List.map
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->

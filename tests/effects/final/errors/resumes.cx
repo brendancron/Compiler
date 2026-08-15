@@ -1,0 +1,3 @@
+effect Error { final ctl throw(msg: string); }
+fn f() -> int { return throw("x"); }
+run { print(f()); } handle Error { final ctl throw(msg) { resume 0; } }

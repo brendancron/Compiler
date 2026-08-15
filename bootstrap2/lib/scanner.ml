@@ -1,11 +1,13 @@
 type error =
-  { line : int
+  { file : string
+  ; line : int
   ; col : int
   ; message : string
   }
 
 type state =
-  { source : string
+  { file : string
+  ; source : string
   ; mutable start : int (* offset of the first char of the token being scanned *)
   ; mutable start_line : int (* line/col of that first char, captured before scanning *)
   ; mutable start_col : int
@@ -46,18 +48,18 @@ let lexeme s = String.sub s.source s.start (s.current - s.start)
 
 let add_token s token_type =
   s.tokens
-  <- Token.make token_type ~lexeme:(lexeme s) ~line:s.start_line ~col:s.start_col
+  <- Token.make token_type ~lexeme:(lexeme s) ~file:s.file ~line:s.start_line ~col:s.start_col
      :: s.tokens
 
 let error s message =
-  s.errors <- { line = s.start_line; col = s.start_col; message } :: s.errors
+  s.errors <- { file = s.file; line = s.start_line; col = s.start_col; message } :: s.errors
 let is_digit c = c >= '0' && c <= '9'
 let is_alpha c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
 let is_alphanumeric c = is_alpha c || is_digit c
 
 let keyword = function
-  | "and" -> Some Token.And
   | "ctl" -> Some Token.Ctl
+  | "final" -> Some Token.Final
   | "effect" -> Some Token.Effect
   | "else" -> Some Token.Else
   | "false" -> Some Token.False
@@ -65,12 +67,16 @@ let keyword = function
   | "for" -> Some Token.For
   | "if" -> Some Token.If
   | "impl" -> Some Token.Impl
+  | "import" -> Some Token.Import
+  | "gen" -> Some Token.Gen
+  | "code" -> Some Token.Code
+  | "derive" -> Some Token.Derive
+  | "meta" -> Some Token.Meta
   | "handle" -> Some Token.Handle
   | "handler" -> Some Token.Handler
   | "match" -> Some Token.Match
   | "new" -> Some Token.New
   | "op" -> Some Token.Op
-  | "or" -> Some Token.Or
   | "resume" -> Some Token.Resume
   | "return" -> Some Token.Return
   | "run" -> Some Token.Run
@@ -88,16 +94,66 @@ let line_comment s =
     ignore (advance s)
   done
 
-let string_literal s =
-  while peek s <> '"' && not (is_at_end s) do
-    let c = advance s in
-    if c = '\n' then newline s
-  done;
+(* Everything else after a backslash is a typo more often than an intent, so
+   there is no pass-through case. *)
+let escaped s =
   if is_at_end s
-  then error s "Unterminated string."
+  then None
   else (
-    ignore (advance s);
-    add_token s (Token.String (String.sub s.source (s.start + 1) (s.current - s.start - 2))))
+    match advance s with
+    | 'n' -> Some '\n'
+    | 't' -> Some '\t'
+    | 'r' -> Some '\r'
+    | '0' -> Some '\000'
+    | '\\' -> Some '\\'
+    | '"' -> Some '"'
+    | '\'' -> Some '\''
+    | _ -> None)
+
+(* Reads to the closing [quote] whatever went wrong, so one bad literal costs
+   one diagnostic rather than lexing its tail as code. *)
+let quoted s quote =
+  let buf = Buffer.create 16 in
+  let bad = ref None in
+  let rec scan () =
+    if is_at_end s
+    then bad := Some "Unterminated literal."
+    else (
+      match advance s with
+      | c when c = quote -> ()
+      | '\\' ->
+        (match escaped s with
+         | Some c -> Buffer.add_char buf c
+         | None -> if !bad = None then bad := Some "Unknown escape.");
+        scan ()
+      | c ->
+        if c = '\n' then newline s;
+        Buffer.add_char buf c;
+        scan ())
+  in
+  scan ();
+  match !bad with
+  | Some message -> Error message
+  | None -> Ok (Buffer.contents buf)
+
+let char_literal s =
+  match quoted s '\'' with
+  | Error message -> error s message
+  | Ok text ->
+    if String.length text = 0
+    then error s "A char literal holds exactly one character."
+    else (
+      (* One scalar value, which is one to four bytes of UTF-8. *)
+      let decoded = String.get_utf_8_uchar text 0 in
+      if (not (Uchar.utf_decode_is_valid decoded))
+         || Uchar.utf_decode_length decoded <> String.length text
+      then error s "A char literal holds exactly one character."
+      else add_token s (Token.Char (Uchar.utf_decode_uchar decoded)))
+
+let string_literal s =
+  match quoted s '"' with
+  | Ok text -> add_token s (Token.String text)
+  | Error message -> error s message
 
 let number s =
   while is_digit (peek s) do
@@ -161,16 +217,29 @@ let scan_token s =
        then Token.Arrow
        else Token.Minus)
   | '!' -> add_token s (if matches s '=' then Token.Bang_equal else Token.Bang)
-  | '=' -> add_token s (if matches s '=' then Token.Equal_equal else Token.Equal)
+  | '=' ->
+    add_token
+      s
+      (if matches s '='
+       then Token.Equal_equal
+       else if matches s '>'
+       then Token.Fat_arrow
+       else Token.Equal)
   | '<' -> add_token s (if matches s '=' then Token.Less_equal else Token.Less)
   | '>' -> add_token s (if matches s '=' then Token.Greater_equal else Token.Greater)
   | '/' ->
     if matches s '/'
     then line_comment s
     else add_token s (if matches s '=' then Token.Slash_equal else Token.Slash)
+  | '%' -> add_token s (if matches s '=' then Token.Percent_equal else Token.Percent)
+  (* Spelled either way: `and` and `&&` are one operator, as are `or` and
+     `||`. A single `&` or `|` is not an operator at all. *)
+  | '&' when matches s '&' -> add_token s Token.Amp_amp
+  | '|' when matches s '|' -> add_token s Token.Pipe_pipe
   | ' ' | '\r' | '\t' -> ()
   | '\n' -> newline s
   | '"' -> string_literal s
+  | '\'' -> char_literal s
   | c ->
     if is_digit c
     then number s
@@ -178,9 +247,10 @@ let scan_token s =
     then identifier s
     else error s (Printf.sprintf "Unexpected character '%c'." c)
 
-let scan_tokens source =
+let scan_tokens ?(file = "") source =
   let s =
-    { source
+    { file
+    ; source
     ; start = 0
     ; start_line = 1
     ; start_col = 1
@@ -197,7 +267,7 @@ let scan_tokens source =
     s.start_col <- col_of s s.current;
     scan_token s
   done;
-  let eof = Token.make Token.Eof ~lexeme:"" ~line:s.line ~col:(col_of s s.current) in
+  let eof = Token.make Token.Eof ~lexeme:"" ~file ~line:s.line ~col:(col_of s s.current) in
   match s.errors with
   | [] -> Ok (List.rev (eof :: s.tokens))
   | errors -> Error (List.rev errors)

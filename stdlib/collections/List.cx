@@ -1,111 +1,78 @@
-import "../lang/Option";
+import { Option } from "../lang/Option";
 
-fn map<T, U>(xs, f) {
-    var result = [];
-    var i = 0;
-    while (i < xs.len()) {
-        result.push(f(xs[i]));
-        i += 1;
-    }
-    return result;
+fn map<T, U>(items: List<T>, f: (T) -> U) -> List<U> {
+    var out: List<U> = [];
+    for (item in items) { out.push(f(item)); }
+    return out;
 }
 
-fn filter<T>(xs, f) {
-    var result = [];
-    var i = 0;
-    while (i < xs.len()) {
-        if (f(xs[i])) {
-            result.push(xs[i]);
-        }
-        i += 1;
+fn filter<T>(items: List<T>, f: (T) -> bool) -> List<T> {
+    var out: List<T> = [];
+    for (item in items) {
+        if (f(item)) { out.push(item); }
     }
-    return result;
+    return out;
 }
 
-fn fold<T, A>(xs, init, f) {
-    var acc = init;
-    var i = 0;
-    while (i < xs.len()) {
-        acc = f(acc, xs[i]);
-        i += 1;
-    }
+fn fold<T, A>(items: List<T>, start: A, f: (A, T) -> A) -> A {
+    var acc = start;
+    for (item in items) { acc = f(acc, item); }
     return acc;
 }
 
-fn any<T>(xs, f) {
-    var i = 0;
-    while (i < xs.len()) {
-        if (f(xs[i])) { return true; }
-        i += 1;
+fn any<T>(items: List<T>, f: (T) -> bool) -> bool {
+    for (item in items) {
+        if (f(item)) { return true; }
     }
     return false;
 }
 
-fn all<T>(xs, f) {
-    var i = 0;
-    while (i < xs.len()) {
-        if (!f(xs[i])) { return false; }
-        i += 1;
+fn all<T>(items: List<T>, f: (T) -> bool) -> bool {
+    for (item in items) {
+        if (f(item)) {} else { return false; }
     }
     return true;
 }
 
-fn find<T>(xs, f) {
-    var i = 0;
-    while (i < xs.len()) {
-        if (f(xs[i])) { return Option::Some(xs[i]); }
-        i += 1;
+fn find<T>(items: List<T>, f: (T) -> bool) -> Option<T> {
+    for (item in items) {
+        if (f(item)) { return new Option::Some(item); }
     }
-    return Option::None;
+    return new Option::None;
 }
 
-fn concat<T>(a, b) {
-    var result = [];
-    var i = 0;
-    while (i < a.len()) {
-        result.push(a[i]);
-        i += 1;
-    }
-    i = 0;
-    while (i < b.len()) {
-        result.push(b[i]);
-        i += 1;
-    }
-    return result;
+fn concat<T>(a: List<T>, b: List<T>) -> List<T> {
+    var out: List<T> = [];
+    for (item in a) { out.push(item); }
+    for (item in b) { out.push(item); }
+    return out;
 }
 
-fn reverse<T>(xs) {
-    var result = [];
-    var i = xs.len() - 1;
-    while (i >= 0) {
-        result.push(xs[i]);
-        i -= 1;
+fn reverse<T>(items: List<T>) -> List<T> {
+    var out: List<T> = [];
+    var at = items.len() - 1;
+    while (at >= 0) {
+        out.push(items[at]);
+        at = at - 1;
     }
-    return result;
+    return out;
 }
 
-fn flat_map<T, U>(xs, f) {
-    var result = [];
-    var i = 0;
-    while (i < xs.len()) {
-        var inner = f(xs[i]);
-        var j = 0;
-        while (j < inner.len()) {
-            result.push(inner[j]);
-            j += 1;
-        }
-        i += 1;
+fn flat_map<T, U>(items: List<T>, f: (T) -> List<U>) -> List<U> {
+    var out: List<U> = [];
+    for (item in items) {
+        for (inner in f(item)) { out.push(inner); }
     }
-    return result;
+    return out;
 }
 
-fn join(xs, sep) {
-    if (xs.len() == 0) { return ""; }
-    var result = xs[0];
-    var i = 1;
-    while (i < xs.len()) {
-        result = result + sep + xs[i];
-        i += 1;
+fn join(items: List<string>, separator: string) -> string {
+    if (items.len() == 0) { return ""; }
+    var out = items[0];
+    var at = 1;
+    while (at < items.len()) {
+        out = out + separator + items[at];
+        at = at + 1;
     }
-    return result;
+    return out;
 }

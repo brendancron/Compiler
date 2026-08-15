@@ -4,7 +4,7 @@ type Point {
 }
 
 op ==(a: Point, b: Point) -> bool {
-        return a.x == b.x and a.y == b.y;
+        return a.x == b.x && a.y == b.y;
 }
 
 var p1 = new Point { x: 1, y: 2 };

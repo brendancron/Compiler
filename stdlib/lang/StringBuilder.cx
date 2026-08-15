@@ -1,42 +1,30 @@
-struct StringBuilder {
-    parts: [string];
-    length: int
+type StringBuilder {
+    parts: List<string>,
+    length: int,
 }
 
-fn new() {
-    return StringBuilder { parts: [], length: 0 };
-}
-
-fn sb_build(sb) {
-    var result = "";
-    var i = 0;
-    var parts = sb.parts;
-    while (i < parts.len()) {
-        result = result + parts[i];
-        i += 1;
-    }
-    return result;
+fn new() -> StringBuilder {
+    return new StringBuilder { parts: [], length: 0 };
 }
 
 impl StringBuilder {
-    fn append(self, s) {
+    fn append(self, s: string) {
         self.parts.push(s);
         self.length = self.length + s.len();
     }
-    fn append_int(self, n) {
-        var s = to_string(n);
-        self.parts.push(s);
-        self.length = self.length + s.len();
+    fn append_int(self, n: int) {
+        self.append(str(n));
     }
-    fn append_line(self, s) {
-        self.parts.push(s);
-        self.parts.push("\n");
-        self.length = self.length + s.len() + 1;
+    fn append_line(self, s: string) {
+        self.append(s);
+        self.append("\n");
     }
-    fn build(self) {
-        return sb_build(self);
+    fn build(self) -> string {
+        var out = "";
+        for (part in self.parts) { out = out + part; }
+        return out;
     }
-    fn len(self) {
+    fn len(self) -> int {
         return self.length;
     }
     fn clear(self) {

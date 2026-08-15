@@ -1,0 +1,24 @@
+type Vec2 { x: int, y: int }
+
+op +(a: Vec2, b: Vec2) -> Vec2 {
+    return new Vec2 { x: a.x + b.x, y: a.y + b.y };
+}
+
+fn accumulate<T>(xs: Array<T>) {
+    xs[0] = xs[0] + xs[1];
+}
+
+var vs = [new Vec2 { x: 1, y: 1 }, new Vec2 { x: 2, y: 2 }];
+accumulate(vs);
+print(vs[0].x, vs[0].y);
+
+var ns = [10, 20];
+accumulate(ns);
+print(ns[0]);
+
+var ws = ["a", "b"];
+accumulate(ws);
+print(ws[0]);
+
+var ls: List<int> = [1, 2];
+print(ls.len());

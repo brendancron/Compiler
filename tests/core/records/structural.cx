@@ -1,7 +1,7 @@
 var p = { x: 1, y: 2 };
 print(p.x, p.y);
 p.x = 9;
-print(p.x, typeof(p));
+print(p.x, typeof(p).name);
 
 // A field read unifies against an open row, so this accepts any record
 // that has a `name`.

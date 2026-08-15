@@ -1,0 +1,14 @@
+var c = 'a';
+print(c, typeof(c).name);
+print(c == 'a', c == 'b');
+print(str(c));
+
+var letters: Array<char> = ['x', 'y'];
+letters[0] = 'z';
+print(letters, letters.len(), letters.contains('y'));
+
+fn repeat(c: char, times: int) -> Array<char> {
+    var out = new Array<char>(times, c);
+    return out;
+}
+print(repeat('!', 3), typeof(repeat).name);

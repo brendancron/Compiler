@@ -19,17 +19,24 @@ type effects =
   ; op_ty : (string, Types.ty) Hashtbl.t (* operation -> its function type *)
   }
 
-let evidence_name op = "__op_" ^ op
-let continuation = "__k"
+let evidence_name op = Ast.generated [ "ev"; op ]
+
+(* Marks a `run` block sitting in a function that was not itself converted.
+   Returning out of such a block would have to travel back through the handler
+   that resumed into it, which only a continuation can do — and the enclosing
+   function has none, because handling the effect discharged its row. *)
+let no_return = Ast.generated [ "cps"; "no-return" ]
+let continuation = Ast.generated [ "cps"; "k" ]
 let counter = ref 0
 
 let fresh prefix =
   incr counter;
-  Printf.sprintf "__%s%d" prefix !counter
+  Ast.generated [ prefix; string_of_int !counter ]
 
 (* Sorted and deduplicated, so caller and callee agree without communicating. *)
 let evidence_of_row info (row : Types.row) =
   row
+  |> List.map fst
   |> List.sort_uniq String.compare
   |> List.concat_map (fun label ->
     match Hashtbl.find_opt info.operations label with
@@ -49,14 +56,20 @@ let evidence_ty info op =
   | Some t -> t
   | None -> Types.Unit
 
-(* The type has to gain them too, or it describes the wrong arity. *)
-let widen info (t : Types.ty) =
+(* The type has to gain them too, or it describes the wrong arity — and a
+   function passed to a function is widened where it stands, so the parameter
+   describing it has to be widened with it. *)
+let rec widen info (t : Types.ty) =
   match t with
   | Types.Fn (params, ret, row) ->
-    Types.Fn (params @ List.map (evidence_ty info) (evidence_of_row info row), ret, row)
+    Types.Fn
+      ( List.map (widen info) params @ List.map (evidence_ty info) (evidence_of_row info row)
+      , widen info ret
+      , row )
   | other -> other
 
-let is_delimited info (row : Types.row) = List.exists (Hashtbl.mem info.delimited) row
+let is_delimited info (row : Types.row) =
+  List.exists (fun (label, _) -> Hashtbl.mem info.delimited label) row
 
 let node span it : Ast.cps_stmt = { Ast.it; span; ann = Types.Unit }
 let var span ty name : Ast.cps_expr = { Ast.it = `Var name; span; ann = ty }
@@ -100,6 +113,18 @@ let is_resume (s : Ast.reflected_stmt) =
   | `Resume _ -> true
   | _ -> false
 
+(* A `return` anywhere inside means the statement has to be converted, whether
+   or not anything in it suspends: left alone it stays an ordinary return, and
+   the value never reaches the continuation. *)
+let rec holds_return (s : Ast.reflected_stmt) =
+  match s.Ast.it with
+  | `Return _ -> true
+  | `Block body -> List.exists holds_return body
+  | `If (_, t, e) -> holds_return t || Option.fold ~none:false ~some:holds_return e
+  | `While (_, body) -> holds_return body
+  | `Match (_, cases) -> List.exists (fun (_, body) -> List.exists holds_return body) cases
+  | _ -> false
+
 let is_return (s : Ast.reflected_stmt) =
   match s.Ast.it with
   | `Return _ -> true
@@ -114,23 +139,48 @@ let tail_resumptive (body : Ast.reflected_stmt list) =
     Some (List.rev ({ last with Ast.it = `Return value } :: earlier))
   | _ -> None
 
-let arm_is_tail_resumptive (a : Ast.reflected_stmt Ast.arm) =
+(* Not "resumes in tail position" but "needs no continuation", which a `final
+   ctl` also does not: it never resumes at all, so what it needs is a way out,
+   and that is an unwind. *)
+let arm_needs_no_continuation (a : Ast.reflected_stmt Ast.arm) =
   match a.Ast.arm_kind with
-  | Ast.Op_fn -> true
+  | Ast.Op_fn | Ast.Op_final -> true
   | Ast.Op_ctl -> tail_resumptive a.Ast.arm_body <> None
 
 let handlers_are_tail_resumptive handlers =
   List.for_all
     (fun (h : Ast.reflected_stmt Ast.handler) ->
-      List.for_all arm_is_tail_resumptive h.Ast.arms)
+      List.for_all arm_needs_no_continuation h.Ast.arms)
     handlers
 
 (* ---- expressions ---- *)
 
+(* A lambda's body is statements, and converting those is defined below in
+   terms of this function. The knot is tied once, after both exist. *)
+let convert_body : (effects -> Ast.reflected_stmt list -> Ast.cps_stmt list) ref =
+  ref (fun _ _ -> [])
+
 let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
+  let widened = ref e.Ast.ann in
   let it : Ast.cps_expr_kind =
     match e.Ast.it with
     | #Ast.lit as l -> l
+    (* A function value takes evidence the way a declaration does, from its own
+       row, so a call site passes the same arguments whichever it reached. *)
+    | `Lambda (params, signature, body) ->
+      let row = row_of e.Ast.ann in
+      if is_delimited info row
+      then
+        unsupported
+          e.Ast.span
+          "A function value cannot perform an effect whose handler resumes yet."
+      else (
+        let evidence =
+          evidence_of_row info row
+          |> List.map (fun op -> { Ast.name = evidence_name op; ty = None })
+        in
+        widened := widen info e.Ast.ann;
+        `Lambda (params @ evidence, signature, !convert_body info body))
     | `Var name ->
       (* Evidence is only known at call sites, so a bare reference would
          escape with the wrong arity. *)
@@ -162,6 +212,8 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
            | _ -> expr info callee
          in
          `Call (callee, args @ evidence))
+    | #Ast.arrays as a -> (Ast.map_arrays (expr info) a :> Ast.cps_expr_kind)
+    | #Ast.strings as s -> (Ast.map_strings (expr info) s :> Ast.cps_expr_kind)
     | #Ast.vars as v -> (Ast.map_vars (expr info) v :> Ast.cps_expr_kind)
     | #Ast.ops as o -> (Ast.map_ops (expr info) o :> Ast.cps_expr_kind)
     | #Ast.logic as l -> (Ast.map_logic (expr info) l :> Ast.cps_expr_kind)
@@ -169,10 +221,12 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
     | #Ast.record as r -> (Ast.map_record (expr info) r :> Ast.cps_expr_kind)
     | #Ast.variant_lit as v -> (Ast.map_variant_lit (expr info) v :> Ast.cps_expr_kind)
   in
-  { Ast.it; span = e.Ast.span; ann = e.Ast.ann }
+  { Ast.it; span = e.Ast.span; ann = !widened }
 
 let rec suspends info (e : Ast.reflected_expr) =
   match e.Ast.it with
+  (* A value, whatever its body does when it is eventually called. *)
+  | `Lambda _ -> false
   | #Ast.lit | `Var _ -> false
   | `Call (callee, args) ->
     (match callee.Ast.it with
@@ -183,8 +237,12 @@ let rec suspends info (e : Ast.reflected_expr) =
   | `Assign (_, v) | `Unop (_, v) -> suspends info v
   | `Binop (_, a, b) | `And (a, b) | `Or (a, b) ->
     suspends info a || suspends info b
-  | `Tuple items -> List.exists (suspends info) items
-  | `Tuple_get (t, _) | `Field (t, _) -> suspends info t
+  | `Tuple items | `Array_lit items -> List.exists (suspends info) items
+  | `Array_new (a, b) | `Array_get (a, b) -> suspends info a || suspends info b
+  | `Array_set (target, index, v) ->
+    suspends info target || suspends info index || suspends info v
+  | `Str_get (a, b) -> suspends info a || suspends info b
+  | `Array_len t | `Str_len t | `Tuple_get (t, _) | `Field (t, _) -> suspends info t
   | `Record_lit fields | `Variant (_, fields) ->
     List.exists (fun (_, v) -> suspends info v) fields
   | `Field_assign (r, _, v) -> suspends info r || suspends info v
@@ -212,11 +270,32 @@ let rec extract info (e : Ast.reflected_expr)
   =
   let rebuild it : Ast.reflected_expr = { e with Ast.it = it } in
   match e.Ast.it with
-  | #Ast.lit | `Var _ -> None
+  | #Ast.lit | `Var _ | `Lambda _ -> None
   | `Call (_, args) when suspends info e && not (List.exists (suspends info) args) ->
     Some (e, fun name -> { Ast.it = `Var name; span = e.Ast.span; ann = e.Ast.ann })
   | `Call (callee, args) -> extract_list info args (fun args -> rebuild (`Call (callee, args)))
   | `Tuple items -> extract_list info items (fun items -> rebuild (`Tuple items))
+  | `Array_lit items -> extract_list info items (fun items -> rebuild (`Array_lit items))
+  | `Array_new (length, fill) ->
+    extract_list info [ length; fill ] (function
+      | [ length; fill ] -> rebuild (`Array_new (length, fill))
+      | _ -> assert false)
+  | `Array_get (target, index) ->
+    extract_list info [ target; index ] (function
+      | [ target; index ] -> rebuild (`Array_get (target, index))
+      | _ -> assert false)
+  | `Array_set (target, index, v) ->
+    extract_list info [ target; index; v ] (function
+      | [ target; index; v ] -> rebuild (`Array_set (target, index, v))
+      | _ -> assert false)
+  | `Array_len target ->
+    extract info target |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Array_len (f n)))
+  | `Str_len target ->
+    extract info target |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Str_len (f n)))
+  | `Str_get (target, index) ->
+    extract_list info [ target; index ] (function
+      | [ target; index ] -> rebuild (`Str_get (target, index))
+      | _ -> assert false)
   | `Tuple_get (t, i) ->
     extract info t |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Tuple_get (f n, i)))
   | `Field (t, label) ->
@@ -251,10 +330,15 @@ and extract_list info items rebuild =
 
 (* ---- continuation-passing form ---- *)
 
-let rec cps info k (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
+(* [ret] is what a `return` calls — the continuation of the function being
+   converted — and [k] is what the statement after this one runs under. They
+   coincide at the top of a body and part company inside a branch, where the
+   join resumes the rest of the body but a `return` must leave the function
+   altogether. *)
+let rec cps info ret k (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
   match stmts with
   | [] ->
-    let span = { Ast.line = 0; col = 0 } in
+    let span = { Ast.file = ""; line = 0; col = 0 } in
     [ call span k [ ignored span ] ]
   | s :: rest ->
     let span = s.Ast.span in
@@ -267,8 +351,15 @@ let rec cps info k (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
        in
        (match extract info value with
         | Some (c, rebuild) -> sequence info span c (fun name ->
-            cps info k [ { s with Ast.it = `Return (Some (rebuild name)) } ])
-        | None -> [ call span k [ expr info value ] ])
+            cps info ret k [ { s with Ast.it = `Return (Some (rebuild name)) } ])
+        | None ->
+          if String.equal ret no_return
+          then
+            unsupported
+              span
+              "A 'return' out of a 'run' block is not supported yet when its \
+               handler resumes."
+          else [ call span ret [ expr info value ] ])
      (* The arm keeps running afterwards, which is what makes multi-shot fall
         out: two `resume`s call the continuation twice. *)
      | `Resume value ->
@@ -277,14 +368,14 @@ let rec cps info k (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
          | Some v -> expr info v
          | None -> ignored span
        in
-       call span continuation [ value ] :: cps info k rest
+       call span continuation [ value ] :: cps info ret k rest
      | `Expr e when suspends info e ->
        (match extract info e with
         | Some (c, rebuild) ->
           sequence info span c (fun name ->
             match (rebuild name).Ast.it with
-            | `Var _ -> cps info k rest
-            | _ -> cps info k ({ s with Ast.it = `Expr (rebuild name) } :: rest))
+            | `Var _ -> cps info ret k rest
+            | _ -> cps info ret k ({ s with Ast.it = `Expr (rebuild name) } :: rest))
         | None -> unsupported span "This effect cannot be sequenced yet.")
      | `Var_decl (name, _, Some e) when suspends info e ->
        (match extract info e with
@@ -294,20 +385,20 @@ let rec cps info k (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
             match (rebuild tmp).Ast.it with
             | `Var _ ->
               bound := name;
-              cps info k rest
+              cps info ret k rest
             | _ ->
               bound := tmp;
-              cps info k ({ s with Ast.it = `Var_decl (name, None, Some (rebuild tmp)) } :: rest)
+              cps info ret k ({ s with Ast.it = `Var_decl (name, None, Some (rebuild tmp)) } :: rest)
           in
           let tmp = fresh "v" in
           let body = build tmp in
           let next = fresh "k" in
           fn_decl span next [ !bound ] body :: invoke info span next c
         | None -> unsupported span "This effect cannot be sequenced yet.")
-     | `If (cond, then_branch, else_branch) when suspends_stmt info s ->
+     | `If (cond, then_branch, else_branch) when suspends_stmt info s || holds_return s ->
        let join = fresh "join" in
-       let branch b = node span (`Block (cps info join [ b ])) in
-       [ fn_decl span join [ fresh "x" ] (cps info k rest)
+       let branch b = node span (`Block (cps info ret join [ b ])) in
+       [ fn_decl span join [ fresh "x" ] (cps info ret k rest)
        ; node
            span
            (`If
@@ -319,19 +410,37 @@ let rec cps info k (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
                   (* Without this the join is never reached. *)
                   | None -> call span join [ ignored span ]) ))
        ]
-     | `Block body when suspends_stmt info s ->
+     | `Block body when suspends_stmt info s || holds_return s ->
        let next = fresh "k" in
-       [ fn_decl span next [ fresh "x" ] (cps info k rest)
-       ; node span (`Block (cps info next body))
+       [ fn_decl span next [ fresh "x" ] (cps info ret k rest)
+       ; node span (`Block (cps info ret next body))
        ]
-     | `While _ when suspends_stmt info s ->
-       unsupported span "An effect inside a loop is not supported yet."
+     (* A loop that suspends becomes a recursive continuation: the body's
+        "what runs next" is the loop itself, so resuming carries on with the
+        next iteration — and resuming twice runs it twice, which is what makes
+        a multi-shot handler work here. *)
+     | `While (cond, body) when suspends_stmt info s ->
+       let again = fresh "loop"
+       and after = fresh "after" in
+       [ fn_decl span after [ fresh "x" ] (cps info ret k rest)
+       ; fn_decl
+           span
+           again
+           [ fresh "x" ]
+           [ node
+               span
+               (`If
+                 ( expr info cond
+                 , node span (`Block (cps info ret again [ body ]))
+                 , Some (call span after [ ignored span ]) )) ]
+       ; call span again [ ignored span ]
+       ]
      | `Run (body, handlers) when not (handlers_are_tail_resumptive handlers) ->
-       run info span k handlers body rest
+       run info ret span k handlers body rest
      | _ ->
        (match stmt info s with
-        | Some s -> s :: cps info k rest
-        | None -> cps info k rest))
+        | Some s -> s :: cps info ret k rest
+        | None -> cps info ret k rest))
 
 and sequence info span c build =
   let name = fresh "v" in
@@ -356,8 +465,9 @@ and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
 
 (* The body's continuation resumes after the block, so an arm that never calls
    it abandons the rest of the body: abort. *)
-and run info span k handlers body rest : Ast.cps_stmt list =
+and run info ret span k handlers body rest : Ast.cps_stmt list =
   let after = fresh "after" in
+  let finished = fresh "finished" in
   let arms =
     List.concat_map
       (fun (h : Ast.reflected_stmt Ast.handler) ->
@@ -365,14 +475,22 @@ and run info span k handlers body rest : Ast.cps_stmt list =
           (fun (a : Ast.reflected_stmt Ast.arm) ->
             let arm_body =
               match a.Ast.arm_kind with
-              | Ast.Op_fn -> cps info continuation a.Ast.arm_body
-              | Ast.Op_ctl -> cps info after a.Ast.arm_body
+              | Ast.Op_fn -> cps info continuation continuation a.Ast.arm_body
+              | Ast.Op_ctl | Ast.Op_final -> cps info finished finished a.Ast.arm_body
             in
             fn_decl span (evidence_name a.Ast.arm_name) (a.Ast.arm_params @ [ continuation ]) arm_body)
           h.Ast.arms)
       handlers
   in
-  (fn_decl span after [ fresh "x" ] (cps info k rest) :: arms) @ cps info after body
+  (* The body ends the delimited computation rather than continuing the
+     program: completing it returns to whoever entered it, which is the `resume`
+     that re-entered it or the block itself. What follows the block runs once,
+     after the handler is done — not once per resumption. *)
+  (fn_decl span after [ fresh "x" ] (cps info ret k rest)
+   :: fn_decl span finished [ fresh "x" ] []
+   :: arms)
+  @ cps info ret finished body
+  @ [ call span after [ ignored span ] ]
 
 (* ---- evidence-only translation ---- *)
 
@@ -398,7 +516,7 @@ and stmt info (s : Ast.reflected_stmt) : Ast.cps_stmt option =
           ( name
           , params @ evidence @ [ { Ast.name = continuation; ty = None } ]
           , signature
-          , cps info continuation body ))
+          , cps info continuation continuation body ))
     else keep (`Fn (name, params @ evidence, signature, sequence_body info body))
   | `Run (body, handlers) ->
     let arms =
@@ -406,16 +524,21 @@ and stmt info (s : Ast.reflected_stmt) : Ast.cps_stmt option =
         (fun (h : Ast.reflected_stmt Ast.handler) ->
           List.map
             (fun (a : Ast.reflected_stmt Ast.arm) ->
-              let body =
+              let converted =
                 match a.Ast.arm_kind with
-                | Ast.Op_fn -> a.Ast.arm_body
-                | Ast.Op_ctl -> Option.get (tail_resumptive a.Ast.arm_body)
+                | Ast.Op_fn -> sequence_body info a.Ast.arm_body
+                | Ast.Op_ctl ->
+                  sequence_body info (Option.get (tail_resumptive a.Ast.arm_body))
+                (* Whatever it did, it does not go back. *)
+                | Ast.Op_final ->
+                  sequence_body info a.Ast.arm_body
+                  @ [ node s.Ast.span `Abort ]
               in
-              fn_decl s.Ast.span (evidence_name a.Ast.arm_name) a.Ast.arm_params (sequence_body info body))
+              fn_decl s.Ast.span (evidence_name a.Ast.arm_name) a.Ast.arm_params converted)
             h.Ast.arms)
         handlers
     in
-    keep (`Block (arms @ sequence_body info body))
+    keep (`Block (arms @ [ node s.Ast.span (`Scope (sequence_body info body)) ]))
   | #Ast.stmts as st ->
     keep (Ast.map_stmts (expr info) (block info) st :> Ast.cps_stmt_kind)
 
@@ -427,18 +550,23 @@ and block info (s : Ast.reflected_stmt) : Ast.cps_stmt =
 and sequence_body info (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
   match stmts with
   | [] -> []
+  (* What follows the block stays where it was written, so a `return` among
+     those statements returns from the function they are in. *)
   | ({ Ast.it = `Run (body, handlers); span; _ } as s) :: rest
     when not (handlers_are_tail_resumptive handlers) ->
     ignore s;
-    let done_ = fresh "done" in
-    fn_decl span done_ [ fresh "x" ] (sequence_body info rest)
-    :: run info span done_ handlers body []
+    let nothing = fresh "nothing" in
+    (fn_decl span nothing [ fresh "x" ] []
+     :: run info no_return span nothing handlers body [])
+    @ sequence_body info rest
   | s :: rest ->
     (match stmt info s with
      | Some s -> s :: sequence_body info rest
      | None -> sequence_body info rest)
 
 (* ---- entry point ---- *)
+
+let () = convert_body := sequence_body
 
 let collect (p : Ast.reflected_stmt list) =
   let info =
@@ -452,7 +580,7 @@ let collect (p : Ast.reflected_stmt list) =
   List.iter
     (fun (s : Ast.reflected_stmt) ->
       match s.Ast.it with
-      | `Effect_decl (name, ops) ->
+      | `Effect_decl (name, _, ops) ->
         Hashtbl.replace
           info.operations
           name

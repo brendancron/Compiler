@@ -1,0 +1,15 @@
+import "geom";
+import { Point } from "geom";
+
+var p: geom.Point = new geom.Point { x: 2, y: 3 };
+print(p.area(), p.shifted(1).x);
+
+var q: Point = geom.origin();
+print(q.x, q.area());
+
+print(geom.describe(new geom.Shape::Circle(3)));
+print(geom.describe(new geom.Shape::Square(4)));
+
+type Point2 { x: int }
+var mine = new Point2 { x: 9 };
+print(mine.x);

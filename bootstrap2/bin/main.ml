@@ -64,8 +64,12 @@ let read_file path =
   | exception Sys_error message -> die message
   | ic -> Fun.protect ~finally:(fun () -> close_in ic) (fun () -> really_input_string ic (in_channel_length ic))
 
-let report line col kind message =
-  Printf.eprintf "[%d:%d] %s error: %s\n" line col kind message
+let report ~entry (span : Ast.span) kind message =
+  Printf.eprintf "%s %s error: %s\n" (Ast.locate ~entry span) kind message
+
+(* Scan and parse errors carry a file and a position but no span record. *)
+let report_at ~entry file line col kind message =
+  report ~entry { Ast.file; line; col } kind message
 
 let () =
   let opts = parse_args Sys.argv in
@@ -78,7 +82,7 @@ let () =
     then print_newline ());
   match Scanner.scan_tokens source with
   | Error errors ->
-    List.iter (fun (e : Scanner.error) -> report e.line e.col "Scan" e.message) errors;
+    List.iter (fun (e : Scanner.error) -> report_at ~entry:opts.path e.file e.line e.col "Scan" e.message) errors;
     exit 65
   | Ok tokens ->
     if opts.dump_tokens
@@ -87,30 +91,43 @@ let () =
       List.iter (fun t -> print_endline (Token.to_string t)) tokens);
     (match Parser.parse tokens with
      | Error errors ->
-       List.iter (fun (e : Parser.error) -> report e.line e.col "Parse" e.message) errors;
+       List.iter (fun (e : Parser.error) -> report_at ~entry:opts.path e.file e.line e.col "Parse" e.message) errors;
        exit 65
      | Ok program ->
        if opts.dump_ast
        then (
          print_endline "-- ast --";
          print_string (Printer.string_of_program program));
-       (match Desugar.program (Prelude.program () @ program) with
+       (match
+          Desugar.program
+            (Prelude.program ()
+             @
+             match Loader.program opts.path with
+             | exception Loader.Failed e ->
+               report ~entry:opts.path e.span "Load" e.message;
+               exit 65
+             | linked ->
+               (match Metaprocess.program ~out:print_string linked with
+                | Ok processed -> processed
+                | Error e ->
+                  report ~entry:opts.path e.span "Meta" e.message;
+                  exit 65))
+        with
         | Error e ->
-          report e.span.line e.span.col "Desugar" e.message;
+          report ~entry:opts.path e.span "Desugar" e.message;
           exit 65
         | Ok desugared ->
         match Monomorphize.program desugared with
         | Error e ->
-          report e.span.line e.span.col "Comptime" e.message;
+          report ~entry:opts.path e.span "Comptime" e.message;
           exit 65
         | Ok desugared ->
         let registry = Registry.builtins () in
-        Builtins.register registry;
         match Typecheck.check ~registry desugared with
         | Error errors ->
           List.iter
             (fun (e : Typecheck.error) ->
-              report e.span.line e.span.col "Type" e.message)
+              report ~entry:opts.path e.span "Type" e.message)
             errors;
           exit 65
         | Ok typed ->
@@ -120,21 +137,26 @@ let () =
             print_string (Printer.string_of_typed_program typed));
           match Resolve.program ~registry (Specialize.program typed) with
           | Error e ->
-            report e.span.line e.span.col "Resolve" e.message;
+            report ~entry:opts.path e.span "Resolve" e.message;
             exit 65
           | Ok resolved ->
-          (match Cps.program (Reflect.program resolved) with
+          match Reflect.program resolved with
+          | Error e ->
+            report ~entry:opts.path e.span "Reflect" e.message;
+            exit 65
+          | Ok reflected ->
+          (match Cps.program reflected with
            | Error e ->
-             report e.span.line e.span.col "CPS" e.message;
+             report ~entry:opts.path e.span "CPS" e.message;
              exit 70
            | Ok converted ->
              (match Verify.program converted with
               | Error e ->
-                report e.span.line e.span.col "Verify" e.message;
+                report ~entry:opts.path e.span "Verify" e.message;
                 exit 70
               | Ok () -> ());
              (match Interp.run (Builtins.env ~out:print_string) converted with
               | Ok () -> ()
               | Error e ->
-                report e.span.line e.span.col "Runtime" e.message;
+                report ~entry:opts.path e.span "Runtime" e.message;
                 exit 70))))

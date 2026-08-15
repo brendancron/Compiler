@@ -11,4 +11,4 @@ fn produce(n: int) {
     log("end");
 }
 
-print(typeof(produce));
+print(typeof(produce).name);

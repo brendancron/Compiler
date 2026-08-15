@@ -1,5 +1,5 @@
 import "main";
 
-fn run() {
+fn start() {
     main.hello();
 }

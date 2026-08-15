@@ -24,7 +24,7 @@ impl Summary for Tweet {
     }
 }
 
-fn notify(item) {
+fn notify<T: Summary>(item: T) {
     print("Breaking news: " + item.summarize());
 }
 

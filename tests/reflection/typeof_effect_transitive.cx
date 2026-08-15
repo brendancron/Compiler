@@ -17,5 +17,5 @@ fn double_range(n: int) {
     range(n, n * 2);
 }
 
-print(typeof(range));
-print(typeof(double_range));
+print(typeof(range).name);
+print(typeof(double_range).name);

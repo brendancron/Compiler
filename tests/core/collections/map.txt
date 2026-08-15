@@ -1,0 +1,6 @@
+3 Map<string, int>
+true false
+25 -1
+3 26
+5
+0 false

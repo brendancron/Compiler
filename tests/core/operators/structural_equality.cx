@@ -1,0 +1,24 @@
+type Point { x: int, y: int }
+type Shape { Circle(int), Square(int) }
+
+var p = new Point { x: 1, y: 2 };
+var q = new Point { x: 1, y: 2 };
+
+print(p == q, same(p, q), same(p, p));
+print(new Point { x: 1, y: 9 } == p);
+
+var nested = [[1, 2], [3]];
+print(nested == [[1, 2], [3]], nested == [[1, 2], [4]]);
+
+print(new Shape::Circle(3) == new Shape::Circle(3));
+print(new Shape::Circle(3) == new Shape::Square(3));
+
+print((1, "a") == (1, "a"), (1, "a") == (1, "b"));
+
+var ps: Set<Point> = [p, q];
+print(ps.len(), ps.contains(new Point { x: 1, y: 2 }));
+
+var seats: Map<Point, string> = [(p, "aisle")];
+print(seats.get_or(q, "missing"));
+
+print(same(1, 1), same("ab", "ab"));

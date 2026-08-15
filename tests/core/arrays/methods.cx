@@ -1,0 +1,20 @@
+var xs = [1, 2, 3];
+print(xs.len());
+print(xs.contains(2), xs.contains(9));
+
+var zeros = new Array<int>(3, 0);
+zeros[1] = 5;
+print(zeros, zeros.len());
+
+fn widest(rows: Array<Array<int>>) -> int {
+    var best = 0;
+    var i = 0;
+    while (i < rows.len()) {
+        if (rows[i].len() > best) {
+            best = rows[i].len();
+        }
+        i = i + 1;
+    }
+    return best;
+}
+print(widest([[1], [2, 3, 4], [5, 6]]));

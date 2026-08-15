@@ -1,0 +1,9 @@
+effect Store<T> {
+    fn put(v: T);
+    fn take(): T;
+}
+
+fn mixed() -> string {
+    put(1);
+    return take();
+}
