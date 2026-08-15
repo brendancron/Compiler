@@ -20,6 +20,37 @@ type TypeShape {
     Other,
 }
 
+// What `a[i:j]` puts between the brackets. The four shapes are four variants
+// rather than one pair with sentinels, so a missing bound is missing rather
+// than encoded.
+type Range {
+    Between(int, int),
+    From(int),
+    To(int),
+    All
+}
+
+// A bound counted from the end is resolved here, once, where the length is
+// known — which is why it is the entry's business and not the language's.
+fn __bound(at: int, length: int) -> int {
+    var resolved = at;
+    if (resolved < 0) { resolved = length + resolved; }
+    if (resolved < 0) { resolved = 0; }
+    if (resolved > length) { resolved = length; }
+    return resolved;
+}
+
+fn __span(r: Range, length: int) -> (int, int) {
+    match r {
+        Range::Between(from, to) => {
+            return (__bound(from, length), __bound(to, length));
+        }
+        Range::From(from) => { return (__bound(from, length), length); }
+        Range::To(to) => { return (0, __bound(to, length)); }
+        Range::All => { return (0, length); }
+    }
+}
+
 impl Array<T> {
     fn contains(self, v: T) -> bool {
         var i = 0;
@@ -300,6 +331,37 @@ impl string {
         return out;
     }
 }
+// Slicing is indexing by a range, so it is the same operator over a different
+// index — and it copies, because a view would need to say how long it lives.
+op []<T>(self: List<T>, r: Range) -> List<T> {
+    var bounds = __span(r, self.len());
+    var out: List<T> = [];
+    var at = bounds.0;
+    while (at < bounds.1) {
+        out.push(self[at]);
+        at = at + 1;
+    }
+    return out;
+}
+
+op []<T>(self: Array<T>, r: Range) -> Array<T> {
+    var bounds = __span(r, self.len());
+    var taken = bounds.1 - bounds.0;
+    if (taken <= 0) { return new Array<T>(0, self[0]); }
+    var out = new Array<T>(taken, self[bounds.0]);
+    var at = 0;
+    while (at < taken) {
+        out[at] = self[bounds.0 + at];
+        at = at + 1;
+    }
+    return out;
+}
+
+op [](self: string, r: Range) -> string {
+    var bounds = __span(r, self.len());
+    return __slice(self, bounds.0, bounds.1);
+}
+
 |}
 
 (* The name a prelude span reports. Not a path: nothing reads it, and a

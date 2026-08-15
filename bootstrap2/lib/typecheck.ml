@@ -285,6 +285,8 @@ let unify_at span expected actual =
 
 let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
   match t.Ast.it with
+  (* The parameter holds them; the call site is what collected them. *)
+  | Ast.Ty_variadic element -> Types.iarray (infer_ty_of_annotation element)
   | Ast.Ty_name "int" -> Types.IInt
   | Ast.Ty_name "float" -> Types.IFloat
   | Ast.Ty_name "string" -> Types.IStr
@@ -435,6 +437,7 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   in
   match s.Ast.it with
   | `Expr e -> assigned_in_expr e acc
+  | `Defer inner -> assigned_in_stmt inner acc
   | `Var_decl (_, _, init) -> opt assigned_in_expr init acc
   | `Block body | `Fn (_, _, _, body) ->
     List.fold_left (fun acc st -> assigned_in_stmt st acc) acc body
@@ -499,13 +502,47 @@ let element_of registry (target : checked_expr) =
   | Some other ->
     (match Types.container_element (Types.of_ty other) with
      | Some (name, elem)
-       when String.equal name Types.array_name || Registry.indexed registry name <> None ->
+       when String.equal name Types.array_name || Registry.is_indexed registry name ->
        elem
      | _ -> fail target.Ast.span "Cannot index %s." (Types.string_of_ty other))
   | None ->
     let elem = Types.fresh () in
     unify_at target.Ast.span (Types.fresh_with (Types.Collection elem)) target.Ast.ann;
     elem
+
+(* The entry for reading this target at this index, when the index is a type
+   the target declared one for. Its declared signature is what says how the
+   operands and the result relate. *)
+let declared_index env registry (target : checked_expr) (index : checked_expr) =
+  let concrete t = Option.map Types.string_of_ty (Types.concrete t) in
+  match Types.concrete index.Ast.ann with
+  | Some Types.Int | None -> None
+  | Some _ ->
+    (* A literal whose container nothing has chosen is an array, which is what
+       it would have defaulted to anyway — decided here because the entry to
+       reach cannot be found without it. *)
+    (match Types.repr target.Ast.ann with
+     | Types.IVar { contents = Types.Unbound (_, Types.Collection elem) } ->
+       (try Types.unify target.Ast.ann (Types.iarray elem) with
+        | Types.Type_error _ -> ())
+     | _ -> ());
+    (match Types.type_name (Option.value (Types.concrete target.Ast.ann) ~default:Types.Unit) with
+     | None -> None
+     | Some owner ->
+       (match Registry.indexed registry owner (Option.value (concrete index.Ast.ann) ~default:"") with
+        | Some { Registry.get = Some fn; _ } ->
+          (match lookup env fn with
+           | None -> None
+           | Some scheme ->
+             let result = Types.fresh () in
+             (try
+                Types.unify
+                  (Types.instantiate scheme)
+                  (Types.IFn ([ target.Ast.ann; index.Ast.ann ], result, Types.REmpty));
+                Some result
+              with
+              | Types.Type_error _ -> None))
+        | _ -> None))
 
 let binop_result registry (op : Ast.binop) a b =
   match Types.concrete a, Types.concrete b with
@@ -537,6 +574,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
   | `Float n -> node Types.IFloat (`Float n)
   | `Str s -> node Types.IStr (`Str s)
   | `Name n -> node Types.iname (`Name n)
+  | `Bytes b -> node (Types.iarray Types.IByte) (`Bytes b)
   | `Char c -> node Types.IChr (`Char c)
   | `Bool b -> node Types.IBool (`Bool b)
   | `Var name ->
@@ -1025,8 +1063,14 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
   | `Index (target, index) ->
     let target = infer_expr env ctx target in
     let index = infer_expr env ctx index in
-    unify_at index.Ast.span Types.IInt index.Ast.ann;
-    node (element_of ctx.registry target) (`Index (target, index))
+    (* An index that is not an int is one the type declared an entry for, and
+       what that entry returns is its own business — a range yields a slice,
+       not an element. *)
+    (match declared_index env ctx.registry target index with
+     | Some result -> node result (`Index (target, index))
+     | None ->
+       unify_at index.Ast.span Types.IInt index.Ast.ann;
+       node (element_of ctx.registry target) (`Index (target, index)))
   | `Index_assign (target, index, v) ->
     let target = infer_expr env ctx target in
     if Types.concrete target.Ast.ann = Some Types.Str
@@ -1085,18 +1129,22 @@ and declare_ops registry (body : Ast.desugared_stmt list) =
                    ; body
                    }
                })
-         | Ast.Op_index, [ target; _ ] ->
-           let owner = named target in
-           (match Registry.indexed registry owner with
-            | Some { Registry.get = Some _; _ } -> taken "Indexing" owner
+         (* Two entries differ by what indexes them, so `taken` is about one
+            index type rather than about the whole type. *)
+         | Ast.Op_index, [ target; index ] ->
+           let owner = named target
+           and by = named index in
+           (match Registry.exact_index registry owner by with
+            | Some { Registry.get = Some _; _ } -> taken ("Indexing by " ^ by) owner
             | _ -> ());
-           Registry.register_index_get registry owner emitted
-         | Ast.Op_index_set, [ target; _; _ ] ->
-           let owner = named target in
-           (match Registry.indexed registry owner with
-            | Some { Registry.set = Some _; _ } -> taken "Index assignment" owner
+           Registry.register_index_get registry owner by emitted
+         | Ast.Op_index_set, [ target; index; _ ] ->
+           let owner = named target
+           and by = named index in
+           (match Registry.exact_index registry owner by with
+            | Some { Registry.set = Some _; _ } -> taken ("Index assignment by " ^ by) owner
             | _ -> ());
-           Registry.register_index_set registry owner emitted
+           Registry.register_index_set registry owner by emitted
          | Ast.Op_index, _ ->
            fail
              s.Ast.span
@@ -1439,6 +1487,8 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
          ~env_fields:(env_free_field_vars env)
          fn_type);
     Ast.annotated span fn_type (`Fn (name, params, signature, body)))
+  (* Checked where it is written; when it runs is the block's business. *)
+  | `Defer inner -> node (`Defer (infer_stmt env ctx assigned inner))
   | `Type_decl (name, params, body) -> node (`Type_decl (name, params, body))
   | `Op_decl (op, params, signature, body) ->
     let mangled = Ast.op_entry_name op params signature in

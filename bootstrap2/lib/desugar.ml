@@ -9,6 +9,14 @@ exception Error of error
 
 let declared : (string, stmt handler) Hashtbl.t = Hashtbl.create 8
 
+(* Functions whose last parameter is variadic, and how many come before it. *)
+let variadic : (string, int) Hashtbl.t = Hashtbl.create 8
+
+let variadic_arity (params : param list) =
+  match List.rev params with
+  | { ty = Some { it = Ty_variadic _; _ }; _ } :: before -> Some (List.length before)
+  | _ -> None
+
 let counter = ref 0
 
 let fresh prefix =
@@ -19,6 +27,23 @@ let rec expr (e : expr) : desugared_expr =
   let sp = e.span in
   let it : desugared_expr_kind =
     match e.it with
+    (* Everything past the fixed parameters becomes the array the callee
+       declared, so the callee has an ordinary parameter and nothing after
+       this pass knows a call was written any other way. *)
+    | `Call (({ it = `Var name; _ } as callee), args)
+      when Hashtbl.mem variadic name && List.length args >= Hashtbl.find variadic name ->
+      let fixed = Hashtbl.find variadic name in
+      let rec split n = function
+        | rest when n = 0 -> [], rest
+        | [] -> [], []
+        | a :: rest ->
+          let before, after = split (n - 1) rest in
+          a :: before, after
+      in
+      let before, collected = split fixed args in
+      `Call
+        ( expr callee
+        , List.map expr before @ [ { it = `Collection_lit (List.map expr collected); span = sp; ann = () } ] )
     | #lit as l -> l
     | #vars as v -> (map_vars expr v :> desugared_expr_kind)
     | #ops as o -> (map_ops expr o :> desugared_expr_kind)
@@ -137,10 +162,13 @@ and clause span (c : stmt handler_clause) : desugared_stmt handler =
 
 let program (p : program) : (desugared_stmt list, error) result =
   Hashtbl.reset declared;
+  Hashtbl.reset variadic;
   List.iter
     (fun (s : stmt) ->
       match s.it with
       | `Handler_decl (name, h) -> Hashtbl.replace declared name h
+      | `Fn (name, params, _, _) ->
+        Option.iter (Hashtbl.replace variadic name) (variadic_arity params)
       | _ -> ())
     p;
   try Ok (List.map stmt p) with

@@ -96,6 +96,33 @@ let cases =
   ; "tests/core/ufcs/with_lambda"
   ; "tests/core/ufcs/imported/main"
   ; "tests/stdlib/fallible/fallible"
+  ; "tests/stdlib/toml/toml/toml"
+  ; "tests/core/strings/string_slice"
+  ; "tests/core/slices/overload"
+  ; "tests/core/embed/embed"
+  ; "tests/core/defer/defer_return"
+  ; "tests/core/defer/defer_scope"
+  ; "tests/core/defer/defer_effect"
+  ; "tests/core/resolution/symbol_res"
+  ; "tests/core/resolution/hoisting"
+  ; "tests/core/builtins/print_value"
+  ; "tests/core/variadic/basics"
+  ; "tests/core/variadic/generic"
+  ; "tests/reflection/typeof_effect_transitive"
+  ; "tests/reflection/typeof_effect_multi"
+  ; "tests/reflection/typeof_effect_fn_vs_ctl"
+  ; "tests/reflection/typeof_effect_ctl"
+  ; "tests/core/defer/defer_lifo"
+  ; "tests/core/defer/defer_basic"
+  ; "tests/core/slices/slice_range"
+  ; "tests/reflection/typeof_slice"
+  ; "tests/reflection/typeof_enum"
+  ; "tests/core/structs/struct_dot_assign"
+  ; "tests/core/enums/wildcard"
+  ; "tests/core/enums/unit_variants"
+  ; "tests/stdlib/automata/dfa/dfa"
+  ; "tests/stdlib/automata/nfa/nfa"
+  ; "tests/stdlib/regex/regex/regex"
   ; "tests/effects/generic/shared_param"
   ; "tests/effects/generic/generic"
   ; "tests/effects/generic/nested"
@@ -165,7 +192,9 @@ let cases =
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
 let error_cases =
-  [ "tests/effects/errors/return_out_of_run"
+  [ "tests/core/variadic/errors/not_last"
+  ; "tests/core/embed/errors/missing"
+  ; "tests/effects/errors/return_out_of_run"
   ; "tests/effects/generic/errors/one_type"
   ; "tests/effects/final/errors/resumes"
   ; "tests/core/ufcs/errors/arity"
@@ -183,8 +212,6 @@ let error_cases =
   ; "tests/types/errors/assign_mismatch"
   ; "tests/types/errors/unknown_type"
   ; "tests/types/errors/string_comparison"
-  ; "tests/types/errors/print_is_not_a_value"
-  ; "tests/types/errors/shadowed_print"
   ; "tests/effects/errors/unhandled"
   ; "tests/effects/errors/non_exhaustive"
   ; "tests/effects/errors/no_such_operation"
@@ -230,7 +257,8 @@ let error_cases =
 (* Programs that must be accepted and then fail while running, paired with a
    .rt holding the diagnostic. Separate from error_cases because those never
    reach the interpreter. *)
-let runtime_cases = [ "tests/core/collections/index_out_of_range" ]
+let runtime_cases =
+  [ "tests/core/collections/index_out_of_range"; "tests/core/slices/negative_index" ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)
 let repo_root () =
@@ -314,7 +342,9 @@ type blocker =
   | Step of string
   | Rewrite (* predates a syntax decision, so the fixture is what is wrong *)
   | Deferred (* a decision taken later on purpose; see internal-docs/TODO.md *)
-  | Backend (* needs the LLVM path, which this bootstrap does not have *)
+  (* Not being worked on, rather than waiting on anything: these need the LLVM
+     path, and native compilation is out of scope for this bootstrap. *)
+  | Parked
   | Unplanned (* no design for it anywhere yet *)
 
 (* Every fixture under tests/ that neither [cases] nor [error_cases] claims.
@@ -322,53 +352,23 @@ type blocker =
    rather than sitting unnoticed — which is how four of them came to be passing
    with nothing recording it. *)
 let expected_failing : (string * blocker) list =
-    (* 10 · Modules *)
+    (* Unplanned *)
   [ "tests/core/for_tuple/for_tuple", Unplanned
-  ; "tests/stdlib/automata/dfa/dfa", Step "10 · Modules"
-  ; "tests/stdlib/automata/nfa/nfa", Step "10 · Modules"
-  ; "tests/stdlib/regex/regex/regex", Step "10 · Modules"
-  ; "tests/stdlib/toml/toml/toml", Step "10 · Modules"
-    (* 11 · Metaprocessing *)
-    (* 12 · typeof yields a Type *)
-  ; "tests/reflection/typeof_effect_ctl", Unplanned
-  ; "tests/reflection/typeof_effect_fn_vs_ctl", Unplanned
-  ; "tests/reflection/typeof_effect_multi", Unplanned
-  ; "tests/reflection/typeof_effect_transitive", Unplanned
-  ; "tests/reflection/typeof_enum", Rewrite
-  ; "tests/reflection/typeof_slice", Rewrite
-    (* Rewrite *)
-  ; "tests/core/builtins/free", Rewrite
-  ; "tests/core/enums/unit_variants", Rewrite
-  ; "tests/core/enums/wildcard", Rewrite
-  ; "tests/core/structs/struct2", Rewrite
-  ; "tests/core/structs/struct_dot_assign", Rewrite
-  ; "tests/types/gadt/main", Rewrite
-    (* Deferred *)
-  ; "tests/core/defer/defer_basic", Deferred
-  ; "tests/core/defer/defer_lifo", Deferred
-  ; "tests/core/defer/defer_return", Deferred
-  ; "tests/core/embed/embed", Deferred
-  ; "tests/core/resolution/symbol_res", Deferred
-  ; "tests/core/slices/negative_index", Deferred
-  ; "tests/core/slices/slice_range", Deferred
-  ; "tests/core/strings/string_slice", Deferred
-    (* Backend *)
-  ; "tests/compile/m0/m0", Backend
-  ; "tests/compile/m1/fib", Backend
-  ; "tests/compile/m2/struct", Backend
-  ; "tests/compile/m3/fact", Backend
-  ; "tests/compile/m4/countdown", Backend
-  ; "tests/compile/m5/sum", Backend
-  ; "tests/compile/m6/apply", Backend
-  ; "tests/compile/m7/safe_div", Backend
-  ; "tests/compile/m8/gadt", Backend
+  ; "tests/types/gadt/main", Unplanned
+    (* Parked — native compilation, deliberately out of scope *)
+  ; "tests/compile/m0/m0", Parked
+  ; "tests/compile/m1/fib", Parked
+  ; "tests/compile/m2/struct", Parked
+  ; "tests/compile/m3/fact", Parked
+  ; "tests/compile/m4/countdown", Parked
+  ; "tests/compile/m5/sum", Parked
+  ; "tests/compile/m6/apply", Parked
+  ; "tests/compile/m7/safe_div", Parked
+  ; "tests/compile/m8/gadt", Parked
     (* Unplanned *)
   ; "tests/core/builtins/conversions", Unplanned
   ; "tests/core/builtins/readfile", Unplanned
   ; "tests/core/builtins/writefile", Unplanned
-  ; "tests/core/functions/trailing_explicit_param", Rewrite
-  ; "tests/core/functions/trailing_multi_param", Rewrite
-  ; "tests/core/structs/struct", Unplanned
   ; "tests/effects/async/async", Unplanned
   ]
 
@@ -467,6 +467,42 @@ let run_runtime_case root name =
         (normalize actual);
       false)
 
+(* Printing a parsed program gives back a program that parses the same way.
+   What it catches is a printer that drops or reshapes something — and, since a
+   mechanical rewrite of source is a heuristic, a rewrite that corrupted a
+   construct it did not understand. *)
+let run_round_trip root name =
+  let path = Filename.concat root (name ^ ".cx") in
+  let parse where text =
+    match Scanner.scan_tokens ~file:path text with
+    | Error _ -> Error (Printf.sprintf "%s does not scan" where)
+    | Ok tokens ->
+      (match Parser.parse tokens with
+       | Error (e :: _) ->
+         Error (Printf.sprintf "%s does not parse [%d:%d] %s" where e.Parser.line e.Parser.col e.Parser.message)
+       | Error [] -> Error (Printf.sprintf "%s does not parse" where)
+       | Ok program -> Ok program)
+  in
+  match parse "source" (read_file path) with
+  | Error message ->
+    Printf.printf "FAIL %s (round trip)\n  %s\n" name message;
+    false
+  | Ok once ->
+    let printed = Bootstrap2.Source.program once in
+    (match parse "its own output" printed with
+     | Error message ->
+       Printf.printf "FAIL %s (round trip)\n  %s\n" name message;
+       false
+     | Ok twice ->
+       let again = Bootstrap2.Source.program twice in
+       if String.equal printed again
+       then (
+         Printf.printf "ok   %s (round trip)\n" name;
+         true)
+       else (
+         Printf.printf "FAIL %s (round trip)\n  printing it twice differs\n" name;
+         false))
+
 let run_case root name =
   let path ext = Filename.concat root (name ^ ext) in
   let expected = read_file (path ".txt") in
@@ -500,7 +536,7 @@ let run_expected_failing root (name, blocker) =
        | Step step -> step
        | Rewrite -> "a rewrite"
        | Deferred -> "a deferred decision"
-       | Backend -> "the backend"
+       | Parked -> "the LLVM path, which is out of scope"
        | Unplanned -> "a design");
     false
   | _ -> true
@@ -515,6 +551,7 @@ let () =
       List.map (run_case root) cases
       @ List.map (run_error_case root) error_cases
       @ List.map (run_runtime_case root) runtime_cases
+      @ List.map (run_round_trip root) cases
       @ List.map (run_expected_failing root) expected_failing
     in
     let failed = List.length (List.filter not results) in

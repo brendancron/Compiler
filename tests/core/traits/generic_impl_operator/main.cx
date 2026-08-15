@@ -25,10 +25,10 @@ impl Pair<T> {
 }
 
 var v = new Pair { a: new Vec2 { x: 1, y: 2 }, b: new Vec2 { x: 10, y: 20 } };
-print(v.total().x, v.twice().x, v.same());
+print(str(v.total().x) + " " + str(v.twice().x) + " " + str(v.same()));
 
 var n = new Pair { a: 2, b: 3 };
-print(n.total(), n.twice(), n.same());
+print(str(n.total()) + " " + str(n.twice()) + " " + str(n.same()));
 
 var s = new Pair { a: "ab", b: "ab" };
-print(s.total(), s.same());
+print(str(s.total()) + " " + str(s.same()));

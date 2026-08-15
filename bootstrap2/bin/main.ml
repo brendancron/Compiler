@@ -6,6 +6,7 @@ let usage =
   \  --dump-tokens   print the token stream\n\
   \  --dump-ast      print the parsed AST\n\
   \  --dump-types    print the type-checked AST\n\
+  \  --dump-code     print the program as Cronyx, after metaprocessing\n\
   \  -h, --help      show this message"
 
 type options =
@@ -14,6 +15,7 @@ type options =
   ; dump_tokens : bool
   ; dump_ast : bool
   ; dump_types : bool
+  ; dump_code : bool
   }
 
 let die message =
@@ -28,6 +30,7 @@ let parse_args argv =
   let dump_tokens = ref false in
   let dump_ast = ref false in
   let dump_types = ref false in
+  let dump_code = ref false in
   let set_path arg =
     match !path with
     | Some _ -> die ("unexpected extra argument: " ^ arg ^ "\n" ^ usage)
@@ -42,6 +45,7 @@ let parse_args argv =
         | "--dump-tokens" -> dump_tokens := true
         | "--dump-ast" -> dump_ast := true
         | "--dump-types" -> dump_types := true
+        | "--dump-code" -> dump_code := true
         | "-h" | "--help" ->
           print_endline usage;
           exit 0
@@ -57,6 +61,7 @@ let parse_args argv =
     ; dump_tokens = !dump_tokens
     ; dump_ast = !dump_ast
     ; dump_types = !dump_types
+    ; dump_code = !dump_code
     }
 
 let read_file path =
@@ -108,7 +113,14 @@ let () =
                exit 65
              | linked ->
                (match Metaprocess.program ~out:print_string linked with
-                | Ok processed -> processed
+                | Ok processed ->
+                  (* What a `gen` produced is ordinary source by now, which is
+                     the point of reading it here rather than as a tree. *)
+                  if opts.dump_code
+                  then (
+                    print_endline "-- code --";
+                    print_string (Source.program processed));
+                  processed
                 | Error e ->
                   report ~entry:opts.path e.span "Meta" e.message;
                   exit 65))

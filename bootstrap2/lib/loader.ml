@@ -160,7 +160,7 @@ let rec bound_by (s : Ast.stmt) =
   | `Block body -> List.concat_map bound_by body
   | _ -> []
 
-let rewrite ~aliases ~direct ~own ~rename (program : Ast.program) =
+let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
   let module S = Set.Make (String) in
   (* A written type name is resolved the same three ways a value name is: its
      own unit's, one brought in by name, or one reached through a namespace. *)
@@ -180,6 +180,7 @@ let rewrite ~aliases ~direct ~own ~rename (program : Ast.program) =
   let rec type_expr (t : Ast.type_expr) : Ast.type_expr =
     let it : Ast.type_expr_kind =
       match t.Ast.it with
+      | Ast.Ty_variadic t -> Ast.Ty_variadic (type_expr t)
       | Ast.Ty_name name -> Ast.Ty_name (resolve_type name)
       | Ast.Ty_app (name, args) ->
         Ast.Ty_app (resolve_type name, List.map type_expr args)
@@ -215,6 +216,19 @@ let rewrite ~aliases ~direct ~own ~rename (program : Ast.program) =
           List.fold_left (fun acc (p : Ast.param) -> S.add p.Ast.name acc) locals params
         in
         `Lambda (params, signature, List.map (stmt inner) body)
+      (* `embed` is a file read where the program is put together, since that
+         is what knows where the source it was written in lives. What the
+         program keeps is the text, so nothing reads anything later. *)
+      | `Call ({ Ast.it = `Var "embed"; _ }, [ { Ast.it = `Str path; _ } ]) ->
+        let path = Utf8.encode path in
+        let full =
+          if Filename.is_relative path
+          then Filename.concat (Filename.dirname from) path
+          else path
+        in
+        (match In_channel.with_open_bin full In_channel.input_all with
+         | contents -> `Bytes contents
+         | exception Sys_error _ -> fail e.Ast.span "Cannot embed '%s'." path)
       | `Code inner -> `Code (go inner)
       | `Var name when not (S.mem name locals) ->
         (match Hashtbl.find_opt direct name with
@@ -393,7 +407,13 @@ let program entry_path =
                names
            | Ast.Wildcard _ -> ()))
       (imports u.program);
-    rewrite ~aliases ~direct ~own ~rename:(fun name -> renamed u ~entry name) u.program
+    rewrite
+      ~aliases
+      ~direct
+      ~own
+      ~rename:(fun name -> renamed u ~entry name)
+      ~from:u.path
+      u.program
   in
   let declarations_of u ~entry =
     resolve_unit u ~entry |> List.filter (fun s -> is_declaration s || entry)

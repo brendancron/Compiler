@@ -1,5 +1,0 @@
-fn print(msg: string) -> int {
-    return msg.len();
-}
-
-print("a", "b");

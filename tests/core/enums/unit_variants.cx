@@ -1,11 +1,11 @@
-enum Direction {
+type Direction {
     North,
     South,
     East,
-    West,
+    West
 }
 
-var dir = Direction::South;
+var dir = new Direction::South;
 
 match dir {
     Direction::North => { print("north"); }

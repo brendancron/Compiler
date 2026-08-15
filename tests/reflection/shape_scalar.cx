@@ -8,6 +8,6 @@ fn kind(shape: TypeShape) -> string {
     }
 }
 
-print(kind(typeof(1).shape), kind(typeof(1.5).shape), kind(typeof(true).shape));
-print(kind(typeof("s").shape), kind(typeof('c').shape));
-print(kind(typeof([1, 2]).shape), kind(typeof((1, 2)).shape), kind(typeof(kind).shape));
+print(str(kind(typeof(1).shape)) + " " + str(kind(typeof(1.5).shape)) + " " + str(kind(typeof(true).shape)));
+print(str(kind(typeof("s").shape)) + " " + str(kind(typeof('c').shape)));
+print(str(kind(typeof([1, 2]).shape)) + " " + str(kind(typeof((1, 2)).shape)) + " " + str(kind(typeof(kind).shape)));

@@ -1,4 +1,5 @@
-// Expected: effect row lists all effects, sorted alphabetically.
+// Two operations of one effect are one entry: what a row records is what
+// has to be handled.
 
 effect io {
     ctl emit(val: int): unit;

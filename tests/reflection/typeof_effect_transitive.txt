@@ -1,2 +1,2 @@
-(int, int) -> unit <yield>
-(int) -> unit <yield>
+(int, int) -> <stream> unit
+(int) -> <stream> unit

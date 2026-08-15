@@ -1,13 +1,13 @@
 var t: (int, string) = (1, "a");
-print(t.0, t.1);
+print(str(t.0) + " " + str(t.1));
 
 fn swap(p: (int, string)) -> (string, int) { return (p.1, p.0); }
 var s = swap(t);
-print(s.0, s.1);
+print(str(s.0) + " " + str(s.1));
 print(typeof(swap).name);
 
 var pairs = [(1, "a"), (2, "b")];
-print(pairs[1].1, typeof(pairs).name);
+print(str(pairs[1].1) + " " + str(typeof(pairs).name));
 
 // Tuples compare by their elements, unlike arrays.
 print((1, 2) == (1, 2));

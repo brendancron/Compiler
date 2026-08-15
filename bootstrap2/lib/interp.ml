@@ -84,7 +84,7 @@ let rec eval env (e : Ast.cps_expr) : value =
             let frame = new_env (Some env) in
             List.iter2 (define frame) names args;
             (try
-               List.iter (exec frame) body;
+               run_block frame body;
                Unit
              with
              | Return_value (v, _) -> v))
@@ -93,6 +93,7 @@ let rec eval env (e : Ast.cps_expr) : value =
   | `Float n -> Float n
   | `Str s -> Str s
   | `Name n -> Name n
+  | `Bytes b -> Array (Array.init (String.length b) (fun i -> Byte b.[i]))
   | `Char c -> Chr c
   | `Bool b -> Bool b
   | `Var name ->
@@ -198,6 +199,37 @@ and call span f args =
     f.apply span args
   | v -> fail span "Cannot call %s." (type_name v)
 
+(* Deferred statements run when the block is left, however it is left, and in
+   reverse: a pair that belongs together is written together, and the second
+   one still happens when the first's block returns out from under it. *)
+and run_block env body =
+  (* Declared, not executed: a function is in scope for the whole block it was
+     written in, which is what the checker already assumes when it accepts a
+     call above the declaration. *)
+  List.iter
+    (fun (s : Ast.cps_stmt) ->
+      match s.Ast.it with
+      | `Fn _ -> exec env s
+      | _ -> ())
+    body;
+  let deferred = ref [] in
+  let run_deferred () = List.iter (fun (scope, s) -> exec scope s) !deferred in
+  let rec walk = function
+    | [] -> ()
+    | { Ast.it = `Defer inner; _ } :: rest ->
+      deferred := (env, inner) :: !deferred;
+      walk rest
+    | { Ast.it = `Fn _; _ } :: rest -> walk rest
+    | s :: rest ->
+      exec env s;
+      walk rest
+  in
+  (match walk body with
+   | () -> run_deferred ()
+   | exception e ->
+     run_deferred ();
+     raise e)
+
 and exec env (s : Ast.cps_stmt) : unit =
   let span = s.Ast.span in
   match s.Ast.it with
@@ -216,7 +248,10 @@ and exec env (s : Ast.cps_stmt) : unit =
     define env name v
   | `Block body ->
     let scope = new_env (Some env) in
-    List.iter (exec scope) body
+    run_block scope body
+  (* Collected by the block that holds it, so reaching one on its own is
+     reaching it twice. *)
+  | `Defer _ -> ()
   | `If (cond, then_branch, else_branch) ->
     if as_bool span (eval env cond)
     then exec env then_branch
@@ -243,7 +278,7 @@ and exec env (s : Ast.cps_stmt) : unit =
                let frame = new_env (Some env) in
                List.iter2 (define frame) names args;
                (try
-                  List.iter (exec frame) body;
+                  run_block frame body;
                   Unit
                 with
                 | Return_value (v, _) -> v))
@@ -282,7 +317,7 @@ and exec env (s : Ast.cps_stmt) : unit =
 
 let run env (program : Ast.cps_stmt list) : (unit, error) result =
   try
-    List.iter (exec env) program;
+    run_block env program;
     Ok ()
   with
   | Runtime_error e -> Error e

@@ -26,5 +26,5 @@ var rex = new Dog { name: "rex", age: 3 };
 var older = new Dog { name: "rex", age: 4 };
 var here = new Point { x: 1, y: 2, z: 3 };
 var there = new Point { x: 1, y: 2, z: 4 };
-print(rex.eq(rex), rex.eq(older));
-print(here.eq(here), here.eq(there));
+print(str(rex.eq(rex)) + " " + str(rex.eq(older)));
+print(str(here.eq(here)) + " " + str(here.eq(there)));

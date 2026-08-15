@@ -9,4 +9,4 @@ impl Dog {
 fn speak(d: Dog) -> string { return "function"; }
 
 var rex = new Dog { name: "rex" };
-print(rex.speak(), speak(rex));
+print(str(rex.speak()) + " " + str(speak(rex)));

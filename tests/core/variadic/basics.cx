@@ -1,0 +1,23 @@
+// The last parameter may be variadic: the call site collects what is left into
+// the array the callee declared, so the callee has an ordinary parameter.
+fn max(first: int, rest: ...int) -> int {
+    var best = first;
+    for (v in rest) { if (v > best) { best = v; } }
+    return best;
+}
+
+print(max(3, 9, 4));
+print(max(1, 2, 3, 4, 5));
+
+// None is an empty array, not an error.
+print(max(3));
+
+// It may be the only parameter.
+fn sum(values: ...int) -> int {
+    var total = 0;
+    for (v in values) { total = total + v; }
+    return total;
+}
+
+print(sum(1, 2, 3));
+print(sum());

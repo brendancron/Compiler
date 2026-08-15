@@ -3,7 +3,7 @@ type Card { Damage(int), Heal { amount: int }, Skip }
 match typeof(new Card::Skip).shape {
     TypeShape::Sum(name, variants) => {
         print(variants.len());
-        for (variant in variants) { print(variant.name, variant.arity); }
+        for (variant in variants) { print(str(variant.name) + " " + str(variant.arity)); }
     }
     TypeShape::Scalar => { print("scalar"); }
     TypeShape::Product(name, fields) => { print("product"); }

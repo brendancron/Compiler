@@ -25,7 +25,9 @@ type entry =
 type t =
   { (* The variadic constructor a literal of this type becomes. *)
     containers : (string, container) Hashtbl.t
-  ; indexed : (string, indexing) Hashtbl.t
+  ; (* Keyed by what the index is, so one type may be read by an int and
+       sliced by a range. *)
+    indexed : (string * string, indexing) Hashtbl.t
   ; constructors : (string, string) Hashtbl.t
   ; exact : (Ast.binop * Types.ty * Types.ty, entry) Hashtbl.t
   ; (* Any two operands of the same type, which cannot be enumerated. *)
@@ -41,17 +43,41 @@ let create () =
   }
 
 let register_container t name entry = Hashtbl.replace t.containers name entry
-let entry_for t name =
-  match Hashtbl.find_opt t.indexed name with
+
+let entry_for t key =
+  match Hashtbl.find_opt t.indexed key with
   | Some entry -> entry
   | None -> { get = None; set = None }
 
-let register_index_get t name fn =
-  Hashtbl.replace t.indexed name { (entry_for t name) with get = Some fn }
+let register_index_get t name index fn =
+  Hashtbl.replace t.indexed (name, index) { (entry_for t (name, index)) with get = Some fn }
 
-let register_index_set t name fn =
-  Hashtbl.replace t.indexed name { (entry_for t name) with set = Some fn }
-let indexed t name = Hashtbl.find_opt t.indexed name
+let register_index_set t name index fn =
+  Hashtbl.replace t.indexed (name, index) { (entry_for t (name, index)) with set = Some fn }
+
+let overloads t name =
+  Hashtbl.fold
+    (fun (owner, index) entry acc ->
+      if String.equal owner name then (index, entry) :: acc else acc)
+    t.indexed
+    []
+
+(* Without the fallback below, which is for reading an entry rather than for
+   deciding whether one is already there. *)
+let exact_index t name index = Hashtbl.find_opt t.indexed (name, index)
+
+(* An index whose type is a parameter registers under that parameter's name and
+   matches nothing written, so a type with one entry answers for any index —
+   which is what keeps a container indexed by its own key type working. *)
+let indexed t name index =
+  match Hashtbl.find_opt t.indexed (name, index) with
+  | Some entry -> Some entry
+  | None ->
+    (match overloads t name with
+     | [ (_, only) ] -> Some only
+     | _ -> None)
+
+let is_indexed t name = overloads t name <> []
 let register_constructor t name fn = Hashtbl.replace t.constructors name fn
 let constructor t name = Hashtbl.find_opt t.constructors name
 let container t name = Hashtbl.find_opt t.containers name

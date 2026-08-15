@@ -7,9 +7,9 @@ run {
         yield(1);
         yield(2);
     } handle Yield {
-        ctl yield(x) { print("inner", x); resume; }
+        ctl yield(x) { print("inner" + " " + str(x)); resume; }
     }
     yield("done");
 } handle Yield {
-    ctl yield(s) { print("outer", s); resume; }
+    ctl yield(s) { print("outer" + " " + str(s)); resume; }
 }

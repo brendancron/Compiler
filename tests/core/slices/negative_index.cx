@@ -1,4 +1,9 @@
+// A bound counted from the end is a position a range names, and `[i:]`
+// resolves it. A plain index is a lookup, and a negative one is out of bounds
+// — usually a computed mistake rather than an intention.
 var nums = [10, 20, 30];
+
+print(nums[-1:][0]);
+print(nums[-2:][0]);
+
 print(nums[-1]);
-print(nums[-2]);
-print(nums[-3]);

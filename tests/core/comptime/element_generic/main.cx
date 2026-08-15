@@ -10,7 +10,7 @@ fn accumulate<T>(xs: Array<T>) {
 
 var vs = [new Vec2 { x: 1, y: 1 }, new Vec2 { x: 2, y: 2 }];
 accumulate(vs);
-print(vs[0].x, vs[0].y);
+print(str(vs[0].x) + " " + str(vs[0].y));
 
 var ns = [10, 20];
 accumulate(ns);

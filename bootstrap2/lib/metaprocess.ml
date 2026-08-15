@@ -59,6 +59,7 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
   let rec type_expr (t : Ast.type_expr) : Ast.type_expr =
     let it =
       match t.Ast.it with
+      | Ast.Ty_variadic t -> Ast.Ty_variadic (type_expr t)
       | Ast.Ty_name n -> Ast.Ty_name (named n)
       | Ast.Ty_app (n, args) -> Ast.Ty_app (named n, List.map type_expr args)
       | Ast.Ty_tuple items -> Ast.Ty_tuple (List.map type_expr items)

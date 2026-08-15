@@ -35,6 +35,7 @@ let rec expr (e : Ast.cps_expr) : unit =
   | `Float _ -> expect span "A float literal" Types.Float ann
   | `Str _ -> expect span "A string literal" Types.Str ann
   | `Name _ -> expect span "A name" Types.name ann
+  | `Bytes _ -> expect span "Embedded bytes" (Types.array Types.Byte) ann
   | `Char _ -> expect span "A char literal" Types.Chr ann
   | `Bool _ -> expect span "A bool literal" Types.Bool ann
   | `Var _ -> ()
@@ -197,6 +198,7 @@ and stmt (s : Ast.cps_stmt) : unit =
   match s.Ast.it with
   | `Expr e -> expr e
   | `Scope body -> List.iter stmt body
+  | `Defer s -> stmt s
   | `Abort -> ()
   | `Var_decl (_, _, init) -> Option.iter expr init
   | `Block body -> List.iter stmt body

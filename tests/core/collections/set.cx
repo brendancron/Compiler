@@ -8,12 +8,12 @@ print(seen.contains(9));
 print(seen.len());
 
 var words: Set<string> = ["a", "b", "a"];
-print(words.len(), words.contains("b"), typeof(words).name);
+print(str(words.len()) + " " + str(words.contains("b")) + " " + str(typeof(words).name));
 
 var letters: Set<char> = ['x', 'y', 'x'];
-print(letters.len(), letters.contains('y'));
+print(str(letters.len()) + " " + str(letters.contains('y')));
 
 var empty: Set<int> = [];
-print(empty.len(), empty.contains(1));
+print(str(empty.len()) + " " + str(empty.contains(1)));
 empty.insert(7);
-print(empty.len(), empty.contains(7));
+print(str(empty.len()) + " " + str(empty.contains(7)));

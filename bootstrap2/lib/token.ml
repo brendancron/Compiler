@@ -12,6 +12,7 @@ type token_type =
   | Semicolon
   | Slash
   | Percent
+  | Dot_dot_dot
   | Amp_amp
   | Pipe_pipe
   | Star
@@ -57,6 +58,7 @@ type token_type =
   | Gen
   | Code
   | Derive
+  | Defer
   | Op
   | Handle
   | Handler
@@ -97,6 +99,7 @@ let token_type_to_string = function
   | Semicolon -> "SEMICOLON"
   | Slash -> "SLASH"
   | Percent -> "PERCENT"
+  | Dot_dot_dot -> "DOT_DOT_DOT"
   | Amp_amp -> "AMP_AMP"
   | Pipe_pipe -> "PIPE_PIPE"
   | Star -> "STAR"
@@ -139,6 +142,7 @@ let token_type_to_string = function
   | Gen -> "GEN"
   | Code -> "CODE"
   | Derive -> "DERIVE"
+  | Defer -> "DEFER"
   | Op -> "OP"
   | Handle -> "HANDLE"
   | Handler -> "HANDLER"

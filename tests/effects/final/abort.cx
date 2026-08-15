@@ -15,7 +15,7 @@ fn as_word(n: int) -> string {
 }
 
 run {
-    print(as_int("42"), as_word(0));
+    print(str(as_int("42")) + " " + str(as_word(0)));
 } handle Error {
     final ctl throw(msg) { print("caught: " + msg); }
 }

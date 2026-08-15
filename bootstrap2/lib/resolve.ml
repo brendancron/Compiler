@@ -51,8 +51,11 @@ exception Failed of error
 let fail span fmt =
   Printf.ksprintf (fun message -> raise (Failed { span; message })) fmt
 
-let accessor registry (target : Ast.resolved_expr) pick =
-  match Option.bind (Types.type_name target.Ast.ann) (Registry.indexed registry) with
+let accessor registry (target : Ast.resolved_expr) (index : Ast.resolved_expr) pick =
+  let by_index owner =
+    Registry.indexed registry owner (Option.value (Types.type_name index.Ast.ann) ~default:"")
+  in
+  match Option.bind (Types.type_name target.Ast.ann) by_index with
   | Some entry ->
     (match pick entry with
      | Some name -> name
@@ -129,12 +132,18 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
     | `Index (target, index) ->
       let target = expr registry target
       and index = expr registry index in
-      if target.Ast.ann = Types.Str
+      (* The primitive reads take an int. Anything else is an entry the type
+         declared, including the range a slice is. *)
+      if index.Ast.ann <> Types.Int
+      then (
+        let name = accessor registry target index (fun entry -> entry.Registry.get) in
+        `Call (fn_ref span name [ target; index ] ann, [ target; index ]))
+      else if target.Ast.ann = Types.Str
       then `Str_get (target, index)
       else if Types.is_array target.Ast.ann
       then `Array_get (target, index)
       else (
-        let name = accessor registry target (fun entry -> entry.Registry.get) in
+        let name = accessor registry target index (fun entry -> entry.Registry.get) in
         `Call (fn_ref span name [ target; index ] ann, [ target; index ]))
     | `Index_assign (target, index, v) ->
       let target = expr registry target
@@ -144,7 +153,7 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
       then `Array_set (target, index, v)
       else (
         let args = [ target; index; v ] in
-        let name = accessor registry target (fun entry -> entry.Registry.set) in
+        let name = accessor registry target index (fun entry -> entry.Registry.set) in
         `Call (fn_ref span name args ann, args))
     | #Ast.lit as l -> l
     | #Ast.arrays as a -> (Ast.map_arrays (expr registry) a :> Ast.resolved_expr_kind)

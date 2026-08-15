@@ -15,4 +15,4 @@ var clamp = (v) => {
     if (v < 0) { return 0; }
     return v;
 };
-print(clamp(0 - 5), clamp(5));
+print(str(clamp(0 - 5)) + " " + str(clamp(5)));

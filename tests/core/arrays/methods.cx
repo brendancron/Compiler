@@ -1,10 +1,10 @@
 var xs = [1, 2, 3];
 print(xs.len());
-print(xs.contains(2), xs.contains(9));
+print(str(xs.contains(2)) + " " + str(xs.contains(9)));
 
 var zeros = new Array<int>(3, 0);
 zeros[1] = 5;
-print(zeros, zeros.len());
+print(str(zeros) + " " + str(zeros.len()));
 
 fn widest(rows: Array<Array<int>>) -> int {
     var best = 0;

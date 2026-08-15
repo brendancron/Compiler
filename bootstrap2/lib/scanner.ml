@@ -71,6 +71,7 @@ let keyword = function
   | "gen" -> Some Token.Gen
   | "code" -> Some Token.Code
   | "derive" -> Some Token.Derive
+  | "defer" -> Some Token.Defer
   | "meta" -> Some Token.Meta
   | "handle" -> Some Token.Handle
   | "handler" -> Some Token.Handler
@@ -196,7 +197,13 @@ let scan_token s =
   | ',' -> add_token s Token.Comma
   | ';' -> add_token s Token.Semicolon
   | ':' -> add_token s (if matches s ':' then Token.Colon_colon else Token.Colon)
-  | '.' -> add_token s Token.Dot
+  | '.' ->
+    if peek s = '.' && peek_next s = '.'
+    then (
+      ignore (advance s);
+      ignore (advance s);
+      add_token s Token.Dot_dot_dot)
+    else add_token s Token.Dot
   | '*' -> add_token s (if matches s '=' then Token.Star_equal else Token.Star)
   | '+' ->
     add_token

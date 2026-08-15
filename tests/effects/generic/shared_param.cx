@@ -13,6 +13,6 @@ fn round_trip(v: int) -> int {
 run {
     print(round_trip(7));
 } handle Store {
-    fn put(v) { print("put", v); }
+    fn put(v) { print("put" + " " + str(v)); }
     fn take() { return 99; }
 }

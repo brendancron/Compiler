@@ -1,91 +1,70 @@
-import "Option";
-import "String";
-import "../automata/Nfa";
-import "../automata/Dfa";
+import { Option } from "Option";
+import { substring } from "String";
+import { Dfa, subset_construction, dfa_step, dfa_is_accept, no_state } from "../automata/Dfa";
 import "../regex/RegexParser";
 import "../regex/RegexNfa";
 
-// Compile a regex pattern string to a DFA (codepoint alphabet).
-// Pipeline: pattern → RegexAst → NFA → DFA (subset construction)
-fn compile(pattern: string) {
-    var ast = RegexParser.parse(pattern);
-    var nfa = RegexNfa.build(ast);
-    return Dfa.subset_construction(nfa);
+// pattern → RegexAst → NFA → DFA. `.` is expanded to printable ASCII while
+// building, so the DFA's alphabet is whatever the pattern actually mentions.
+fn compile(pattern: string) -> Dfa {
+    return subset_construction(RegexNfa.build(RegexParser.parse(pattern)));
 }
 
-// Returns true if the entire input matches the pattern (full-string match).
-fn test(dfa, input: string) {
-    var chars = input.chars();
+// How far the DFA gets from `start`, and the end of the last position it
+// accepted at — `no_match` when it never accepted.
+fn no_match() -> int { return 0 - 1; }
+
+fn longest_from(dfa: Dfa, cps: List<int>, start: int) -> int {
     var state = dfa.start;
-    var i = 0;
-    var dead = false;
-    while (i < chars.len() && !dead) {
-        var cp = ord(chars[i]);
-        var next = Dfa.dfa_step(dfa, state, cp);
-        if (next == -1) { dead = true; }
-        if (!dead) { state = next; }
-        if (!dead) { i += 1; }
+    var accepted = no_match();
+    var at = start;
+    if (dfa_is_accept(dfa, state)) { accepted = at; }
+    while (at < cps.len()) {
+        var next = dfa_step(dfa, state, cps[at]);
+        if (next == no_state()) { return accepted; }
+        state = next;
+        at = at + 1;
+        if (dfa_is_accept(dfa, state)) { accepted = at; }
     }
-    if (dead) { return false; }
-    return Dfa.dfa_is_accept(dfa, state);
+    return accepted;
 }
 
-// Returns the first matching substring, or None.
-// Leftmost-longest: at each start position, extend as far as the DFA accepts.
-fn find(dfa, input: string) {
-    var chars = input.chars();
-    var n = chars.len();
-    var i = 0;
-    while (i < n) {
-        var state = dfa.start;
-        var last_accept = -1;
-        var j = i;
-        var dead = false;
-        while (j < n && !dead) {
-            var cp = ord(chars[j]);
-            var next = Dfa.dfa_step(dfa, state, cp);
-            if (next == -1) { dead = true; }
-            if (!dead) {
-                state = next;
-                if (Dfa.dfa_is_accept(dfa, state)) { last_accept = j + 1; }
-                j += 1;
-            }
-        }
-        if (last_accept != -1) {
-            return Option::Some(substring(input, i, last_accept));
-        }
-        i += 1;
-    }
-    return Option::None;
+fn code_points(input: string) -> List<int> {
+    var cps: List<int> = [];
+    for (c in input.chars()) { cps.push(ord(c)); }
+    return cps;
 }
 
-// Returns all non-overlapping matches, greedy left-to-right.
-fn find_all(dfa, input: string) {
-    var chars = input.chars();
-    var n = chars.len();
-    var results = [];
-    var i = 0;
-    while (i < n) {
-        var state = dfa.start;
-        var last_accept = -1;
-        var j = i;
-        var dead = false;
-        while (j < n && !dead) {
-            var cp = ord(chars[j]);
-            var next = Dfa.dfa_step(dfa, state, cp);
-            if (next == -1) { dead = true; }
-            if (!dead) {
-                state = next;
-                if (Dfa.dfa_is_accept(dfa, state)) { last_accept = j + 1; }
-                j += 1;
-            }
-        }
-        if (last_accept != -1) {
-            results.push(substring(input, i, last_accept));
-            i = last_accept;
+// The whole input, not a prefix of it.
+fn test(dfa: Dfa, input: string) -> bool {
+    var cps = code_points(input);
+    return longest_from(dfa, cps, 0) == cps.len();
+}
+
+fn find(dfa: Dfa, input: string) -> Option<string> {
+    var cps = code_points(input);
+    var at = 0;
+    while (at < cps.len()) {
+        var end = longest_from(dfa, cps, at);
+        if (end != no_match()) { return new Option::Some(substring(input, at, end)); }
+        at = at + 1;
+    }
+    return new Option::None;
+}
+
+// Non-overlapping, leftmost-longest.
+fn find_all(dfa: Dfa, input: string) -> List<string> {
+    var cps = code_points(input);
+    var found: List<string> = [];
+    var at = 0;
+    while (at < cps.len()) {
+        var end = longest_from(dfa, cps, at);
+        if (end != no_match() && end > at) {
+            found.push(substring(input, at, end));
+            at = end;
         } else {
-            i += 1;
+            at = at + 1;
         }
     }
-    return results;
+    return found;
 }

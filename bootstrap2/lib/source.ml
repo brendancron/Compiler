@@ -1,0 +1,440 @@
+(* The surface tree as Cronyx. What it prints is a program, not a rendering of
+   one: parsing the output gives back the same tree.
+
+   Comments are not in the tree, so they are not in the output. That is what
+   keeps this a way to read a program the compiler built — after `Metaprocess`,
+   what a `gen` produced is ordinary source here — rather than a formatter for
+   files someone wrote. *)
+
+let pad depth = String.make (depth * 4) ' '
+
+(* Whichever quote encloses it has to be escaped, and only that one: a `'`
+   inside a string needs nothing. *)
+let escape ?(quote = '"') text =
+  let buf = Buffer.create (String.length text + 2) in
+  String.iter
+    (fun c ->
+      match c with
+      | c when c = quote ->
+        Buffer.add_char buf '\\';
+        Buffer.add_char buf c
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | '\r' -> Buffer.add_string buf "\\r"
+      | c -> Buffer.add_char buf c)
+    text;
+  Buffer.contents buf
+
+let string_of_unop = function
+  | Ast.Neg -> "-"
+  | Ast.Not -> "!"
+
+let rec type_expr (t : Ast.type_expr) =
+  match t.Ast.it with
+  | Ast.Ty_name name -> name
+  | Ast.Ty_variadic inner -> "..." ^ type_expr inner
+  | Ast.Ty_app (name, args) ->
+    Printf.sprintf "%s<%s>" name (String.concat ", " (List.map type_expr args))
+  | Ast.Ty_tuple items -> Printf.sprintf "(%s)" (String.concat ", " (List.map type_expr items))
+  | Ast.Ty_record fields ->
+    Printf.sprintf
+      "{ %s }"
+      (String.concat ", " (List.map (fun (l, t) -> l ^ ": " ^ type_expr t) fields))
+  | Ast.Ty_fn (params, ret, row) ->
+    Printf.sprintf
+      "(%s) ->%s %s"
+      (String.concat ", " (List.map type_expr params))
+      (match row with
+       | [] -> ""
+       | labels -> Printf.sprintf " <%s>" (String.concat ", " labels))
+      (type_expr ret)
+
+let annotation = function
+  | None -> ""
+  | Some t -> ": " ^ type_expr t
+
+let param (p : Ast.param) = p.Ast.name ^ annotation p.Ast.ty
+
+let comptime_params (cs : Ast.comptime_param list) =
+  match cs with
+  | [] -> ""
+  | cs ->
+    Printf.sprintf
+      "<%s>"
+      (String.concat
+         ", "
+         (List.map (fun (c : Ast.comptime_param) -> c.Ast.cp_name ^ annotation c.Ast.cp_ty) cs))
+
+let signature (sg : Ast.signature) =
+  match sg.Ast.ret with
+  | None -> ""
+  | Some ret ->
+    Printf.sprintf
+      " ->%s %s"
+      (match sg.Ast.row with
+       | None | Some [] -> ""
+       | Some labels -> Printf.sprintf " <%s>" (String.concat ", " labels))
+      (type_expr ret)
+
+let rec expr (e : Ast.expr) : string =
+  match e.Ast.it with
+  | `Int n -> string_of_int n
+  | `Float n -> Token.float_to_string n
+  | `Str s -> Printf.sprintf "\"%s\"" (escape (Utf8.encode s))
+  | `Char c -> Printf.sprintf "'%s'" (escape ~quote:'\'' (Utf8.encode [| c |]))
+  | `Bool b -> string_of_bool b
+  | `Name n -> n
+  (* No literal writes one, so it is printed as the text it holds. *)
+  | `Bytes b -> Printf.sprintf "\"%s\"" (escape b)
+  | `Var name -> name
+  | `Assign (name, v) -> Printf.sprintf "%s = %s" name (expr v)
+  | `Compound (op, name, v) ->
+    Printf.sprintf "%s %s= %s" name (Ast.string_of_binop op) (expr v)
+  | `Unop (op, a) -> Printf.sprintf "%s%s" (string_of_unop op) (expr a)
+  (* Parenthesised throughout: the tree already says how it groups, and this
+     has no precedence table to decide when the parentheses are spare. *)
+  | `Binop (op, a, b) ->
+    Printf.sprintf "(%s %s %s)" (expr a) (Ast.string_of_binop op) (expr b)
+  | `And (a, b) -> Printf.sprintf "(%s && %s)" (expr a) (expr b)
+  | `Or (a, b) -> Printf.sprintf "(%s || %s)" (expr a) (expr b)
+  | `Call (callee, args) -> Printf.sprintf "%s(%s)" (expr callee) (arguments args)
+  | `Index (target, index) -> Printf.sprintf "%s[%s]" (expr target) (expr index)
+  | `Index_assign (target, index, v) ->
+    Printf.sprintf "%s[%s] = %s" (expr target) (expr index) (expr v)
+  | `Tuple items -> Printf.sprintf "(%s)" (arguments items)
+  | `Tuple_get (target, at) -> Printf.sprintf "%s.%d" (expr target) at
+  | `Record_lit fields -> Printf.sprintf "{ %s }" (labelled fields)
+  | `Field (target, label) -> Printf.sprintf "%s.%s" (expr target) label
+  | `Field_assign (target, label, v) ->
+    Printf.sprintf "%s.%s = %s" (expr target) label (expr v)
+  | `New (name, fields) -> Printf.sprintf "new %s { %s }" name (labelled fields)
+  | `New_call (name, args, values) ->
+    Printf.sprintf
+      "new %s%s(%s)"
+      name
+      (match args with
+       | [] -> ""
+       | args -> Printf.sprintf "<%s>" (String.concat ", " (List.map type_expr args)))
+      (arguments values)
+  | `New_variant (ty, variant, payload) ->
+    Printf.sprintf "new %s::%s%s" ty variant (payload_of payload)
+  | `Collection_lit items -> Printf.sprintf "[%s]" (arguments items)
+  | `Comptime_call (callee, comptime, args) ->
+    Printf.sprintf
+      "%s<%s>(%s)"
+      (expr callee)
+      (String.concat
+         ", "
+         (List.map
+            (function
+              | Ast.Ct_type t -> type_expr t
+              | Ast.Ct_value v -> expr v)
+            comptime))
+      (arguments args)
+  | `Method_call (receiver, name, _, args) ->
+    Printf.sprintf "%s.%s(%s)" (expr receiver) name (arguments args)
+  | `Typeof inner -> Printf.sprintf "typeof(%s)" (expr inner)
+  | `Code inner -> Printf.sprintf "code(%s)" (expr inner)
+  | `Lambda (params, sg, body) ->
+    Printf.sprintf
+      "(%s)%s => { %s }"
+      (String.concat ", " (List.map param params))
+      (signature sg)
+      (String.concat " " (List.map (stmt 0) body))
+
+and arguments items = String.concat ", " (List.map expr items)
+
+and labelled fields =
+  String.concat ", " (List.map (fun (l, v) -> Printf.sprintf "%s: %s" l (expr v)) fields)
+
+and payload_of (p : Ast.expr Ast.payload) =
+  match p with
+  | Ast.P_none -> ""
+  | Ast.P_tuple [] -> ""
+  | Ast.P_tuple items -> Printf.sprintf "(%s)" (arguments items)
+  | Ast.P_fields fields -> Printf.sprintf " { %s }" (labelled fields)
+
+and block depth body =
+  String.concat "" (List.map (stmt depth) body)
+
+and stmt depth (s : Ast.stmt) : string =
+  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  let braced head body = line (Printf.sprintf "%s {" head) ^ block (depth + 1) body ^ line "}" in
+  match s.Ast.it with
+  | `Expr e -> line (expr e ^ ";")
+  | `Var_decl (name, ty, init) ->
+    line
+      (Printf.sprintf
+         "var %s%s%s;"
+         name
+         (annotation ty)
+         (match init with
+          | None -> ""
+          | Some v -> " = " ^ expr v))
+  | `Block body -> braced "" body
+  | `If (cond, then_branch, else_branch) ->
+    let head = line (Printf.sprintf "if (%s) {" (expr cond)) in
+    let then_part = head ^ nested depth then_branch in
+    (match else_branch with
+     | None -> then_part ^ line "}"
+     | Some other -> then_part ^ line "} else {" ^ nested depth other ^ line "}")
+  | `While (cond, body) ->
+    line (Printf.sprintf "while (%s) {" (expr cond)) ^ nested depth body ^ line "}"
+  | `For (init, cond, step, body) ->
+    line
+      (Printf.sprintf
+         "for (%s %s; %s) {"
+         (match init with
+          | None -> ";"
+          | Some i -> String.trim (stmt 0 i))
+         (match cond with
+          | None -> ""
+          | Some c -> expr c)
+         (match step with
+          | None -> ""
+          | Some st -> expr st))
+    ^ nested depth body
+    ^ line "}"
+  | `For_in (name, iterable, body) ->
+    line (Printf.sprintf "for (%s in %s) {" name (expr iterable))
+    ^ nested depth body
+    ^ line "}"
+  | `Fn (name, params, sg, body) ->
+    braced
+      (Printf.sprintf
+         "fn %s%s(%s)%s"
+         name
+         (comptime_params sg.Ast.comptime)
+         (String.concat ", " (List.map param params))
+         (signature sg))
+      body
+  | `Return e ->
+    line
+      (match e with
+       | None -> "return;"
+       | Some v -> Printf.sprintf "return %s;" (expr v))
+  | `Defer inner -> line "defer" ^ nested depth inner
+  | `Import decl ->
+    line
+      (match decl with
+       | Ast.Qualified path -> Printf.sprintf "import \"%s\";" (escape path)
+       | Ast.Aliased (path, alias) ->
+         Printf.sprintf "import \"%s\" as %s;" (escape path) alias
+       | Ast.Selective (names, path) ->
+         Printf.sprintf
+           "import { %s } from \"%s\";"
+           (String.concat ", " names)
+           (escape path)
+       | Ast.Wildcard path -> Printf.sprintf "import \"%s/*\";" (escape path))
+  | `Meta body -> braced "meta" body
+  | `Gen inner -> line "gen" ^ nested depth inner
+  | `Meta_fn (name, params, sg, body) ->
+    braced
+      (Printf.sprintf
+         "meta fn %s(%s)%s%s"
+         (match Ast.deriver_trait name with
+          | Some _ -> "derive"
+          | None -> name)
+         (String.concat ", " (List.map param params))
+         (signature sg)
+         (match Ast.deriver_trait name with
+          | Some trait -> " for " ^ trait
+          | None -> ""))
+      body
+  | `Derive (traits, target) ->
+    line (Printf.sprintf "derive %s for %s;" (String.concat ", " traits) target)
+  | `Type_decl (name, params, body) -> type_decl depth name params body
+  | `Effect_decl (name, params, ops) -> effect_decl depth name params ops
+  | `Handler_decl (name, h) ->
+    line (Printf.sprintf "handler %s : %s {" name h.Ast.handled)
+    ^ String.concat "" (List.map (arm (depth + 1)) h.Ast.arms)
+    ^ line "}"
+  | `Run (body, handlers) ->
+    line "run {" ^ block (depth + 1) body ^ handlers_of depth handlers
+  | `Resume e ->
+    line
+      (match e with
+       | None -> "resume;"
+       | Some v -> Printf.sprintf "resume %s;" (expr v))
+  | `Op_decl (op, params, sg, body) ->
+    braced
+      (Printf.sprintf
+         "op %s%s(%s)%s"
+         (match op with
+          | Ast.Op_binary b -> Ast.string_of_binop b
+          | Ast.Op_index -> "[]"
+          | Ast.Op_index_set -> "[]=")
+         (comptime_params sg.Ast.comptime)
+         (String.concat ", " (List.map param params))
+         (signature sg))
+      body
+  | `Trait_decl (name, sigs) ->
+    line (Printf.sprintf "trait %s {" name)
+    ^ String.concat
+        ""
+        (List.map
+           (fun (m : Ast.method_sig) ->
+             Printf.sprintf
+               "%sfn %s(%s)%s;\n"
+               (pad (depth + 1))
+               m.Ast.ms_name
+               (String.concat ", " (List.map param m.Ast.ms_params))
+               (signature m.Ast.ms_signature))
+           sigs)
+    ^ line "}"
+  | `Impl_decl (trait, target, params, methods) ->
+    line
+      (Printf.sprintf
+         "impl %s%s%s {"
+         (match trait with
+          | None -> ""
+          | Some t -> t ^ " for ")
+         target
+         (match params with
+          | [] -> ""
+          | ps -> Printf.sprintf "<%s>" (String.concat ", " ps)))
+    ^ String.concat "" (List.map (method_def (depth + 1)) methods)
+    ^ line "}"
+  | `Match (scrutinee, cases) ->
+    line (Printf.sprintf "match %s {" (expr scrutinee))
+    ^ String.concat "" (List.map (case (depth + 1)) cases)
+    ^ line "}"
+
+(* A body is a block statement anywhere one may stand, so its braces are the
+   enclosing form's and only its contents are printed here. *)
+and nested depth (s : Ast.stmt) =
+  match s.Ast.it with
+  | `Block body -> block (depth + 1) body
+  | _ -> stmt (depth + 1) s
+
+and type_decl depth name params body =
+  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  let head =
+    Printf.sprintf
+      "type %s%s {"
+      name
+      (match params with
+       | [] -> ""
+       | ps -> Printf.sprintf "<%s>" (String.concat ", " ps))
+  in
+  line head
+  ^ (match body with
+     | Ast.T_fields fields ->
+       String.concat
+         ",\n"
+         (List.map (fun (l, t) -> Printf.sprintf "%s%s: %s" (pad (depth + 1)) l (type_expr t)) fields)
+     | Ast.T_variants variants ->
+       String.concat
+         ",\n"
+         (List.map
+            (fun (v : Ast.variant) ->
+              Printf.sprintf
+                "%s%s%s"
+                (pad (depth + 1))
+                v.Ast.v_name
+                (match v.Ast.v_payload with
+                 | Ast.P_none -> ""
+                 | Ast.P_tuple items ->
+                   Printf.sprintf "(%s)" (String.concat ", " (List.map type_expr items))
+                 | Ast.P_fields fields ->
+                   Printf.sprintf
+                     " { %s }"
+                     (String.concat
+                        ", "
+                        (List.map (fun (l, t) -> l ^ ": " ^ type_expr t) fields))))
+            variants))
+  ^ "\n"
+  ^ line "}"
+
+and effect_decl depth name params ops =
+  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  line
+    (Printf.sprintf
+       "effect %s%s {"
+       name
+       (match params with
+        | [] -> ""
+        | ps -> Printf.sprintf "<%s>" (String.concat ", " ps)))
+  ^ String.concat
+      ""
+      (List.map
+         (fun (o : Ast.op_decl) ->
+           Printf.sprintf
+             "%s%s %s(%s)%s;\n"
+             (pad (depth + 1))
+             (match o.Ast.op_kind with
+              | Ast.Op_fn -> "fn"
+              | Ast.Op_ctl -> "ctl"
+              | Ast.Op_final -> "final ctl")
+             o.Ast.op_name
+             (String.concat ", " (List.map param o.Ast.op_params))
+             (match o.Ast.op_ret with
+              | None -> ""
+              | Some t -> " -> " ^ type_expr t))
+         ops)
+  ^ line "}"
+
+(* Each clause reopens the brace the one before it closed, so only the last
+   leaves it shut. *)
+and handlers_of depth handlers =
+  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  let clause (h : Ast.stmt Ast.handler_clause) =
+    match h with
+    | Ast.Named name -> line (Printf.sprintf "} with %s;" name)
+    | Ast.Inline h ->
+      line (Printf.sprintf "} handle %s {" h.Ast.handled)
+      ^ String.concat "" (List.map (arm (depth + 1)) h.Ast.arms)
+  in
+  let printed = String.concat "" (List.map clause handlers) in
+  match List.rev handlers with
+  | Ast.Inline _ :: _ -> printed ^ line "}"
+  | _ -> printed
+
+and arm depth (a : Ast.stmt Ast.arm) =
+  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  line
+    (Printf.sprintf
+       "%s %s(%s) {"
+       (match a.Ast.arm_kind with
+        | Ast.Op_fn -> "fn"
+        | Ast.Op_ctl -> "ctl"
+        | Ast.Op_final -> "final ctl")
+       a.Ast.arm_name
+       (String.concat ", " a.Ast.arm_params))
+  ^ block (depth + 1) a.Ast.arm_body
+  ^ line "}"
+
+and method_def depth (m : (Ast.stmt, unit) Ast.method_def) =
+  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  line
+    (Printf.sprintf
+       "fn %s%s(%s)%s {"
+       m.Ast.md_name
+       (comptime_params m.Ast.md_signature.Ast.comptime)
+       (String.concat ", " (List.map param m.Ast.md_params))
+       (signature m.Ast.md_signature))
+  ^ block (depth + 1) m.Ast.md_body
+  ^ line "}"
+
+and case depth (p, body) =
+  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  line
+    (Printf.sprintf
+       "%s => {"
+       (match p with
+        | Ast.Pat_wild -> "_"
+        | Ast.Pat_variant (ty, variant, payload) ->
+          Printf.sprintf
+            "%s::%s%s"
+            ty
+            variant
+            (match payload with
+             | Ast.P_none -> ""
+             | Ast.P_tuple names -> Printf.sprintf "(%s)" (String.concat ", " names)
+             | Ast.P_fields fields ->
+               Printf.sprintf " { %s }" (String.concat ", " (List.map fst fields)))))
+  ^ block (depth + 1) body
+  ^ line "}"
+
+let program (p : Ast.program) : string = block 0 p

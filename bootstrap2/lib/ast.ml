@@ -58,6 +58,9 @@ and type_expr_kind =
   | Ty_tuple of type_expr list
   | Ty_record of (string * type_expr) list
   | Ty_fn of type_expr list * type_expr * string list
+  (* `...T` on the last parameter: the callee takes an `Array<T>`, and the
+     call site is what puts the extra arguments in it. *)
+  | Ty_variadic of type_expr
 
 type param =
   { name : string
@@ -113,6 +116,9 @@ type lit =
      reflection is where they come from, which is what keeps a name a name
      rather than any string a program happened to build. *)
   | `Name of string
+  (* A file's contents, held as one node rather than an octet per byte. Raw:
+     nothing has decoded it, so what is embedded need not be text. *)
+  | `Bytes of string
   ]
 
 type 'e vars =
@@ -298,6 +304,10 @@ type ('e, 's) stmts =
   | `While of 'e * 's
   | `Fn of string * param list * signature * 's list
   | `Return of 'e option
+  (* Runs when the block holding it is left, however it is left, and after
+     anything deferred later — so a pair of statements that belong together
+     can be written together. *)
+  | `Defer of 's
   ]
 
 (* A function with no name. Its body is statements, so this is the one
@@ -692,6 +702,7 @@ let map_stmts (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) stmts)
   | `Fn (name, params, signature, body) ->
     `Fn (name, params, signature, List.map fs body)
   | `Return e -> `Return (Option.map fe e)
+  | `Defer s -> `Defer (fs s)
 
 let map_loops (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) loops)
   : ('e2, 's2) loops

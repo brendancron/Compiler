@@ -1,4 +1,4 @@
-[int]
-[bool]
-[string]
-[[int]]
+Array<int>
+Array<bool>
+Array<string>
+Array<Array<int>>

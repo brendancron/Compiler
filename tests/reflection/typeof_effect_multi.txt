@@ -1,1 +1,1 @@
-(int) -> unit <emit, request>
+(int) -> <io> unit

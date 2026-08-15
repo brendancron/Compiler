@@ -1,1 +1,1 @@
-(int) -> unit <yield>
+(int) -> <mixed> unit

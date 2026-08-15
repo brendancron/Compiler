@@ -1,0 +1,13 @@
+// `print` is an ordinary function of one argument, so it is a value like any
+// other and a declaration may shadow it.
+var send = print;
+send("passed as a value");
+
+fn twice(f: (string) -> unit, msg: string) { f(msg); f(msg); }
+twice(print, "twice");
+
+fn shadowed() -> int {
+    fn print(msg: string) -> int { return msg.len(); }
+    return print("abcd");
+}
+print(shadowed());

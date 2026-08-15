@@ -1,0 +1,7 @@
+start
+in block
+inner
+after block
+saw 2
+end of 1
+end of 2

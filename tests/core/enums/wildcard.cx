@@ -1,20 +1,20 @@
-enum Color {
+type Color {
     Red,
     Green,
-    Blue,
+    Blue
 }
 
-match Color::Red {
+match new Color::Red {
     Color::Red => { print("red"); }
     _ => { print("other"); }
 }
 
-match Color::Green {
+match new Color::Green {
     Color::Red => { print("red"); }
     _ => { print("other"); }
 }
 
-match Color::Blue {
+match new Color::Blue {
     Color::Red => { print("red"); }
     _ => { print("other"); }
 }

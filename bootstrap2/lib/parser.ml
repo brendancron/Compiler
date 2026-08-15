@@ -302,7 +302,7 @@ and call s : Ast.expr =
       loop (finish_call s callee)
     | Token.Left_bracket ->
       ignore (advance s);
-      let index = expression s in
+      let index = index_or_range s in
       ignore (consume s Token.Right_bracket "Expected ']' after index.");
       loop (Ast.at callee.Ast.span (`Index (callee, index)))
     | Token.Less ->
@@ -463,6 +463,31 @@ and record_fields s : (string * Ast.expr) list =
   in
   ignore (consume s Token.Right_brace "Expected '}' after fields.");
   fields
+
+(* `a[i]` indexes and `a[i:j]` slices, which is the same operator over a
+   different index: what the brackets hold is an `int` or a `Range`, and which
+   entry that reaches is the type's business. Either bound may be left out. *)
+and index_or_range s : Ast.expr =
+  let sp = Ast.span_of_token (peek s) in
+  let range variant args =
+    let payload = if args = [] then Ast.P_none else Ast.P_tuple args in
+    Ast.at sp (`New_variant ("Range", variant, payload))
+  in
+  if check s Token.Colon
+  then (
+    ignore (advance s);
+    if check s Token.Right_bracket
+    then range "All" []
+    else range "To" [ expression s ])
+  else (
+    let first = expression s in
+    if not (check s Token.Colon)
+    then first
+    else (
+      ignore (advance s);
+      if check s Token.Right_bracket
+      then range "From" [ first ]
+      else range "Between" [ first; expression s ]))
 
 and starts_lambda s =
   let depth = ref 0
@@ -670,6 +695,11 @@ and declaration s : Ast.stmt option =
     | Token.Import ->
       ignore (advance s);
       Some (import_decl s sp)
+    | Token.Defer ->
+      ignore (advance s);
+      (match declaration s with
+       | Some inner -> Some (Ast.at sp (`Defer inner))
+       | None -> None)
     | Token.Derive ->
       ignore (advance s);
       let rec traits acc =
@@ -738,9 +768,24 @@ and parameters s : Ast.param list =
     else (
       let rec loop acc =
         let param_name = consume_identifier s "Expected parameter name." in
-        let p = { Ast.name = param_name; ty = type_annotation s } in
+        let ty =
+          match matches s [ Token.Colon ] with
+          | None -> None
+          | Some _ ->
+            let sp = Ast.span_of_token (peek s) in
+            (match matches s [ Token.Dot_dot_dot ] with
+             | None -> Some (type_expr s)
+             | Some _ -> Some (Ast.at sp (Ast.Ty_variadic (type_expr s))))
+        in
+        let p = { Ast.name = param_name; ty } in
         match matches s [ Token.Comma ] with
-        | Some _ -> loop (p :: acc)
+        | Some _ ->
+          (* Anything after it would have no boundary to be collected up to. *)
+          (match p.Ast.ty with
+           | Some { Ast.it = Ast.Ty_variadic _; _ } ->
+             ignore (error s (peek s) "A variadic parameter must be the last one.")
+           | _ -> ());
+          loop (p :: acc)
         | None -> List.rev (p :: acc)
       in
       loop [])

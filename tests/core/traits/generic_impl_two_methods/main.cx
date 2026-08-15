@@ -12,12 +12,12 @@ impl Box<T> {
 
 var a = new Box { v: 1 };
 var b = new Box { v: "s" };
-print(a.get(), b.get());
-print(a.same(), b.same());
+print(str(a.get()) + " " + str(b.get()));
+print(str(a.same()) + " " + str(b.same()));
 
 var xs: List<int> = [1, 2];
 var ys: List<string> = ["x"];
 xs.push(3);
 ys.push("y");
-print(xs.len(), ys.len());
-print(xs[2], ys[1]);
+print(str(xs.len()) + " " + str(ys.len()));
+print(str(xs[2]) + " " + str(ys[1]));

@@ -45,5 +45,5 @@ derive Eq, Show for Dog;
 
 var rex = new Dog { name: "rex", age: 3 };
 var older = new Dog { name: "rex", age: 4 };
-print(rex.eq(rex), rex.eq(older));
+print(str(rex.eq(rex)) + " " + str(rex.eq(older)));
 print(rex.show());

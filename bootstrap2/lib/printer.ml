@@ -13,6 +13,7 @@ let string_of_row = function
 let rec string_of_type_expr (t : Ast.type_expr) : string =
   match t.Ast.it with
   | Ast.Ty_name name -> name
+  | Ast.Ty_variadic t -> "..." ^ string_of_type_expr t
   | Ast.Ty_app (name, args) ->
     Printf.sprintf "%s<%s>" name (String.concat ", " (List.map string_of_type_expr args))
   | Ast.Ty_tuple items ->
@@ -39,6 +40,7 @@ let string_of_param (p : Ast.param) = p.Ast.name ^ annotation p.Ast.ty
 let rec string_of_expr (e : Ast.expr) : string =
   match e.Ast.it with
   | `Int n -> string_of_int n
+  | `Bytes b -> Printf.sprintf "(bytes %d)" (String.length b)
   | `Float n -> Token.float_to_string n
   | `Str s -> Printf.sprintf "%S" (Utf8.encode s)
   | `Char c -> Printf.sprintf "'%s'" (Token.literal_to_string (Token.Char c))
@@ -134,6 +136,7 @@ let rec write_stmt buf indent (s : Ast.stmt) =
   in
   match s.Ast.it with
   | `Expr e -> line "%s%s\n" pad (string_of_expr e)
+  | `Defer s -> nested "defer" [ s ]
   | `Meta body -> nested "meta" body
   | `Gen inner -> nested "gen" [ inner ]
   | `Derive (traits, ty) ->
@@ -256,6 +259,7 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
   let body =
     match e.Ast.it with
     | `Int n -> string_of_int n
+    | `Bytes b -> Printf.sprintf "(bytes %d)" (String.length b)
     | `Lambda (params, _, _) ->
       Printf.sprintf "(fn (%s) ...)" (String.concat " " (List.map string_of_param params))
     | `Name n -> n
@@ -380,6 +384,7 @@ let rec write_typed_stmt buf indent (s : Ast.typed_stmt) =
   in
   match s.Ast.it with
   | `Expr e -> line "%s%s\n" pad (string_of_typed_expr e)
+  | `Defer s -> line "%s(defer …)\n" pad; ignore s
   | `Var_decl (name, _, init) -> line "%s(var %s %s)\n" pad name (opt_typed_expr init)
   | `Block body -> nested "block" body
   | `If (cond, then_branch, else_branch) ->

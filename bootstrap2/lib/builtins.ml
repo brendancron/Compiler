@@ -19,10 +19,9 @@ let methods : (string * string * (unit -> Types.infer_ty list * Types.infer_ty))
    function of no arguments, which is what stops one being passed around as a
    value that could be anything. *)
 let variadic : (string * (unit -> Types.infer_ty)) list =
-  [ "print", (fun () -> Types.IUnit)
-    (* What a lowered `gen` calls. The name is unforgeable, and it is bound only
+  [ (* What a lowered `gen` calls. The name is unforgeable, and it is bound only
        while a meta block runs. *)
-  ; Ast.generated [ "meta"; "emit" ], (fun () -> Types.IUnit)
+    Ast.generated [ "meta"; "emit" ], (fun () -> Types.IUnit)
   ; Ast.generated [ "meta"; "value" ], (fun () -> Types.IUnit)
     (* What a lowered `code` calls, taking the same bindings a `gen` does. *)
   ; Ast.generated [ "meta"; "code" ], (fun () -> Types.icode)
@@ -30,6 +29,9 @@ let variadic : (string * (unit -> Types.infer_ty)) list =
 
 let functions : (string * (unit -> Types.infer_ty list * Types.infer_ty)) list =
   [ "clock", (fun () -> [], Types.IFloat)
+    (* One argument, so it needs no rule of its own: several are written as
+       one string, and what a value looks like is its own business. *)
+  ; ("print", fun () -> [ Types.fresh () ], Types.IUnit)
   ; ("str", fun () -> [ Types.fresh () ], Types.IStr)
     (* A scalar value is a code point, so this is the number it already is. *)
   ; ("ord", fun () -> [ Types.IChr ], Types.IInt)
@@ -43,7 +45,6 @@ let functions : (string * (unit -> Types.infer_ty list * Types.infer_ty)) list =
 
 let values ~out =
   let native name arity apply = name, Value.Fn { Value.name; arity; apply } in
-  let variadic name apply = native name None apply in
   let two name f =
     native name (Some 2) (fun span args ->
       match args with
@@ -56,8 +57,8 @@ let values ~out =
       | [ a ] -> f span a
       | _ -> Value.fail span "Cannot apply %s to these arguments." name)
   in
-  [ variadic "print" (fun _ args ->
-      out (String.concat " " (List.map Value.string_of_value args));
+  [ one "print" (fun _ v ->
+      out (Value.string_of_value v);
       out "\n";
       Value.Unit)
   ; one "str" (fun _ v -> Value.Str (Utf8.decode (Value.string_of_value v)))

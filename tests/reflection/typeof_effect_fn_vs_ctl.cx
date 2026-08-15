@@ -1,4 +1,5 @@
-// A function calling both fn and ctl ops — only the ctl effect appears in its type row.
+// A row names effects, not operations: `log` and `yield` are both `mixed`,
+// so calling either puts that one effect in the row.
 
 effect mixed {
     fn log(msg: string): unit;

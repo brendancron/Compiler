@@ -1,0 +1,29 @@
+// Block-scoped, so an inner block runs its own when it ends rather than
+// waiting for the function to.
+fn scoped() {
+    print("start");
+    {
+        defer print("inner");
+        print("in block");
+    }
+    print("after block");
+}
+scoped();
+
+// The statement is run when the block is left, so it sees what the variable
+// holds then — not what it held where the `defer` was written.
+fn later() {
+    var n = 1;
+    defer print("saw" + " " + str(n));
+    n = 2;
+}
+later();
+
+fn each_iteration() {
+    var i = 0;
+    while (i < 2) {
+        defer print("end of" + " " + str(i));
+        i = i + 1;
+    }
+}
+each_iteration();

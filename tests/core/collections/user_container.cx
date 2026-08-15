@@ -25,16 +25,16 @@ op []=<T>(r: Ring<T>, i: int, v: T) -> T {
 }
 
 var ring: Ring<int> = [1, 2, 3];
-print(ring[0], ring[1], ring[4]);
+print(str(ring[0]) + " " + str(ring[1]) + " " + str(ring[4]));
 
 ring.head = 1;
-print(ring[0], ring[2]);
+print(str(ring[0]) + " " + str(ring[2]));
 
 ring[0] = 9;
-print(ring[0], typeof(ring).name);
+print(str(ring[0]) + " " + str(typeof(ring).name));
 
 var words: Ring<string> = ["a", "b"];
-print(words[3], typeof(words).name);
+print(str(words[3]) + " " + str(typeof(words).name));
 
 var also: List<int> = [7, 8];
-print(also.len(), also[1], ring[0]);
+print(str(also.len()) + " " + str(also[1]) + " " + str(ring[0]));

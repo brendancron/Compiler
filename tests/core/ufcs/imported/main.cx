@@ -4,9 +4,9 @@
 import { Point, describe, shifted, doubled } from "shapes";
 
 var here = new Point { x: 1, y: 2 };
-print(here.describe(), describe(here));
-print(here.shifted(3).x, shifted(here, 3).x);
-print(2.doubled(), 2.doubled().doubled());
+print(str(here.describe()) + " " + str(describe(here)));
+print(str(here.shifted(3).x) + " " + str(shifted(here, 3).x));
+print(str(2.doubled()) + " " + str(2.doubled().doubled()));
 
 type Marker { label: string }
 
@@ -22,4 +22,4 @@ fn shadowed() -> int {
     var doubled = (n: int) => 0 - n;
     return 5.doubled();
 }
-print(shadowed(), 5.doubled());
+print(str(shadowed()) + " " + str(5.doubled()));
