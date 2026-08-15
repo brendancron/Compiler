@@ -269,8 +269,14 @@ and stmt depth (s : Ast.stmt) : string =
          (String.concat ", " (List.map param params))
          (signature sg))
       body
-  | `Trait_decl (name, sigs) ->
-    line (Printf.sprintf "trait %s {" name)
+  | `Trait_decl (name, params, sigs) ->
+    line
+      (Printf.sprintf
+         "trait %s%s {"
+         name
+         (match params with
+          | [] -> ""
+          | ps -> Printf.sprintf "<%s>" (String.concat ", " ps)))
     ^ String.concat
         ""
         (List.map
@@ -289,7 +295,13 @@ and stmt depth (s : Ast.stmt) : string =
          "impl %s%s%s {"
          (match trait with
           | None -> ""
-          | Some t -> t ^ " for ")
+          | Some (t, args) ->
+            Printf.sprintf
+              "%s%s for "
+              t
+              (match args with
+               | [] -> ""
+               | args -> Printf.sprintf "<%s>" (String.concat ", " (List.map type_expr args))))
          target
          (match params with
           | [] -> ""

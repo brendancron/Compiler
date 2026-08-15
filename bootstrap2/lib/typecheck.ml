@@ -105,8 +105,15 @@ let with_type_params assoc f =
         saved)
     f
 
-let ctx_traits : (string, Ast.method_sig list) Hashtbl.t = Hashtbl.create 8
-let ctx_impls : (string * string, unit) Hashtbl.t = Hashtbl.create 8
+(* Methods reached through the type rather than through a value of it. *)
+let ctx_associated : (string * string, unit) Hashtbl.t = Hashtbl.create 8
+
+(* A trait's parameters and its signatures. *)
+let ctx_traits : (string, string list * Ast.method_sig list) Hashtbl.t = Hashtbl.create 8
+
+(* What a type implemented a trait at. Added rather than replaced, so one type
+   may implement a trait at more than one argument. *)
+let ctx_impls : (string * string, Types.infer_ty list) Hashtbl.t = Hashtbl.create 8
 
 (* The scheme each variadic is bound to, so a call site can ask whether the name
    still refers to it rather than testing the spelling — a program that declares
@@ -120,6 +127,7 @@ let reset_effects () =
   Hashtbl.reset ctx_types;
   Hashtbl.reset ctx_effect_params;
   Hashtbl.reset ctx_traits;
+  Hashtbl.reset ctx_associated;
   Hashtbl.reset ctx_impls;
   Hashtbl.reset ctx_variadic;
   Hashtbl.reset ctx_methods;
@@ -219,7 +227,7 @@ let receiver_of span registry (receiver : (_, Types.infer_ty) Ast.node) name ele
     (match Types.repr receiver.Ast.ann with
      | Types.IVar { contents = Types.Unbound (_, Types.Bound traits) } ->
        (match traits with
-        | trait :: _ -> Via_trait trait
+        | (trait, _) :: _ -> Via_trait trait
         | [] -> fail_here "Cannot call '%s': the receiver's type is not known here." name)
      | Types.IVar { contents = Types.Unbound (_, Types.Collection elem) } ->
        let holds owner =
@@ -361,26 +369,53 @@ and row_of_labels labels =
     labels
     Types.REmpty
 
+(* A bound may name a parameter declared before it — `<S, T: TryFrom<S>>` — so
+   each is in scope while the next one's annotation is read. What is registered
+   here is undone before returning; the caller installs the whole list. *)
 let type_params_of span (comptime : Ast.comptime_param list) =
+  let touched = List.map (fun (p : Ast.comptime_param) ->
+    p.Ast.cp_name, Hashtbl.find_opt ctx_type_params p.Ast.cp_name) comptime
+  in
+  let restore () =
+    List.iter
+      (fun (name, previous) ->
+        match previous with
+        | Some var -> Hashtbl.replace ctx_type_params name var
+        | None -> Hashtbl.remove ctx_type_params name)
+      touched
+  in
+  Fun.protect ~finally:restore (fun () ->
   List.map
     (fun (p : Ast.comptime_param) ->
+      let remember var =
+        Hashtbl.replace ctx_type_params p.Ast.cp_name var;
+        p.Ast.cp_name, var
+      in
       match p.Ast.cp_ty with
       | None ->
         let var = Types.fresh () in
         Types.declare_param var;
-        p.Ast.cp_name, var
+        remember var
       (* An annotation naming a declared trait is a bound on a type parameter;
          anything else would be a value parameter. *)
       | Some { Ast.it = Ast.Ty_name trait; _ } when Hashtbl.mem ctx_traits trait ->
-        let var = Types.fresh_with (Types.Bound [ trait ]) in
+        let var = Types.fresh_with (Types.Bound [ trait, [] ]) in
         Types.declare_param var;
-        p.Ast.cp_name, var
+        remember var
+      (* `T: TryFrom<S>` — the arguments are part of which impl the bound
+         reaches, so they are read here rather than dropped. *)
+      | Some { Ast.it = Ast.Ty_app (trait, args); _ } when Hashtbl.mem ctx_traits trait ->
+        let var =
+          Types.fresh_with (Types.Bound [ trait, List.map infer_ty_of_annotation args ])
+        in
+        Types.declare_param var;
+        remember var
       | Some _ ->
         fail
           span
           "Comptime value parameter '%s' is not supported yet."
           p.Ast.cp_name)
-    comptime
+    comptime)
 
 let annotated_or_fresh = function
   | Some t -> infer_ty_of_annotation t
@@ -719,7 +754,25 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     admits_row (lookup env name) row ctx.row;
     node ret (`Call (callee_node, args))
   | `Method_call (receiver, name, as_function, args) ->
-    let receiver = infer_expr env ctx receiver in
+    (* `T.from(x)` — the receiver names a type rather than a value, which is how
+       an associated function is reached. What stands under it only has to
+       carry the type. *)
+    let named_receiver =
+      match receiver.Ast.it with
+      | `Var owner when lookup env owner = None ->
+        (match Hashtbl.find_opt ctx_type_params owner with
+         | Some var -> Some var
+         | None ->
+           if Hashtbl.mem ctx_types owner
+           then Some (named_type receiver.Ast.span owner [])
+           else None)
+      | _ -> None
+    in
+    let receiver =
+      match named_receiver with
+      | Some ann -> { Ast.it = `Int 0; span = receiver.Ast.span; ann }
+      | None -> infer_expr env ctx receiver
+    in
     let args = List.map (infer_expr env ctx) args in
     let owners =
       List.sort_uniq
@@ -776,19 +829,37 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
         which type supplies the body is settled when the parameter is given
         one. *)
      | Via_trait trait ->
+       let trait_params, trait_methods =
+         Option.value (Hashtbl.find_opt ctx_traits trait) ~default:([], [])
+       in
+       (* `Self` is the type the bound stands for, and the trait's own
+          parameters are what the bound named it at. *)
+       let bound_args =
+         match Types.repr receiver.Ast.ann with
+         | Types.IVar { contents = Types.Unbound (_, Types.Bound traits) } ->
+           Option.value (List.assoc_opt trait traits) ~default:[]
+         | _ -> []
+       in
+       let in_scope =
+         ("Self", receiver.Ast.ann)
+         ::
+         (if List.length trait_params = List.length bound_args
+          then List.combine trait_params bound_args
+          else [])
+       in
+       with_type_params in_scope (fun () ->
        let declared =
-         match Hashtbl.find_opt ctx_traits trait with
-         | Some methods ->
-           List.find_opt (fun (m : Ast.method_sig) -> String.equal m.Ast.ms_name name) methods
-         | None -> None
+         List.find_opt (fun (m : Ast.method_sig) -> String.equal m.Ast.ms_name name) trait_methods
        in
        (match declared with
         | None -> fail span "Trait '%s' has no method '%s'." trait name
         | Some m ->
+          (* Without `self` every parameter is its own; with it, the first is
+             the receiver and is already accounted for. *)
           let rest =
             match m.Ast.ms_params with
-            | _self :: rest -> rest
-            | [] -> []
+            | { Ast.name = "self"; _ } :: rest -> rest
+            | all -> all
           in
           if List.length rest <> List.length args
           then
@@ -814,8 +885,17 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
                , ret
                , row ));
           Types.unify_row row ctx.row;
-          node ret (`Method_call (receiver, name, as_function, args)))
+          node ret (`Method_call (receiver, name, as_function, args))))
      | Owner owner ->
+       if Hashtbl.mem ctx_associated (owner, name) && named_receiver = None
+       then
+         fail
+           span
+           "'%s' is an associated function of '%s', so it is reached as '%s.%s'."
+           name
+           owner
+           owner
+           name;
        let missing () = fail span "Type '%s' has no method '%s'." owner name in
        if (String.equal owner Types.array_name || String.equal owner Types.string_name)
           && String.equal name Types.array_len
@@ -843,23 +923,26 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
            | Some scheme -> Types.instantiate scheme
            | None -> missing ()
          in
+         (* An associated function takes no receiver, so what it was passed is
+            the arguments alone. *)
+         let associated = Hashtbl.mem ctx_associated (owner, name) in
+         let passed =
+           let given = List.map (fun (a : checked_expr) -> a.Ast.ann) args in
+           if associated then given else receiver.Ast.ann :: given
+         in
          (match Types.repr fn with
-          | Types.IFn (params, _, _) when List.length params <> List.length args + 1 ->
+          | Types.IFn (params, _, _) when List.length params <> List.length passed ->
             fail
               span
-              "Method '%s' takes %d argument(s) but %d were passed."
+              "%s '%s' takes %d argument(s) but %d were passed."
+              (if associated then "Associated function" else "Method")
               name
-              (List.length params - 1)
+              (if associated then List.length params else List.length params - 1)
               (List.length args)
           | _ -> ());
          let ret = Types.fresh () in
          let row = Types.fresh_row () in
-         Types.unify
-           fn
-           (Types.IFn
-              ( receiver.Ast.ann :: List.map (fun (a : checked_expr) -> a.Ast.ann) args
-              , ret
-              , row ));
+         Types.unify fn (Types.IFn (passed, ret, row));
          admits_row (lookup env (Ast.method_name owner name)) row ctx.row;
          node ret (`Method_call (receiver, name, as_function, args)))))
   (* A bare name is a value's if one answers to it, and the declared type
@@ -1191,14 +1274,14 @@ and declare_traits (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
-      | `Trait_decl (name, methods) ->
+      | `Trait_decl (name, params, methods) ->
         if Hashtbl.mem ctx_traits name
         then fail s.Ast.span "Trait '%s' is already declared." name;
-        Hashtbl.replace ctx_traits name methods
+        Hashtbl.replace ctx_traits name (params, methods)
       | _ -> ())
     body
 
-and declare_impls (body : Ast.desugared_stmt list) =
+and declare_impls registry (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
@@ -1215,9 +1298,9 @@ and declare_impls (body : Ast.desugared_stmt list) =
         (match trait with
          | None -> ()
          | Some trait ->
-           (match Hashtbl.find_opt ctx_traits trait with
-            | None -> fail span "Unknown trait '%s'." trait
-            | Some required ->
+           (match Hashtbl.find_opt ctx_traits (fst trait) with
+            | None -> fail span "Unknown trait '%s'." (fst trait)
+            | Some (_, required) ->
               List.iter
                 (fun (r : Ast.method_sig) ->
                   if not (supplies r.Ast.ms_name)
@@ -1225,19 +1308,20 @@ and declare_impls (body : Ast.desugared_stmt list) =
                     fail
                       span
                       "'%s' for '%s' is missing method '%s'."
-                      trait
+                      (fst trait)
                       type_name
                       r.Ast.ms_name)
                 required));
         List.iter
           (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
+            (* Without `self` it is an associated function: reached through the
+               type rather than through a value of it, which is what lets a
+               conversion name the type it produces. *)
             (match m.Ast.md_params with
              | { Ast.name = "self"; _ } :: _ -> ()
              | _ ->
-               fail
-                 span
-                 "Method '%s' must take 'self' as its first parameter."
-                 m.Ast.md_name);
+               Hashtbl.replace ctx_associated (type_name, m.Ast.md_name) ();
+               Registry.mark_associated registry type_name m.Ast.md_name);
             if Hashtbl.mem ctx_methods (type_name, m.Ast.md_name)
             then
               fail
@@ -1247,7 +1331,10 @@ and declare_impls (body : Ast.desugared_stmt list) =
                 m.Ast.md_name;
             Hashtbl.replace ctx_methods (type_name, m.Ast.md_name) ())
           methods;
-        Option.iter (fun t -> Hashtbl.replace ctx_impls (type_name, t) ()) trait
+        Option.iter
+          (fun (t, args) ->
+            Hashtbl.add ctx_impls (type_name, t) (List.map infer_ty_of_annotation args))
+          trait
       | _ -> ())
     body
 
@@ -1386,7 +1473,7 @@ and hoist env (body : Ast.desugared_stmt list) =
 and infer_block env ctx (body : Ast.desugared_stmt list) : checked_stmt list =
   declare_types body;
   declare_traits body;
-  declare_impls body;
+  declare_impls ctx.registry body;
   hoist env body;
   let assigned = assigned_names body in
   List.map (fun s -> infer_stmt env ctx assigned s) body
@@ -1523,7 +1610,7 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
       span
       (Types.IFn (param_types, declared_ret, declared_row))
       (`Op_decl (op, params, signature, body)))
-  | `Trait_decl (name, methods) -> node (`Trait_decl (name, methods))
+  | `Trait_decl (name, params, methods) -> node (`Trait_decl (name, params, methods))
   | `Impl_decl (trait, type_name, params, methods) ->
     let inferred =
       List.map
@@ -1921,7 +2008,22 @@ let admits registry kind (t : Types.infer_ty) =
   (* Written `<T: Summary>`: the type must have an `impl Summary for` it. *)
   | Types.Bound traits ->
     (match Types.infer_type_name t with
-     | Some name -> List.for_all (fun trait -> Hashtbl.mem ctx_impls (name, trait)) traits
+     | Some name ->
+       (* An impl of that trait for this type, at arguments that agree with the
+          ones the bound named. *)
+       List.for_all
+         (fun (trait, args) ->
+           List.exists
+             (fun declared ->
+               List.length declared = List.length args
+               &&
+               try
+                 List.iter2 Types.unify args declared;
+                 true
+               with
+               | Types.Type_error _ -> false)
+             (Hashtbl.find_all ctx_impls (name, trait)))
+         traits
      | None -> false)
   | Types.Any -> true
   | Types.Addable | Types.Numeric ->
@@ -1995,7 +2097,7 @@ let check ~registry (program : Ast.desugared_stmt list)
   in
   each declare_types;
   each declare_traits;
-  each declare_impls;
+  each (declare_impls registry);
   each (declare_ops registry);
   each (hoist env);
   let assigned = assigned_names program in

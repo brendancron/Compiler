@@ -127,7 +127,7 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
          written for a type the meta program named. *)
       | `Impl_decl (trait, type_name, params, methods) ->
         `Impl_decl
-          ( Option.map named trait
+          ( Option.map (fun (t, args) -> named t, List.map type_expr args) trait
           , named type_name
           , params
           , List.map
@@ -140,7 +140,7 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
               methods )
       | `Derive (traits, target) -> `Derive (traits, named target)
       | `Type_decl (name, params, body) -> `Type_decl (named name, params, body)
-      | `Trait_decl (name, methods) -> `Trait_decl (named name, methods)
+      | `Trait_decl (name, params, methods) -> `Trait_decl (named name, params, methods)
       | `Gen inner -> `Gen (stmt inner)
       | `Meta body -> `Meta (List.map stmt body)
       | `Meta_fn (n, params, sg, body) ->
@@ -192,7 +192,7 @@ let run ~out ~codes ~emit ~capture (program : Ast.program) =
         | Error [] -> fail { Ast.file = ""; line = 1; col = 1 } "The meta block does not check."
         | Error (e :: _) -> fail e.Typecheck.span "%s" e.Typecheck.message
         | Ok typed ->
-          (match Resolve.program ~registry (Specialize.program typed) with
+          (match Resolve.program ~registry (Specialize.program ~registry typed) with
            | Error e -> fail e.Resolve.span "%s" e.Resolve.message
            | Ok resolved ->
              (match Reflect.program resolved with

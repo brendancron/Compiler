@@ -2,7 +2,8 @@
 (* An operator or method inside a generic body cannot be selected while the body
    is generic, so it is copied per concrete type its call sites use. *)
 type state =
-  { generic : (string, Ast.typed_stmt) Hashtbl.t
+  { registry : Registry.t
+  ; generic : (string, Ast.typed_stmt) Hashtbl.t
   ; copies : (string * string, string) Hashtbl.t
   ; mutable emitted : Ast.typed_stmt list
   ; mutable changed : bool
@@ -177,7 +178,12 @@ let rec rewrite state (e : Ast.typed_expr) : Ast.typed_expr =
          then `Method_call (receiver, name, as_function, args)
          else (
            let copy = copy_for state mangled at in
-           `Call ({ receiver with Ast.it = `Var copy; ann = at }, receiver :: args))
+           let passed =
+             match Types.type_name receiver.Ast.ann with
+             | Some owner when Registry.is_associated state.registry owner name -> args
+             | _ -> receiver :: args
+           in
+           `Call ({ receiver with Ast.it = `Var copy; ann = at }, passed))
        | _ -> `Method_call (receiver, name, as_function, args))
     | `Call (callee, args) ->
       let args = List.map (rewrite state) args in
@@ -265,9 +271,14 @@ let is_template state (s : Ast.typed_stmt) =
   | `Fn (name, _, _, _) -> Hashtbl.mem state.generic name
   | _ -> false
 
-let program (p : Ast.typed_stmt list) : Ast.typed_stmt list =
+let program ~registry (p : Ast.typed_stmt list) : Ast.typed_stmt list =
   let state =
-    { generic = Hashtbl.create 8; copies = Hashtbl.create 8; emitted = []; changed = false }
+    { registry
+    ; generic = Hashtbl.create 8
+    ; copies = Hashtbl.create 8
+    ; emitted = []
+    ; changed = false
+    }
   in
   List.iter (collect state) p;
   if Hashtbl.length state.generic = 0

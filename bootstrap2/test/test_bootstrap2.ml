@@ -165,6 +165,8 @@ let cases =
   ; "tests/core/traits/inherent/main"
   ; "tests/core/traits/generic_impl_two_methods/main"
   ; "tests/core/traits/generic_impl_operator/main"
+  ; "tests/core/traits/try_from/main"
+  ; "tests/core/traits/associated"
   ; "tests/core/traits/builtin_receiver/main"
   ; "tests/effects/methods/methods"
   ; "tests/core/comptime/type_params/main"
@@ -312,7 +314,7 @@ let interpret path =
             (Printf.sprintf "type error %s %s" (at e.span) e.message)
         | Error [] -> Error "type check failed"
         | Ok typed ->
-          match Resolve.program ~registry (Specialize.program typed) with
+          match Resolve.program ~registry (Specialize.program ~registry typed) with
           | Error e ->
             Error
               (Printf.sprintf "resolve error %s %s" (at e.span) e.message)
@@ -392,7 +394,7 @@ let rejections path =
         let registry = Registry.builtins () in
         match Typecheck.check ~registry desugared with
         | Ok typed ->
-          (match Resolve.program ~registry (Specialize.program typed) with
+          (match Resolve.program ~registry (Specialize.program ~registry typed) with
            | Ok resolved ->
              (match Reflect.program resolved with
               | Error e -> Ok (Printf.sprintf "%s %s" (at e.span) e.message)

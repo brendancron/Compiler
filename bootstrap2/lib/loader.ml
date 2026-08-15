@@ -129,7 +129,7 @@ let declared_name (s : Ast.stmt) =
   match s.Ast.it with
   | `Fn (name, _, _, _) -> Some name
   | `Type_decl (name, _, _) -> Some name
-  | `Trait_decl (name, _) -> Some name
+  | `Trait_decl (name, _, _) -> Some name
   | _ -> None
 
 let is_declaration (s : Ast.stmt) =
@@ -289,9 +289,10 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
                  variants)
         in
         `Type_decl (resolve_type name, params, body)
-      | `Trait_decl (name, methods) ->
+      | `Trait_decl (name, params, methods) ->
         `Trait_decl
           ( resolve_type name
+          , params
           , List.map
               (fun (m : Ast.method_sig) ->
                 { m with
@@ -303,7 +304,7 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
         `Derive (List.map resolve_type traits, resolve_type target)
       | `Impl_decl (trait, type_name, params, methods) ->
         `Impl_decl
-          ( Option.map resolve_type trait
+          ( Option.map (fun (t, args) -> resolve_type t, List.map type_expr args) trait
           , resolve_type type_name
           , params
           , List.map

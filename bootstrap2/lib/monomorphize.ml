@@ -36,14 +36,16 @@ let traits : (string, unit) Hashtbl.t = Hashtbl.create 8
 
 let rec note_traits (s : desugared_stmt) =
   match s.it with
-  | `Trait_decl (name, _) -> Hashtbl.replace traits name ()
+  | `Trait_decl (name, _, _) -> Hashtbl.replace traits name ()
   | `Block body | `Fn (_, _, _, body) -> List.iter note_traits body
   | _ -> ()
 
 let is_value (p : comptime_param) =
   match p.cp_ty with
   | None -> false
-  | Some { it = Ty_name name; _ } -> not (Hashtbl.mem traits name)
+  (* A bound may carry arguments — `T: TryFrom<S>` — and is still a bound. *)
+  | Some { it = Ty_name name; _ } | Some { it = Ty_app (name, _); _ } ->
+    not (Hashtbl.mem traits name)
   | Some _ -> true
 
 let split (signature : signature) =

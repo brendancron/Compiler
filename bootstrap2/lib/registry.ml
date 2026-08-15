@@ -29,6 +29,7 @@ type t =
        sliced by a range. *)
     indexed : (string * string, indexing) Hashtbl.t
   ; constructors : (string, string) Hashtbl.t
+  ; associated : (string * string, unit) Hashtbl.t
   ; exact : (Ast.binop * Types.ty * Types.ty, entry) Hashtbl.t
   ; (* Any two operands of the same type, which cannot be enumerated. *)
     homogeneous : (Ast.binop, entry) Hashtbl.t
@@ -38,6 +39,7 @@ let create () =
   { containers = Hashtbl.create 8
   ; indexed = Hashtbl.create 8
   ; constructors = Hashtbl.create 8
+  ; associated = Hashtbl.create 8
   ; exact = Hashtbl.create 64
   ; homogeneous = Hashtbl.create 8
   }
@@ -78,6 +80,12 @@ let indexed t name index =
      | _ -> None)
 
 let is_indexed t name = overloads t name <> []
+
+(* Reached through the type rather than through a value of it, so a call to one
+   passes no receiver. The checker knows which these are; the passes that build
+   the call have to be told. *)
+let mark_associated t owner method_ = Hashtbl.replace t.associated (owner, method_) ()
+let is_associated t owner method_ = Hashtbl.mem t.associated (owner, method_)
 let register_constructor t name fn = Hashtbl.replace t.constructors name fn
 let constructor t name = Hashtbl.find_opt t.constructors name
 let container t name = Hashtbl.find_opt t.containers name

@@ -147,7 +147,7 @@ let () =
           then (
             print_endline "-- types --";
             print_string (Printer.string_of_typed_program typed));
-          match Resolve.program ~registry (Specialize.program typed) with
+          match Resolve.program ~registry (Specialize.program ~registry typed) with
           | Error e ->
             report ~entry:opts.path e.span "Resolve" e.message;
             exit 65

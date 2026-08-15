@@ -203,9 +203,12 @@ type ('s, 'ann) method_def =
   ; md_ann : 'ann
   }
 
+(* A trait may take type parameters, and an impl says what it implements them
+   at — `impl TryFrom<string> for int`. Which impl a bound reaches then follows
+   from those arguments as well as from the trait's name. *)
 type ('s, 'ann) method_defs =
-  [ `Trait_decl of string * method_sig list
-  | `Impl_decl of string option * string * string list * ('s, 'ann) method_def list
+  [ `Trait_decl of string * string list * method_sig list
+  | `Impl_decl of (string * type_expr list) option * string * string list * ('s, 'ann) method_def list
   ]
 
 (* Written, then what the name resolves to as an ordinary function. The two
@@ -638,7 +641,7 @@ let map_method_defs (fs : 's1 -> 's2) (fa : 'a1 -> 'a2) (m : ('s1, 'a1) method_d
   : ('s2, 'a2) method_defs
   =
   match m with
-  | `Trait_decl (name, methods) -> `Trait_decl (name, methods)
+  | `Trait_decl (name, params, methods) -> `Trait_decl (name, params, methods)
   | `Impl_decl (trait, type_name, params, methods) ->
     `Impl_decl (trait, type_name, params, List.map (map_method_def fs fa) methods)
 

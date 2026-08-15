@@ -761,6 +761,20 @@ and declaration s : Ast.stmt option =
     None
 
 (* Assumes the '(' has been consumed; consumes the closing ')'. *)
+and type_arguments s : Ast.type_expr list =
+  match matches s [ Token.Less ] with
+  | None -> []
+  | Some _ ->
+    let rec loop acc =
+      let t = type_expr s in
+      match matches s [ Token.Comma ] with
+      | Some _ -> loop (t :: acc)
+      | None -> List.rev (t :: acc)
+    in
+    let args = loop [] in
+    ignore (consume s Token.Greater "Expected '>' after type arguments.");
+    args
+
 and parameters s : Ast.param list =
   let params =
     if check s Token.Right_paren
@@ -1051,6 +1065,7 @@ and op_decl s sp : Ast.stmt =
 
 and trait_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected a trait name." in
+  let params = type_params s in
   ignore (consume s Token.Left_brace "Expected '{' after the trait name.");
   let rec loop acc =
     if check s Token.Right_brace || is_at_end s
@@ -1069,17 +1084,27 @@ and trait_decl s sp : Ast.stmt =
   in
   let methods = loop [] in
   ignore (consume s Token.Right_brace "Expected '}' after the trait body.");
-  Ast.at sp (`Trait_decl (name, methods))
+  Ast.at sp (`Trait_decl (name, params, methods))
 
 and impl_decl s sp : Ast.stmt =
   let first = consume_identifier s "Expected a type or trait name after 'impl'." in
-  let first_params = type_params s in
+  (* What follows the first name is the trait's arguments when a `for` comes
+     after it, and the type's own parameters otherwise. *)
+  let written = type_arguments s in
   let trait, type_name, params =
     match matches s [ Token.For ] with
     | Some _ ->
       let name = consume_identifier s "Expected a type name after 'for'." in
-      Some first, name, type_params s
-    | None -> None, first, first_params
+      Some (first, written), name, type_params s
+    | None ->
+      ( None
+      , first
+      , List.map
+          (fun (t : Ast.type_expr) ->
+            match t.Ast.it with
+            | Ast.Ty_name n -> n
+            | _ -> ignore (error s (peek s) "Expected a type parameter name."); "")
+          written )
   in
   ignore (consume s Token.Left_brace "Expected '{' after the impl header.");
   let rec loop acc =

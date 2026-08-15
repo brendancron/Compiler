@@ -43,7 +43,8 @@ and kind =
   | Collection of infer_ty
   (* Trait names a written `<T: Summary>` demands. A method call resolves
      through the trait's declared signature, so the owner need not be known. *)
-  | Bound of string list
+  (* A trait and what it was named at: `TryFrom<string>` rather than `TryFrom`. *)
+  | Bound of (string * infer_ty list) list
 
 and tv =
   | Unbound of int * kind
@@ -175,7 +176,7 @@ let is_array (t : ty) =
 let string_of_kind = function
   | Any -> "any"
   | Collection _ -> "a collection"
-  | Bound traits -> String.concat " and " traits
+  | Bound traits -> String.concat " and " (List.map fst traits)
   | Addable -> "int, float or string"
   | Numeric -> "int or float"
 
@@ -481,7 +482,7 @@ and strongest a b =
     Collection x
   | Collection _, Any -> a
   | Any, Collection _ -> b
-  | Bound x, Bound y -> Bound (List.sort_uniq String.compare (x @ y))
+  | Bound x, Bound y -> Bound (List.sort_uniq compare (x @ y))
   | Bound _, Any -> a
   | Any, Bound _ -> b
   | Collection _, other | other, Collection _ ->

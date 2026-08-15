@@ -104,7 +104,11 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
       else if String.equal name Types.array_len && args = [] && receiver.Ast.ann = Types.Str
       then `Str_len receiver
       else (
-        let all = receiver :: args in
+        (* An associated function is reached through the type, so what stood in
+           for the receiver is not an argument. *)
+        let all =
+          if Registry.is_associated registry owner name then args else receiver :: args
+        in
         `Call (fn_ref span (Ast.method_name owner name) all ann, all))
     | `Collection_lit items ->
       let items = List.map (expr registry) items in

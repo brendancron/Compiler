@@ -232,7 +232,7 @@ let rec write_stmt buf indent (s : Ast.stmt) =
     nested
       (Printf.sprintf "handler %s : %s" name h.Ast.handled)
       (List.concat_map (fun a -> a.Ast.arm_body) h.Ast.arms)
-  | `Trait_decl (name, methods) ->
+  | `Trait_decl (name, _, methods) ->
     line
       "%s(trait %s%s)\n"
       pad
@@ -243,7 +243,7 @@ let rec write_stmt buf indent (s : Ast.stmt) =
   | `Impl_decl (trait, type_name, _, methods) ->
     nested
       (match trait with
-       | Some trait -> Printf.sprintf "impl %s for %s" trait type_name
+       | Some (trait, _) -> Printf.sprintf "impl %s for %s" trait type_name
        | None -> Printf.sprintf "impl %s" type_name)
       (List.concat_map (fun (m : (Ast.stmt, unit) Ast.method_def) -> m.Ast.md_body) methods)
 
@@ -412,11 +412,11 @@ let rec write_typed_stmt buf indent (s : Ast.typed_stmt) =
   | `Type_decl (name, _, _) -> line "%s(type %s)\n" pad name
   | `Op_decl (op, _, _, body) ->
     nested (Printf.sprintf "op %s" (Ast.string_of_op op)) body
-  | `Trait_decl (name, _) -> line "%s(trait %s)\n" pad name
+  | `Trait_decl (name, _, _) -> line "%s(trait %s)\n" pad name
   | `Impl_decl (trait, type_name, _, methods) ->
     nested
       (match trait with
-       | Some trait -> Printf.sprintf "impl %s for %s" trait type_name
+       | Some (trait, _) -> Printf.sprintf "impl %s for %s" trait type_name
        | None -> Printf.sprintf "impl %s" type_name)
       (List.concat_map
          (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) -> m.Ast.md_body)
