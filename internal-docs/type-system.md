@@ -186,6 +186,12 @@ It also settles the receiver's type where nothing else had. `[1, 2, 3].each()` h
 
 That is what makes an imported function reachable through a dot: `import { map } from "…"` renames the declaration to `List#map`, and the resolved name carries the rename to where the fallback needs it.
 
+**A trait may take type parameters, and a bound carries what it named them at.** `T: TryFrom<S>` is a `Types.Bound` holding the trait and its arguments, and a type satisfies it when an impl exists *at arguments that unify* — not merely when the trait's name appears. A parameter declared earlier is in scope while a later one's bound is read, which is what lets `S` appear in `T`'s.
+
+**A method without `self` is an associated function**, reached through the type rather than through a value of it — `T.from(source)` where `T` is a parameter, or `Counter.zero()` where it is a declared type. What stands under the receiver only has to carry the type; the receiver is dropped when the call is built, which `Specialize` and `Resolve` learn from the registry.
+
+Dispatch stays static: `Specialize` copies the caller per concrete argument, so the call becomes a direct one to that type's entry.
+
 **A variadic parameter is homogeneous, and the call site is what fills it.** `fn max(first: int, rest: ...int)` declares an ordinary `Array<int>` parameter; `Desugar` collects everything past the fixed arguments into an array literal, so nothing after that pass knows the call was written any other way.
 
 Homogeneous is what makes it free. C#'s `params object[]` needs a universal supertype and a way back out of it; every argument here is the same `T`, so there is nothing to box and nothing to recover. A call that wants mixed types passes an explicit array, or several arguments.

@@ -33,7 +33,7 @@ The tags a step can discharge are `Step "..."`; the rest will not be fixed by fi
 
 
 
-**No fixture is waiting on a step.** Steps 8 through 12 are done, and everything they were tagged with is discharged, retired, or turned out to be waiting on something else. Two categories are left.
+**No fixture is waiting on a step.** Steps 8 through 13 are done, and everything they were tagged with is discharged, retired, or turned out to be waiting on something else. Two categories are left.
 
 `Parked` is native compilation, deliberately not being worked on.
 
@@ -183,6 +183,44 @@ The statement runs when the block is left, so it reads what a variable holds *th
 **It is the interpreter's, not a desugaring.** A block collects what it defers as it walks, and runs them on the way out — including out of an exception, which is what makes `return` and an effect unwind behave the same without either being special-cased. Desugaring would have had to find every exit itself.
 
 **A deferred statement runs after an aborting handler's arm, not before.** The arm runs where the operation was performed; only then does the stack unwind, and the deferred statement is on the way out. `core/defer/defer_effect` pins the order.
+
+## 13 · Parameterized traits — done
+
+`tests/core/traits/try_from` was written before any of it, and failed on the first line of the feature until each piece landed:
+
+```cronyx
+trait TryFrom<S> {
+    fn from(source: S) -> <Fallible> Self;
+}
+
+impl TryFrom<string> for int { … }
+impl TryFrom<string> for bool { … }
+
+fn do_work<S, T: TryFrom<S>>(source: S) -> <Fallible> T {
+    return T.from(source);
+}
+```
+
+**Why this shape rather than `To<T>`.** Put the trait on the source and dispatch on the result, and every call needs the result type inferred — which is why Rust's `parse::<i32>()` has a turbofish. Put it on the target and the bound does the work: `T` is named, so the impl is chosen the way `<K: Hash>` already chooses one.
+
+**What it needs**, and none of it is dynamic dispatch:
+
+- **Trait type parameters.** `Trait_decl` carries a name and its method signatures; it needs a parameter list, and `Impl_decl` needs arguments — `impl TryFrom<string> for int`, where the trait today is a bare `string option`.
+- **Receiverless methods, and `Self`.** Every trait method takes `self`, so there is neither a way to write `fn from(source: S) -> Self` nor a way to call it. This is the piece that unblocks anything at all here.
+- **Parameterized bounds.** `Types.Bound of string list` becomes a list of trait names with arguments, and `ctx_impls`, keyed `(type, trait)`, gains them too.
+- **Calling through the parameter**, `T.from(source)`.
+
+**Overloading a trait by its argument** — `impl TryFrom<string> for int` beside `impl TryFrom<float> for int` — is the shape [slicing](#slicing) already needed, where an `[]` entry went from one per type to one per index type.
+
+**Dispatch stays static.** `Specialize` copies `do_work` per concrete `(S, T)`, so `T.from(source)` becomes a direct call to that type's entry. No vtables, no dictionaries.
+
+**One thing to expect.** `var n: int = do_work("42");` takes `S` from the argument and `T` from the annotation, so a call with neither is ambiguous. Comptime arguments are already writable, so `do_work<string, int>("42")` is the escape hatch — the same one Rust needed and for the same reason.
+
+**Associated functions came out general rather than trait-only.** `Counter.zero()` on an inherent `impl` works the same way, which makes a constructor a language feature rather than a module-path coincidence — `Dfa.new(…)` had been the latter. `core/traits/associated` covers it, and `traits/errors/no_self` changed meaning: a method without `self` is no longer an error, so it now asserts the error for calling one on a value.
+
+**What made it look impossible for a while was older than the feature.** `Monomorphize.is_value` recognised a bound only when written as a bare name, so `T: TryFrom<S>` was read as a *value* parameter, the function became a template, and the template was deleted — leaving *Undefined variable* at the call with no error anywhere saying why.
+
+**One limit stands.** Two impls of one trait for one type at different arguments — `TryFrom<string> for int` beside `TryFrom<float> for int` — collide, because a method registers under `(type, method name)`. That is overloading by trait argument, the same shape [slicing](#slicing) solved for `[]`, and it is not built here.
 
 ## Variadic parameters
 
