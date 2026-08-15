@@ -8,7 +8,21 @@ The compiler's own hygiene runs beside this as a second stream, in [Remediation 
 
 That stream is not only hygiene, and the numbering here does not cover what it has produced. `char` and `byte`, string escapes, character-indexed strings and string immutability are all language features, and none of them has a step number — they arrived because moving a builtin into the prelude required them. Expect more of that: a migration finds the gap, and the gap is a feature. [Data Structures](Data%20Structures.md) is where the resulting language is described; this document is only the queue.
 
-The suite is 224 cases: 100 run, 50 error, 1 runtime, 73 expected-failing.
+The suite is 258 fixtures — 181 run, 60 error, 2 runtime, 15 expected-failing — plus a round-trip check over every run fixture, for 439 assertions in total.
+
+## Where to pick up
+
+Steps 0 through 13 have landed and **nothing is queued behind a step**. What is left is fifteen fixtures in two categories, and three of them want a decision rather than work.
+
+| | |
+|---|---|
+| **Waiting on a decision** | `builtins/conversions` needs [fallibility](Remediation%20of%20Builtins.md#fallibility) settled for `to_int` — the discussion favoured `<Fallible> int` over `Option<int>`, and now that [step 13](#13--parameterized-traits--done) exists it could be `impl TryFrom<string> for int` instead of a function. `builtins/readfile` and `writefile` wait on what IO becomes once `print` is an effect. |
+| **Waiting on a feature** | GADTs (`types/gadt`), `async` (`effects/async`), and tuple destructuring in a binding (`core/for_tuple`, which also wants `HashMap.entries()`). |
+| **Parked** | `compile/*`. Native compilation is out of scope for this bootstrap. |
+
+**Deliberately not built:** string interpolation, and a formatter. `--dump-code` prints the tree as Cronyx and its round-trip check guards mechanical rewrites, but neither is a formatter — comments are discarded by the scanner, so a real one needs trivia the tree does not carry.
+
+**Two limits worth knowing before extending anything.** Two impls of one trait for one type at different arguments collide, because a method registers under `(type, method name)`. And the prelude is order-sensitive: a call above a declaration is monomorphic, so an entry that uses a helper must come after it.
 
 ## Order
 
