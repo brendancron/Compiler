@@ -20,9 +20,7 @@ Decisions taken deliberately later, with the reason.
 
 **`embed`.** `tests/core/embed` exists and has not been discussed. Reading a file at compile time is a metaprocessing capability, so it belongs with the sandbox question about what the evaluator permits.
 
-**Effect rows at call sites are equated, not subsumed.** A call unifies the callee's row with the caller's, so a pure function called from an effectful one comes out annotated with the caller's effects — and the CPS pass, reading that annotation, passes it evidence it has no parameters for. `fn twice(n) { return n * 2; }` called from a function that performs `log` fails at run time with an arity error. Koka's rule is containment, not equality. Fixing it means a subrow constraint, or taking a function's row from its declaration rather than from a call site's inference variable. [Resolve] already does the latter for the calls it synthesizes, since it emits the declaration and the call together.
-
-**Verify does not check effect rows.** It compares each node against its children, and a row belongs to a function reached through a name. The bug above is exactly the kind it was built to catch and cannot.
+**Verify does not check effect rows.** It compares each node against its children, and a row belongs to a function reached through a name. The call-site row bug — a callee annotated with effects it does not perform, given evidence it has no parameter for — was exactly the kind it was built to catch and could not see; it was found by running a program, and fixed as step 11 of [Remediation of Builtins](Remediation%20of%20Builtins.md).
 
 **A deferred method call's result type rests on its uses.** When a receiver is a type parameter, the call is checked for the method's existence and its result is a fresh variable, pinned by whatever the caller does with it. `"x " + item.summarize()` pins it to string; a result nobody constrains is not checked against the impl until the copy is made, and not at all if no copy is. Specialization could re-check each copy against the declared method type.
 

@@ -36,6 +36,10 @@ fn f(): List<int> { return [1, 2, 3]; }    // return type
 var xs = [1, 2, 3];  xs.push(4);           // push exists only on List
 ```
 
+The last is a rule rather than a coincidence. A method call on a literal that is still a collection variable looks at `Array` and every registered container declaring that method: the array wins if it declares it, a single other container narrows to it, and several is a diagnostic naming them. So an unrelated `Stack.push` does not disturb it, and the rule degrades gracefully as a standard library adds containers.
+
+It resolves where it is written, not later, so `xs.len()` before `xs.push(4)` narrows to an array on the first line and rejects the second. Annotate when a literal is used both ways.
+
 ## Defaulting
 
 Nothing narrowed it, so it is an **array** — the same rule that turns an unconstrained numeric variable into `int`.

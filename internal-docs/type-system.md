@@ -35,7 +35,7 @@ type infer_ty =
   | IFn of infer_ty list * infer_ty * infer_row
   | IVar of tv ref
 and tv = Unbound of int * kind | Link of infer_ty
-and kind = Any | Addable | Numeric
+and kind = Any | Addable | Numeric | Collection of infer_ty | Bound of string list
 
 (* After inference: fully resolved. No unification variable can appear. *)
 type ty =
@@ -52,7 +52,7 @@ The point of two representations is that an *unresolved* type variable is unrepr
 
 `Generic` is the concession full let-polymorphism forces. `fn id(x) { return x; }` is `'a -> 'a` and its body genuinely has no concrete type, so `ty` needs a way to say "quantified" as distinct from "not yet known". A `Generic` reaching codegen means that call site was never monomorphized — a marker for work to do, not an unresolved variable.
 
-The surface spelling is Cronyx's: `int`, `float`, `string`, `bool`, `unit`. The OCaml constructor is `Str`, but no user ever writes `str`.
+The surface spelling is Cronyx's: `int`, `float`, `string`, `char`, `byte`, `bool`, `unit`. The OCaml constructors are `Str`, `Chr` and `Byte`, but no user ever writes those.
 
 Cost: one conversion function and some duplication between the two types.
 
@@ -99,6 +99,9 @@ Two numeric types plus annotation-free inference makes `fn double(x) { return x 
 - Unifying a `Numeric` variable with `Int` or `Float` succeeds; with `Str`, `Bool`, `Unit`, or a function type it fails with "operator `+` expects a numeric type".
 - Unifying two variables takes the stronger constraint.
 - At `resolve` time, a still-unbound `Numeric` or `Addable` variable **defaults to `Int`**. A still-unbound `Any` variable becomes `Generic`, since it is polymorphic rather than ambiguous.
+- A variable introduced by a **written** type parameter — `fn f<T>`, `impl Box<T>` — is registered in `Types.declared_params` and never defaults, however constrained. The author said the definition is generic in `T`; defaulting it to `int` because the body adds would contradict them.
+
+Forgetting that registration is invisible for a long time. The binding still generalizes, so the definition type checks and so does every call; only the *body's* annotations are wrong, and they are wrong in a way that looks right at the first instantiation. `impl` parameters were created with a bare `fresh ()` for exactly this reason, and the symptom was a `Pair<Vec2>` whose method had been resolved at `int` — passing the checker and failing in the interpreter.
 
 There is no implicit widening: `1 + 2.5` is a type error, and mixing requires an explicit conversion. Subtyping interacts badly with unification, and the error messages it produces are markedly worse.
 
@@ -162,16 +165,26 @@ Notes on the parts that differ from the plan above:
 
 - **Errors accumulate per top-level statement.** A statement that fails is dropped from the checked tree and checking continues; the tree is only returned when there are no errors at all, so a partial tree never escapes.
 - **`unify` takes expected first, actual second**, and the message reads "Expected X, got Y" straight off that. Call sites that had it backwards produced inverted messages (`if (1)` reporting "Expected int, got bool"), which is worth watching for when adding rules.
+- **`has_generic` and `match_generic` must agree.** One decides whether a definition is a specialization template, the other what its copy's types become, and both walk a type looking for `Generic`. If either stops short — they both used to skip a `Named`'s *arguments*, where an opaque container keeps its parameter — the result is a template that is never collected, or a copy that is collected and still generic. Neither shows up until a generic body contains something type-directed.
 - **Generalization removes the function's own binding first.** `hoist` binds a function monomorphically so recursion works; leaving that binding in place while computing the environment's free variables makes every one of the function's own variables look free, and nothing is ever quantified. This cost an hour and is invisible until you test a function used at two types.
 
 ## Known gaps
 
-- **`print` is variadic**, which no HM type describes. Calls to it are checked structurally (arguments are inferred, the call is `unit`); referring to `print` as a value yields an unconstrained type rather than a real signature. A proper fix needs either varargs in the type language or a `print` that takes one argument.
+- **`print` is variadic**, which no HM type describes. A call is checked structurally — the arguments are inferred and the call carries a signature built from them — and the *binding* is `() -> unit`, so referring to `print` as a value is rejected rather than yielding something unconstrained. What no type describes is the declaration, so `print` cannot be written in Cronyx. The intended answer is a `meta fn` expanding a call at compile time, which needs no type for the arity at all; the alternatives are a top type, trait objects, or a one-argument `print`.
 - **No exhaustiveness check on `return`.** A function returning on only one path infers from the `return` it can see, while the evaluator yields `unit` when control falls off the end. The types are a promise the runtime does not keep.
-- **`Generic` has no consumer yet.** Nothing monomorphizes, so a polymorphic function is fine for the interpreter and will not be for codegen.
+- **`Generic` survives where nothing needed it concrete.** `Specialize` copies a generic function or `impl` method per concrete type its call sites use, but only when the body contains something type-directed — an operator, a method, a literal. A function that merely moves values around keeps one copy and a `Generic` in its annotations, which is fine for the interpreter and will not be for codegen.
 - **Uses before a function's declaration are monomorphic.** Generalization happens when the declaration statement is reached, so a call earlier in the same block sees the hoisted monomorphic type.
+- **The same applies across declarations.** A call to a generic `impl`'s method from anything inferred before that `impl` pins its type variable permanently. The prelude hit this: `impl string`'s `split` calls `List.push`, and placing it above `impl List<T>` fixed `List__push` at `string`.
 
 ## Settled
+
+**A dot is a call with the receiver passed first.** `x.f(y)` is `f(x, y)` when the receiver's type declares no method `f`, so a free function extends a type without an `impl` and without owning it. An `impl` answers first — otherwise whatever function a program happened to have in scope could shadow a method — and the fallback fires only after the type is found to have no method of that name, which keeps the rule to one direction.
+
+It also settles the receiver's type where nothing else had. `[1, 2, 3].each()` has no owner to look in, because a literal's container is not chosen until something chooses it; unifying against the function's first parameter is what chooses it. So the fallback runs both when the owner has no such method and when there is no owner yet.
+
+**A method call carries two names**, because neither pass can answer alone. Whether `xs.map()` reaches a method or a function is a typing question; what `map` names in the file it was written in is a loading one. So the node holds what was written and what the name resolves to as an ordinary function — the loader fills the second in by the same lookup it does for a reference, including a local of that name shadowing an import, and the checker uses the first to find a method and the second when there is none. Neither guesses.
+
+That is what makes an imported function reachable through a dot: `import { map } from "…"` renames the declaration to `List#map`, and the resolved name carries the rename to where the fallback needs it.
 
 **Comparison operators are ordinary entries.** Their result type comes from the entry rather than being fixed to `bool` — see [Elaboration](Elaboration.md).
 

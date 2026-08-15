@@ -13,8 +13,9 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 | [Collection Literals.md](Collection%20Literals.md) | How `[...]` picks a collection type |
 | [Elaboration.md](Elaboration.md) | Type-directed resolution of operators, indexing, and literals |
 | [Comptime Params.md](Comptime%20Params.md) | `<>` parameters, and why they are not just generics |
+| [Modules.md](Modules.md) | `import`, and why several files become one program |
 | [Metaprocessing.md](Metaprocessing.md) | `meta` and `gen`, and compilation calling itself |
 | [Reify.md](Reify.md) | Turning a compile-time value back into syntax |
-| [Implementation Plan.md](Implementation%20Plan.md) | Build order, and which fixtures each step affects |
+| [Implementation Plan.md](Implementation%20Plan.md) | The remaining language work, and which fixtures each step affects |
 | [Remediation of Builtins.md](Remediation%20of%20Builtins.md) | What is wrong with how builtins are supplied, and the order to fix it |
 | [TODO.md](TODO.md) | Deferred decisions, and why |

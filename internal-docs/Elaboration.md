@@ -128,6 +128,8 @@ ring[0] = 5;
 
 `xs[i] += 1` composes the two with the operator between them, unless an in-place entry claims the whole form.
 
+Both forms are implemented. `[]=` is a separate operator rather than a three-operand `[]` because it reads as an assignment; arity is what separates the two `[]` forms below.
+
 ## Literals
 
 A literal has no type of its own — it proposes candidates and the expected type picks one. That is the same table, keyed in the opposite direction: operators resolve forwards from operand types to a result, literals resolve backwards from a target type to a constructor.
@@ -137,6 +139,16 @@ var a: Array<int>       = [1, 2, 3];
 var l: List<int>        = [1, 2, 3];
 var s: Set<int>         = [1, 2, 3];
 ```
+
+A type says it can be built from a literal by declaring `op []` with a single operand — the array of elements the literal produces:
+
+```cronyx
+op []<T>(items: Array<T>) -> Ring<T> {
+    return new Ring { items: items, head: 0 };
+}
+```
+
+One operand builds, two read, three write, and the entry is identified by what it builds so that two containers over `Array<T>` do not collide.
 
 See [Collection Literals](Collection%20Literals.md) for how that one works in detail. Numeric literals already behave this way — `1` is an `int` or a `float` depending on context, defaulting to `int`.
 
@@ -212,10 +224,10 @@ Without it, zero-cost operators exist only in monomorphic code. That is the ceil
 
 - **Precedence** when two entries match the same operands.
 - **A designated default**, so an unresolved numeric literal has an answer.
-- **Which operators are open.** `and` and `or` short-circuit, so overloading them would be overloading control flow — they stay closed:
+- **Which operators are open.** `&&` and `||` short-circuit, so overloading them would be overloading control flow — they stay closed:
 
   ```cronyx
-  op and(a: Vec2, b: Vec2) -> Vec2 { ... }   // rejected
+  op &&(a: Vec2, b: Vec2) -> Vec2 { ... }   // rejected
   ```
 
 - **Registration completes before type checking**, since the checker consults the table.

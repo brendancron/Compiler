@@ -1,10 +1,14 @@
 # Metaprocessing
 
+Status: **built.** `lib/metaprocess.ml` runs `meta` blocks and `meta fn` calls and splices what `gen` emits; `tests/meta/` passes except `derive/basic`, which predates the type redesign. A meta function's parameters take values, like any other function's.
+
 A `meta` block runs while the program is being compiled. Reaching one means compiling and running its dependencies, then continuing where compilation left off — so metaprocessing is recursive compilation.
+
+**Literally so.** `Metaprocess` calls Desugar, Monomorphize, Typecheck, Specialize, Resolve, Reflect, Cps, Verify and Interp on the block's statements — the same passes, in the same order, that the rest of the program goes through. There is no second interpreter and no compile-time subset of the language.
 
 ## Two things, not one
 
-**`meta` runs code at compile time.** Its output happens during compilation, before the program runs at all:
+**`meta` runs code at compile time.** Braces are a block of statements rather than part of the form, so `meta print(x);` and `meta { … }` are the same thing at different sizes. Its output happens during compilation, before the program runs at all:
 
 ```cronyx
 print("Top");
@@ -113,6 +117,44 @@ So a name in generated code is an identifier unless the meta environment binds i
 
 **The emitted nodes do not go through the rest of compilation inside metaprocessing.** They are handed back to the enclosing compilation and continue from the stage the meta block interrupted. Generated code is checked and lowered exactly once, as part of the program it lands in.
 
+### How a captured statement reaches the interpreter
+
+`gen` has to run when control reaches it — inside a loop, inside a branch — so it is a runtime construct in the block's compiled program. But what it carries is *surface syntax*, and every IR after the front end has dropped that shape.
+
+So a `gen` does not survive as a node. Captured statements go into a table the metaprocessor owns, and `gen S` lowers to a call:
+
+```
+gen S    ⟶    meta#emit(k, "n", n, …)
+```
+
+`k` indexes the table; the pairs are the block's own bindings and their values. `meta#emit` looks up entry `k`, substitutes, and appends the result to whatever collector is running. The name is generated, so no program can write it, and it is bound only while a block runs.
+
+**Which names get passed is a correctness matter.** Only names the block itself binds are sent, because a name it does *not* bind is a runtime name — mentioning it inside the meta block would not compile. That is precisely why `gen var x = y + 5;` works: `y` is never passed, so it is never substituted, and it survives as an identifier.
+
+The table is shared across the whole run rather than per block, because a `meta fn` body may contain `gen` and is recorded once but called from many blocks.
+
+### What substitutes
+
+A bare identifier bound by the meta program is replaced; everything else is syntax, resolved in the program the code lands in. What the identifier holds decides how:
+
+| It holds | It becomes |
+|---|---|
+| `int`, `float`, `string`, `bool`, `char` | that literal |
+| `Code` | the syntax it captured |
+| `Name` | an identifier, in a name position |
+| anything else | itself, unsubstituted |
+
+**Only a bare identifier splices.** `self.eq(other)` inside a `code` is a call in the generated program, not a call to make now, and that holds however the callee is defined. It is what keeps the question *does this run now or later* from depending on resolving a name — which is also why a computed piece is bound to a local first:
+
+```cronyx
+var one = compare(f.name);
+check = code(check and one);
+```
+
+A **name position** — a declaration's name, a constructor's type, a field, a method, a type annotation — substitutes only for a `Name`. A string never becomes an identifier on its own; `"greet_" + n` has to say so, with `.as_name()`, which rejects text that could not be one. That is the same objection that rules out passing a type as a string: characters carry no guarantee that anything answers to them.
+
+A list does not become a list literal, and a record does not become a record literal. No fixture needs it — `greeting.cx` iterates the list while compiling and substitutes one name at a time.
+
 ## Nesting
 
 A meta block inside a meta block is processed while the outer one is being compiled, so the innermost runs first:
@@ -160,10 +202,12 @@ C
 Three separate things, worth keeping apart:
 
 - **Processing** a nested meta block happens during compilation of its parent, unconditionally.
-- **Splicing** puts `gen` output at the position the meta block occupied — which, for a nested block, is inside the parent's body rather than in the program.
+- **Splicing** puts `gen` output at the position the meta block occupied — which, for a nested block, is inside the parent's body rather than in the program. A generated *declaration* is the exception: it hoists to the front of the program, because what generated it may stand below the code that uses it. `gen_symbol.cx` calls `greet` on line 1 and generates `fn greet` from a block below.
 - **Executing** spliced code follows ordinary control flow, so a statement generated inside a branch that is never taken never runs.
 
 So control flow decides what *executes*, never what gets *processed*.
+
+A meta block **inside a `gen`** is still a nested block, so it is processed now and its output takes its place — inside the `gen`, which is where it stood. That is what makes `gen_meta.cx` print `D` first: the inner block runs during the outer's compilation, and the `gen print("E")` it produced is what the outer block emits when it runs. Treating the inner block as ordinary captured syntax instead gives `B F D …`, which is the wrong answer and the one this section exists to rule out.
 
 ## Meta functions
 
@@ -182,6 +226,28 @@ meta fn derive_name(T) {
 
 derive_name(Dog);         // statement: replaced by the gen output
 ```
+
+### Where the `meta` goes
+
+`meta` always means the same thing — run this while compiling. The only question is where it is written, and that answers two different needs.
+
+**On the call.** `meta fib(10)` asks for an ordinary function's result now. `fib` is a plain `fn`, equally useful at runtime, and the call site decides.
+
+**On the declaration.** `meta fn f(…)` makes every call to `f` a meta call, with nothing written at the call sites. That is required rather than convenient: `print(a, b)` cannot become `meta print(a, b)` everywhere, so a function whose whole purpose is to expand has to say so once, where it is declared. It has no runtime form, because every call to it has already happened by then.
+
+Neither is a separate mechanism, and neither is a macro system: both are Cronyx running Cronyx, and the difference is only who says *when*.
+
+`tests/meta/functions/fib` puts `meta` on the declaration for a computation, which is the wrong lesson — it makes a perfectly ordinary recursive function compile-time-only for no gain. It wants rewriting to a plain `fn` and a `meta` call.
+
+### Parameters take values
+
+A meta function's parameters are ordinary parameters. They receive values, evaluated in the meta program, because a meta function is an ordinary function that has been reduced away before the program runs. Nothing takes syntax, and there are no syntax objects in the language.
+
+That is the simplifying decision, and it decides two other things by itself.
+
+**A type must be a value to be passed as one.** `derive(Dog)` cannot take a bare name, and `typeof` only takes a value. So `derive` is not waiting on metaprocessing — a deriver works today over a `TypeShape` — but on naming the type it is written for.
+
+**`print` cannot become a meta function.** `print(a, b)` with `a` a runtime variable is not reducible at compile time: the argument has no value yet, and the call fails with `Undefined variable 'a'`, which is correct rather than a gap. Moving `print` out of `builtins.ml` therefore needs one of the answers in [Remediation of Builtins](Remediation%20of%20Builtins.md) step 8 — rest parameters, a top type, or a one-argument `print` — and not this.
 
 Four rules follow:
 
@@ -248,9 +314,9 @@ Declarations reach every level, because they are compiled from the dependency gr
 | its own locals                               | yes | it is running                      |
 | an enclosing meta block's locals             | no  | that block has not run             |
 | runtime `var` bindings                       | no  | they have no value while compiling |
-| declarations below it in the file            | ?   | undecided                          |
-| imported symbols                             | ?   | undecided                          |
-| symbols another meta block generated         | ?   | undecided                          |
+| declarations below it in the file            | no  | a block sees the program as compilation reached it |
+| imported symbols                             | yes | a unit's declarations are one program by then |
+| symbols another meta block generated         | yes | if that block stands above it     |
 
 **Runtime variables are not in scope.** `var y = 4;` has no value while compiling — it is a binding the program will make later. That is exactly why `gen var x = y + 5;` works: `y` is unbound at compile time, so it passes through as an identifier.
 
@@ -349,6 +415,88 @@ That keeps the recursion honest: compiling a meta block runs the same pipeline t
 
 The same applies to what compile-time code may do. It can do anything the evaluator permits. Restricting file access or nondeterminism is a sandboxing decision for whatever is passed in, not a rule the language needs to state.
 
+## `code` builds syntax, `gen` emits it
+
+`gen` is a side effect: what follows it goes into the program being compiled. `code(e)` is a value — it hands back the syntax without running it, and nothing is emitted until a `gen` takes it.
+
+```cronyx
+meta fn build() {
+    var check = code(true);
+    for (n in [1, 2, 3]) { check = code(check and n > 0); }
+    gen fn all_positive() -> bool { return check; }
+}
+```
+
+`check` is an ordinary local holding a `Code`. The fold is what joins the pieces, so there is no `join`, no operator-as-a-value, and no control flow inside `gen` — the loop that builds the code is the loop the language already has, which is the point. A template with a repetition marker can only repeat what the marker anticipated; this can sort the fields, skip one, or call a helper.
+
+That helper is a meta function, because a function that manipulates syntax runs while compiling by definition:
+
+```cronyx
+meta fn doubled(v: Code) -> Code { return code(v + v); }
+```
+
+**`Code` and `Name` are compile-time types**, next to `Type`. A `Code` cannot reach a running program — `code` outside a meta block is an error, and nothing else builds one. A `Name` is ordinary once it is in hand; what is restricted is making one, since that is where a name could otherwise be forged.
+
+**How it is built.** `code` reuses what `gen` already had. Both are lowered before the meta program runs — into a call carrying an index into a table of captured syntax, plus the meta-bound names in scope. `gen`'s call emits, `code`'s returns. The one difference is scope: lowering follows the names bound *up to that point*, because `var body = code(…)` cannot be handed `body`.
+
+## Deriving
+
+Generating an `impl` from a type's shape is what a meta function is for, and it is the case the language should be good at: real code derives several traits at once, so the form takes a list and names the type once.
+
+```cronyx
+derive Eq, Ord, Hash, Clone, Debug for Dog;
+```
+
+A deriver is declared beside the trait it derives, bound to it by a `for` clause the way an `impl` is:
+
+```cronyx
+trait Hash {
+    fn hash(self) -> int;
+}
+
+meta fn derive(shape: TypeShape) for Hash {
+    match shape {
+        TypeShape::Product(t, fields) => {
+            gen impl Hash for t {
+                fn hash(self) -> int { … built with `code`, above … }
+            }
+        }
+        …
+    }
+}
+```
+
+**It takes a `TypeShape`, not a `Type`.** A `Type` cannot be passed anywhere — it answers a question where it stands — so `derive A for X;` passes `typeof(X).shape`, and the name of the type comes out of the shape with the fields. Handing over a whole `Type` waits on the lazy handle, and nothing here needs it.
+
+`derive A, B for X;` is one call per trait. Nothing else is new: a generated `impl` is spliced and hoisted like any other generated declaration, and it is checked as ordinary code in the program it lands in.
+
+**The name written is not the name registered.** Every deriver is called `derive`, which would collide; `for Hash` is what registers it, under a generated name no program can write. So a second deriver for one trait is *trait 'Hash' already has a deriver*, and a `derive` naming a trait without one is *trait 'Hash' has no deriver* — both while metaprocessing, rather than as a missing method later.
+
+**Why `for Hash` rather than a member of the trait.** Binding by a clause keeps a trait what it is — signatures — and makes a mistyped trait name an error at the declaration rather than a derive that silently does not exist. It also allows a deriver for a trait you did not write, which the alternative cannot: there are no orphan rules here, so `derive Hash for geom.Point;` is as legitimate as writing the impl by hand. Duplicate derivers for one trait are rejected the way duplicate `op` entries are.
+
+**Why a statement rather than an attribute on the declaration.** `derive … for …` can name an imported type, does not touch the type-declaration grammar, and reads as the `impl Hash for Dog` it generates.
+
+**The keyword is sugar, and the call underneath stays available.** A deriver taking extra arguments, or a second one for the same trait, is an ordinary meta function called directly:
+
+```cronyx
+derive_bounded(typeof(Dog), 16);
+```
+
+**What it needs**, in order:
+
+1. ~~`Type` carrying `.name` and `.shape`~~ — done, and a shape rather than a field list because a product and a sum call for different code.
+2. ~~Building a body from what reflection said~~ — done. `code` and `Name`, above; `meta/code/derive_eq` is the deriver, taking a `TypeShape` and generating a working `eq`.
+3. ~~`typeof` accepting a type name~~ — done. A bare name is a value's type if one answers to it and the declared type otherwise, so `typeof(Dog)` reads a type nothing holds.
+4. ~~Naming the type a generated `impl` is written for~~ — done, though not where it was expected; see below.
+5. ~~`meta fn derive(…) for Trait` as a registering declaration~~ — done.
+6. ~~`derive A, B, C for X;`~~ — done, with *trait `Foo` has no deriver* when one is missing.
+
+All six are built. `meta/derive/basic` and `meta/derive/two_traits` are the fixtures; the second derives two traits for one type in one statement.
+
+**`Type.name` stayed a string.** The plan was to make it a `Name` so a generated `impl` could use it, and that is wrong: `typeof(f).name` is `(int) -> int`, which no identifier could be. A name that can be spliced exists exactly where a declaration does, so `Product` and `Sum` carry one and the other shapes do not — `match T.shape { TypeShape::Product(t, fields) => gen impl t { … } }`. It also costs no fixture churn, since everything that prints `typeof(x).name` still gets a string.
+
+**Passing a whole `Type` to a meta function turned out not to be on the path** — a deriver needs the shape and the name, and both are ordinary values once folded. It becomes necessary when a field reports its type, which is the lazy handle. The rest is the `typeof` rework, which `Set` and `Map` also want for `Hash`.
+
 ## What it needs
 
 **A dependency graph.** Running a meta block does not require compiling the whole program, only what that block transitively references. Evaluation order follows the graph, and a cycle — a block depending on something whose definition depends on that block — is an error with a message rather than a hang.
@@ -357,7 +505,7 @@ The same applies to what compile-time code may do. It can do anything the evalua
 
 **A symbol table that rejects duplicates.** The Rust bootstrap registers provided names into a `HashMap<String, usize>` (`staged_forest.rs:92`), so a second provider of the same name silently replaces the first. Registration has to fail instead, or the ordinary duplicate-definition rule never gets the chance to fire.
 
-**A position to splice into.** `gen` in statement position emits statements; in expression position, one expression. The two are different modes and only one is valid in a given context.
+**A statement chunk.** `code` captures an expression. A deriver that emits several statements wants `code { … }` as well, and the two are different modes with only one valid in a given position.
 
 ## Open questions
 

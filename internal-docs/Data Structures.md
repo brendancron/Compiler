@@ -2,7 +2,9 @@
 
 The datatypes the language has, and what each looks like in use.
 
-Every one of these is a declared type. `Array` and `List` are supplied by the compiler rather than written in Cronyx, but they are declared the same way anything else is — a name, its parameters, and no fields — so nothing downstream can tell them from a type a program declares. What makes a type a container is an entry saying how to build one from a literal and whether it can be indexed, not a case in the compiler.
+Two of these are primitive: `Array` is a contiguous mutable block and `string` is a sequence of characters, and neither can be written in Cronyx because nothing in Cronyx can see inside them. Everything else is a declared type. `List`, `Set` and `Map` are written in the prelude, in Cronyx, with no compiler support of any kind — what makes a type a container is a declaration saying how to build one from a literal and whether it can be indexed, and any program can write one.
+
+The primitives are as small as they can be. Their operations that *are* expressible — `Array.contains`, `string.split`, `string.trim` — are prelude code like any other method.
 
 ## Array
 
@@ -18,6 +20,8 @@ print(xs.len());         // 3
 print(typeof(xs));       // Array<int>
 ```
 
+An array has identity: a second name is the same array, not a copy, and writing through one is visible through the other. `==` asks whether two values are structurally equal, so `[1, 2] == [1, 2]` is true; `same(xs, ys)` asks whether they are the same array. For a scalar there is nothing to tell apart, so `same` and `==` agree.
+
 An array of a given size:
 
 ```cronyx
@@ -26,6 +30,35 @@ var zeros = new Array<int>(16);
 print(zeros.len());      // 16
 print(zeros[0]);         // 0
 ```
+
+## String
+
+`string` — a sequence of Unicode scalar values. `len` and indexing count characters, not bytes, and both are constant time.
+
+```cronyx
+var s = "héllo";
+
+print(s.len());          // 5
+print(s[1]);             // é
+print(typeof(s[1]));     // char
+print(s.contains("éll"));// true
+print("a,b".split(','));  // [a, b]
+```
+
+A string cannot be written through — `s[0] = c` is an error — so an index reads and nothing writes.
+
+## Char and byte
+
+`char` is one scalar value, written `'é'`, with the escapes a string literal takes: `\n`, `\t`, `\r`, `\0`, `\\`, `\'`, `\"`. `byte` is one octet and has no literal, so it is reached by asking a string for its encoding.
+
+```cronyx
+print(s.chars().len());  // 5   Array<char>
+print(s.bytes().len());  // 6   Array<byte>, the UTF-8 encoding
+```
+
+`chars` copies, because an array is mutable and a string is not. `bytes` is the wire form: it is what leaves the process, and the only string operation the compiler still supplies.
+
+These are code points, not grapheme clusters. `é` written as `e` plus a combining accent is two characters, the same answer Python gives and a different one from Swift.
 
 ## List
 
@@ -126,22 +159,26 @@ var both = new Pair { first: 1, second: "one" };
 
 ## Map
 
-`Map<K, V>` — keys must be hashable and comparable.
+`Map<K, V>` — a collection literal reads as a map when the annotation says so, taking the last value written for a key.
 
 ```cronyx
 var ages: Map<string, int> = [("alice", 30), ("bob", 25)];
 
 ages.insert("carol", 41);
 
-print(ages.get("alice"));   // Some(30)
-print(ages.len());          // 3
+print(ages.len());                  // 3
+print(ages.contains("alice"));      // true
+print(ages.get_or("bob", 0));       // 25
+print(ages.get_or("dave", -1));     // -1
 ```
 
-A map's element type is the pair `(K, V)`, so an array of tuples is already the right shape and no separate literal form is needed.
+A map's element type is the pair `(K, V)`, so an array of tuples is already the right shape and no separate literal form is needed. That is not a special case: the entry declares it, as `op []<K, V>(pairs: Array<(K, V)>) -> Map<K, V>`.
+
+There is no `get` returning an `Option`, because there is no `Option` — what a lookup does when a key is absent is part of a fallibility design that has not been settled, and `get_or` is what can be written without settling it. Lookup is a linear scan comparing keys with `==`, so a record key is matched on its fields.
 
 ## Set
 
-`Set<T>` — same constraints as map keys. A collection literal reads as a set when the annotation says so, dropping duplicates.
+`Set<T>` — a collection literal reads as a set when the annotation says so, dropping duplicates.
 
 ```cronyx
 var seen: Set<int> = [1, 2, 2, 3];
@@ -151,3 +188,7 @@ seen.insert(4);
 print(seen.contains(2));    // true
 print(seen.len());          // 4
 ```
+
+A set declares a literal and no indexing, so `seen[0]` is an error. The three bracket entries are independent and a type takes only the ones that mean something for it.
+
+Membership is `==`, which is structural — two records with equal fields are the same element, and a set of them holds one. Identity, when that is the question being asked, is `same(a, b)`.
