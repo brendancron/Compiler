@@ -1,4 +1,3 @@
-import { Option } from "../lang/Option";
 import { Hash } from "../ops/Hash";
 
 // Open addressing with linear probing, over the same slot scheme as HashSet:

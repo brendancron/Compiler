@@ -1,6 +1,5 @@
 import { map, filter, fold, any, all, find, concat, reverse, flat_map, join }
     from "../../../stdlib/collections/List";
-import { Option } from "../../../stdlib/lang/Option";
 
 var nums = [1, 2, 3, 4, 5];
 

@@ -1,4 +1,3 @@
-import { Option } from "Option";
 import { substring } from "String";
 import { Dfa, subset_construction, dfa_step, dfa_is_accept, no_state } from "../automata/Dfa";
 import "../regex/RegexParser";

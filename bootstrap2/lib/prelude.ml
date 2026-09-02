@@ -66,6 +66,13 @@ trait FromArray<T> {
     fn from_array(items: Array<T>) -> Self;
 }
 
+// In the prelude rather than the stdlib because the language itself hands one
+// back: `partial_cmp` answers `None` for two values with no order between them.
+type Option<T> {
+    Some(T),
+    None
+}
+
 // What `a[i:j]` puts between the brackets. The four shapes are four variants
 // rather than one pair with sentinels, so a missing bound is missing rather
 // than encoded.

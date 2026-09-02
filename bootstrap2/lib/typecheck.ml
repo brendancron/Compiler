@@ -128,6 +128,7 @@ let ctx_traits : (string, string list * Ast.trait_body) Hashtbl.t = Hashtbl.crea
 
 (* So a program's declaration can be told from the prelude's. *)
 let ctx_trait_spans : (string, Ast.span) Hashtbl.t = Hashtbl.create 8
+let ctx_type_spans : (string, Ast.span) Hashtbl.t = Hashtbl.create 8
 
 (* No trait in the key: two naming the same associated type would collide. *)
 let ctx_assoc : (string * string, Types.infer_ty) Hashtbl.t = Hashtbl.create 8
@@ -153,6 +154,7 @@ let scoped_declarations f =
   let types = snapshot ctx_types
   and traits = snapshot ctx_traits
   and trait_spans = snapshot ctx_trait_spans
+  and type_spans = snapshot ctx_type_spans
   and methods = snapshot ctx_methods
   and impls = snapshot ctx_impls
   and associated = snapshot ctx_associated
@@ -167,6 +169,7 @@ let scoped_declarations f =
       restore ctx_types types;
       restore ctx_traits traits;
       restore ctx_trait_spans trait_spans;
+      restore ctx_type_spans type_spans;
       restore ctx_methods methods;
       restore ctx_impls impls;
       restore ctx_associated associated;
@@ -186,6 +189,7 @@ let reset_effects () =
   Hashtbl.reset ctx_effect_params;
   Hashtbl.reset ctx_traits;
   Hashtbl.reset ctx_trait_spans;
+  Hashtbl.reset ctx_type_spans;
   Hashtbl.reset ctx_associated;
   Hashtbl.reset ctx_entries;
   Hashtbl.reset ctx_assoc;
@@ -1505,8 +1509,14 @@ and declare_types (body : Ast.desugared_stmt list) =
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
       | `Type_decl (name, params, body) ->
-        if Hashtbl.mem ctx_types name
-        then fail s.Ast.span "Type '%s' is already declared." name;
+        (* A program declaring a type the prelude also declares gets its own,
+           the way it does for a trait. Two of its own are still a mistake. *)
+        let from_prelude (at : Ast.span) = String.equal at.Ast.file Prelude.file in
+        (match Hashtbl.find_opt ctx_type_spans name with
+         | Some declared when from_prelude declared && not (from_prelude s.Ast.span) -> ()
+         | Some _ -> fail s.Ast.span "Type '%s' is already declared." name
+         | None -> if Hashtbl.mem ctx_types name then fail s.Ast.span "Type '%s' is already declared." name);
+        Hashtbl.replace ctx_type_spans name s.Ast.span;
         let type_params = List.map (fun name -> name, Types.fresh ()) params in
         let vars = List.map snd type_params in
         (* Already the right shape, or `Add(Expr<int>, …)` reads `Expr` as a
