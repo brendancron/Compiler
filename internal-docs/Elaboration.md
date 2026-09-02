@@ -1,12 +1,12 @@
 # Elaboration
 
-`Resolve` runs after type checking and turns every construct whose meaning depends on a type — operators, compound assignment, indexing, literals — into a concrete call or a primitive, chosen once at compile time. It is the last stage of the [elaboration](Architecture.md) cluster, which is where its name comes from.
+`Resolve` runs after type checking and turns every construct whose meaning depends on a type — operators, compound assignment, indexing, literals — into a concrete call or a primitive, chosen once at compile time. It is the pass named in [Architecture](Architecture.md), and elaboration is the older word for what it does.
 
 That is what lets a user-defined type give meaning to `+`, `==`, `[]`, and the rest without `int + int` costing anything more than it does today.
 
-## Declaring an operator
+## An operator is a trait
 
-An operator is declared like a function, named by the symbol it defines:
+Each operator is a trait the prelude declares, and a type gives the operator meaning by implementing it. The trait's associated `Output` is the result, so it need not be either operand:
 
 ```cronyx
 type Vec2 {
@@ -14,21 +14,29 @@ type Vec2 {
     y: int
 }
 
-op +(a: Vec2, b: Vec2) -> Vec2 {
-    return Vec2 { x: a.x + b.x, y: a.y + b.y };
+impl Add<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn add(self, rhs: Vec2) -> Vec2 {
+        return new Vec2 { x: self.x + rhs.x, y: self.y + rhs.y };
+    }
 }
 
-var v = Vec2 { x: 1, y: 2 } + Vec2 { x: 3, y: 4 };
+var v = new Vec2 { x: 1, y: 2 } + new Vec2 { x: 3, y: 4 };
 
 print(v.x);      // 4
 print(v.y);      // 6
 ```
 
-Both operands are matched, not just the left one, so the two sides may differ:
+Selection is on both operands, not just the receiver, so the two sides may differ. The trait's argument is the right-hand type, which is what lets a scalar stand on the left:
 
 ```cronyx
-op *(n: int, v: Vec2) -> Vec2 {
-    return Vec2 { x: n * v.x, y: n * v.y };
+impl Mul<Vec2> for int {
+    type Output = Vec2;
+
+    fn mul(self, rhs: Vec2) -> Vec2 {
+        return new Vec2 { x: self * rhs.x, y: self * rhs.y };
+    }
 }
 
 var doubled = 2 * v;
@@ -36,77 +44,61 @@ var doubled = 2 * v;
 print(doubled.x);   // 8
 ```
 
-That also means commutativity is not free. `v * 2` is a separate declaration unless a rule derives it:
+That also means commutativity is not free. `v * 2` is `impl Mul<int> for Vec2`, a second impl, unless a rule derives it.
+
+**`Eq` is the exception.** Both operands are the type and the answer is always a `bool`, so it takes no argument and binds no `Output`:
 
 ```cronyx
-op *(v: Vec2, n: int) -> Vec2 {
-    return n * v;
-}
-```
-
-Comparison operators are entries like any other, so their result type is whatever the entry says:
-
-```cronyx
-op ==(a: Vec2, b: Vec2) -> bool {
-    return a.x == b.x and a.y == b.y;
+impl Eq for Vec2 {
+    fn eq(self, rhs: Vec2) -> bool {
+        return self.x == rhs.x && self.y == rhs.y;
+    }
 }
 
 print(v == v);      // true
 ```
 
+`!=` is not an impl of its own. A type that has said what equal means has said what unequal means, so `Resolve` lowers `a != b` as the negation of the `eq` call.
+
+**A type that declares nothing gets equality by deriving it**, which is the compiler's own derivation rather than a deriver walking the shape:
+
+```cronyx
+derive Eq for Vec2;
+```
+
+## Bounds
+
+Because operators are traits, generic code can require one, which is the thing a table of entries could not express:
+
+```cronyx
+fn twice<T: Add<T, Output = T>>(x: T) -> T {
+    return x + x;
+}
+
+print(twice(21));      // 42
+print(twice("ab"));    // abab
+```
+
+`Output = T` is an associated-type binding: it says what the impl the bound reaches must have bound, not merely that some impl exists. Without it the return type would be `T.Output` and could not be written as `T`.
+
+The scalars implement the operator traits without a program declaring anything, so a bound reaches `int` as readily as a type that wrote an impl. Their impls emit a machine operation rather than a call — see [What it costs](#what-it-costs).
+
 ## Assignment and increment
 
-`x += v` and `x++` are entries of their own, because a type may want to update in place rather than build a new value and rebind:
-
-```cronyx
-op +=<T>(xs: List<T>, v: T) {
-    xs.push(v);
-}
-
-var xs: List<int> = [1, 2, 3];
-
-xs += 4;         // appends; does not rebuild the list
-```
-
-```cronyx
-type Counter { count: int }
-
-op ++(c: Counter) {
-    c.count = c.count + 1;
-}
-
-var c = Counter { count: 0 };
-
-c++;
-print(c.count);  // 1
-```
-
-When no entry matches, they derive from the plain operator, so a type gets the expected meaning without declaring anything:
+`x += v` and `x++` always derive from the operator. `Resolve` rewrites the first as `x = x + v` and the second as `x = x + 1`, so a type needs only `Add` to get both:
 
 ```cronyx
 var n = 1;
 
-n += 2;          // no entry for (AddAssign, int, int), so: n = n + 2
-n++;             // likewise: n = n + 1
+n += 2;          // n = n + 2
+n++;             // n = n + 1
 ```
 
-The derivation needs `+` to exist. A type with neither is an error naming both: there is no `+=` for it and nothing to derive one from.
-
-Because these are chosen by type, they cannot be rewritten in `Desugar` — `x += v` reaches the checker intact, and `Resolve` decides whether it becomes a call to an in-place entry or an assignment built from `+`.
-
-Note what in-place means for a type with identity:
-
-```cronyx
-var xs: List<int> = [1, 2, 3];
-var ys = xs;
-
-ys += 4;
-print(xs.len());   // 4 — same list
-```
+There is no in-place form. A `List` that wanted `xs += 4` to append rather than rebuild would need an `AddAssign` trait of its own, and `Resolve` would choose between the impl and the derivation — which is why `+=` is not rewritten in `Desugar`, where no type is known yet. Nothing declares one today.
 
 ## Indexing
 
-Reading and writing an index are separate entries, since a type may support one and not the other:
+Reading and writing an index are two traits, since a type may support one and not the other. `IndexSet` requires `Index`, so the element read and the element written cannot disagree:
 
 ```cronyx
 type Ring<T> {
@@ -114,31 +106,44 @@ type Ring<T> {
     head: int
 }
 
-op [](r: Ring<T>, i: int) -> T {
-    return r.items[(r.head + i) % r.items.len()];
+impl Index<int> for Ring<T> {
+    type Output = T;
+
+    fn get(self, i: int) -> T {
+        return self.items[(self.head + i) % self.items.len()];
+    }
 }
 
-op []=(r: Ring<T>, i: int, v: T) {
-    r.items[(r.head + i) % r.items.len()] = v;
+impl IndexSet<int> for Ring<T> {
+    fn set(self, i: int, v: T) -> T {
+        self.items[(self.head + i) % self.items.len()] = v;
+        return v;
+    }
 }
 
 print(ring[0]);
 ring[0] = 5;
 ```
 
-`xs[i] += 1` composes the two with the operator between them, unless an in-place entry claims the whole form.
+`xs[i] += 1` composes the two with the operator between them.
 
-Both forms are implemented. `[]=` is a separate operator rather than a three-operand `[]` because it reads as an assignment; arity is what separates the two `[]` forms below.
+**A type that is not a container reads its element off the impl.** `Ring<T>` holds its elements in a field, so what indexing answers with comes from `Index`'s `Output` rather than from the type's own arguments — which is what associated types are for, and why a non-generic type can be indexed at all.
 
 ### Slicing is indexing by a range
 
-`a[i:j]` is `a[r]` where `r` is a `Range`, so there is no slice operator — a type joins in by declaring one more `[]` entry:
+`a[i:j]` is `a[r]` where `r` is a `Range`, so there is no slice operator — a type joins in by implementing `Index` once more, at `Range`:
 
 ```cronyx
-op [](self: Ring, r: Range) -> List<int> { return self.items[r]; }
+impl Index<Range> for Ring {
+    type Output = List<int>;
+
+    fn get(self, r: Range) -> List<int> { return self.items[r]; }
+}
 ```
 
-Entries are keyed by **what indexes them**, which is what lets one type be read by an `int` and sliced by a `Range`. A type declaring a single entry answers for any index, so a container indexed by its own key type still works without naming that type twice.
+Entries are keyed by **what indexes them**, which is what lets one type be read by an `int` and sliced by a `Range`. A type with a single entry answers for any index, so a container indexed by its own key type still works without naming that type twice.
+
+One type implementing `Index` twice means two impls bringing a `get` apiece, so an impl's methods are named for the trait and its arguments rather than the type alone.
 
 `Range` is a sum — `Between`, `From`, `To`, `All` — rather than a pair with sentinels, so `a[2:]` has no end bound rather than an end bound meaning *no*.
 
@@ -158,19 +163,21 @@ var l: List<int>        = [1, 2, 3];
 var s: Set<int>         = [1, 2, 3];
 ```
 
-A type says it can be built from a literal by declaring `op []` with a single operand — the array of elements the literal produces:
+A type says it can be built from a literal by implementing `FromArray` — the array of elements the literal produces:
 
 ```cronyx
-op []<T>(items: Array<T>) -> Ring<T> {
-    return new Ring { items: items, head: 0 };
+impl FromArray<T> for Ring<T> {
+    fn from_array(items: Array<T>) -> Ring<T> {
+        return new Ring { items: items, head: 0 };
+    }
 }
 ```
 
-One operand builds, two read, three write, and the entry is identified by what it builds so that two containers over `Array<T>` do not collide.
+Building from a literal and reading an element are separate traits, though both are written `[…]`: one takes the elements and yields the container, the other takes the container and yields an element. The entry is identified by what it builds, so two containers over `Array<T>` do not collide.
 
 See [Collection Literals](Collection%20Literals.md) for how that one works in detail. Numeric literals already behave this way — `1` is an `int` or a `float` depending on context, defaulting to `int`.
 
-String literals stay simple: a string literal is a `string`. Making them target-typed would attach a constraint to nearly every literal in a program, and it is deferred rather than decided — see [TODO](TODO.md).
+String literals stay simple: a string literal is a `string`. Making them target-typed would attach a constraint to nearly every literal in a program, and it is deferred rather than decided.
 
 ## What it costs
 
@@ -178,24 +185,24 @@ Both of these lower during compilation, so nothing is looked up while the progra
 
 ```cronyx
 var a = 1 + 2;                       // primitive add
-var b = Vec2 { x: 1, y: 2 } + v;     // direct call to the `+` above
+var b = new Vec2 { x: 1, y: 2 } + v; // direct call to Vec2's `add`
 ```
 
 The first emits the same node the evaluator has always handled. The second emits an ordinary call — the cost of the function you wrote, and nothing more.
 
 ## The table
 
-Internally the declarations above become entries. The checker consults them for the result type, and the lowering pass for the emission:
+An impl of an operator trait becomes an entry. The checker consults these for the result type, and the lowering pass for the emission:
 
 ```
 (Add, int,    int)     → int      primitive add
 (Add, float,  float)   → float    primitive add
 (Add, string, string)  → string   primitive concat
-(Add, Vec2,   Vec2)    → Vec2     call the declared `+`
-(Mul, int,    Vec2)    → Vec2     call the declared `*`
+(Add, Vec2,   Vec2)    → Vec2     call Vec2's `Add<Vec2>` impl
+(Mul, int,    Vec2)    → Vec2     call int's `Mul<Vec2>` impl
 ```
 
-Builtin arithmetic is not a special case in the compiler. It is an entry whose emission happens to be a primitive rather than a call, which is why it stays fast without the operator path knowing anything about it.
+Builtin arithmetic is not a special case in the compiler. It is an entry whose emission happens to be a primitive rather than a call, which is why `int + int` stays fast without the operator path knowing anything about it. The fast path is a resolution outcome, not something an optimizer recovers later.
 
 Two consumers, one table — that is the reason for a table rather than two matches that have to agree.
 
@@ -244,9 +251,7 @@ Without it, zero-cost operators exist only in monomorphic code. That is the ceil
 - **A designated default**, so an unresolved numeric literal has an answer.
 - **Which operators are open.** `&&` and `||` short-circuit, so overloading them would be overloading control flow — they stay closed:
 
-  ```cronyx
-  op &&(a: Vec2, b: Vec2) -> Vec2 { ... }   // rejected
-  ```
+  There is no `And` trait to implement, and `&&` is its own node rather than a call.
 
 - **Registration completes before type checking**, since the checker consults the table.
 
