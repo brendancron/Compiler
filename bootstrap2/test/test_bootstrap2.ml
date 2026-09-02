@@ -88,6 +88,8 @@ let cases =
   ; "tests/stdlib/list/list"
   ; "tests/core/lambdas/basics"
   ; "tests/core/lambdas/trailing"
+  ; "tests/core/lambdas/trailing_no_parens"
+  ; "tests/core/lambdas/trailing_named"
   ; "tests/core/ufcs/basics"
   ; "tests/core/ufcs/impl_wins"
   ; "tests/core/ufcs/with_lambda"
@@ -380,6 +382,7 @@ let expected_failing : (string * blocker) list =
   ; "tests/effects/async/async", Unplanned
     (* A resumption re-enters the scope without re-executing the `defer`
        that set the flag, and the pass marks no such re-entry point. *)
+  ; "tests/core/operators/bounded_param", Waiting "an unbounded operand resolving through its operator's trait"
   ; ( "tests/core/defer/defer_multishot_abort"
     , Waiting "a re-entered scope re-arming its deferred statements" )
     (* Operators resolved through an impl instead of the operator registry. *)

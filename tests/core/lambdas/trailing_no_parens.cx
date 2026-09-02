@@ -1,0 +1,10 @@
+fn apply(f: (int) -> int) -> int {
+    return f(10);
+}
+
+fn twice(f: (int) -> int) -> int {
+    return f(f(1));
+}
+
+print(apply { it * 2 });
+print(twice { it + 3 });

@@ -298,6 +298,10 @@ and call s : Ast.expr =
     | Token.Left_paren ->
       ignore (advance s);
       loop (finish_call s callee)
+    (* `f { it * 2 }` — the parentheses a call would need are what the braces
+       stand in for, so there is nothing between the callee and the lambda. *)
+    | Token.Left_brace when not s.no_brace && callable callee ->
+      loop (Ast.at callee.Ast.span (`Call (callee, trailing_lambda s [])))
     | Token.Left_bracket ->
       ignore (advance s);
       let index = index_or_range s in
@@ -382,14 +386,52 @@ and arguments s : Ast.expr list =
   ignore (consume s Token.Right_paren "Expected ')' after arguments.");
   args
 
-(* `f(xs) { it * 2 }` — a block after a call is a one-parameter function value
-   passed last, and `it` is what that parameter is called. *)
+(* Only a name or something already called can take one, so `if x { … }` and a
+   record literal keep their braces. *)
+and callable (e : Ast.expr) =
+  match e.Ast.it with
+  | `Var _ | `Field _ | `Call _ | `Method_call _ | `Comptime_call _ -> true
+  | _ -> false
+
+(* `{ x, y -> … }` names the parameters; anything else takes the implicit `it`.
+   Read by lookahead, since a body may legitimately start with a name. *)
+and trailing_params s : Ast.param list option =
+  let rec names acc at =
+    match (peek_at s at).Token.token_type with
+    | Token.Arrow -> Some (List.rev acc)
+    | Token.Identifier name ->
+      (match (peek_at s (at + 1)).Token.token_type with
+       | Token.Arrow -> Some (List.rev ({ Ast.name; ty = None } :: acc))
+       | Token.Comma -> names ({ Ast.name; ty = None } :: acc) (at + 2)
+       | _ -> None)
+    | _ -> None
+  in
+  match names [] 0 with
+  | None -> None
+  | Some params ->
+    let rec skip () =
+      if (peek s).Token.token_type = Token.Arrow
+      then ignore (advance s)
+      else (
+        ignore (advance s);
+        skip ())
+    in
+    skip ();
+    Some params
+
+(* `f(xs) { it * 2 }` — a block after a call is a function value passed last,
+   taking the parameters it names or a single `it`. *)
 and trailing_lambda s args : Ast.expr list =
   if not (check s Token.Left_brace && not s.no_brace)
   then args
   else (
     let sp = Ast.span_of_token (peek s) in
     ignore (advance s);
+    let params =
+      match trailing_params s with
+      | Some params -> params
+      | None -> [ { Ast.name = "it"; ty = None } ]
+    in
     (* An expression filling the braces exactly is the value; anything else
        is a body. Telling them apart takes trying. *)
     let mark = s.current
@@ -408,13 +450,7 @@ and trailing_lambda s args : Ast.expr list =
       | exception Parse_error -> restore ()
     in
     args
-    @ [ Ast.at
-          sp
-          (`Lambda
-             ( [ { Ast.name = "it"; ty = None } ]
-             , { Ast.ret = None; row = None; comptime = [] }
-             , body ))
-      ])
+    @ [ Ast.at sp (`Lambda (params, { Ast.ret = None; row = None; comptime = [] }, body)) ])
 
 and finish_call s callee : Ast.expr =
   Ast.at callee.Ast.span (`Call (callee, trailing_lambda s (arguments s)))
