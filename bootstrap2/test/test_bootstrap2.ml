@@ -387,7 +387,6 @@ let expected_failing : (string * blocker) list =
        for a continuation to capture the active scope stack and restore it when
        invoked, which is a change to how [Interp] represents one. *)
   [ "tests/effects/abort_under_conversion", Waiting "a continuation that restores its scopes"
-  ; "tests/effects/return_from_arm", Waiting "a return in an arm leaving the enclosing function"
     (* Unplanned *)
     (* Parked — native compilation, deliberately out of scope *)
   ; "tests/compile/m0/m0", Parked
