@@ -1,158 +1,136 @@
-import "../effects/Yield";
-import "../ops/Hash";
+import { Hash } from "../ops/Hash";
 
-// Open-addressing hash set with linear probing.
-// `slots`: -1=empty, -2=deleted(tombstone), else=index into `keys`.
-// K must implement Hash (key.hash() -> int) and support == for equality.
+// Open addressing with linear probing. A slot holds an index into `keys`, or
+// `empty` for one never used and `deleted` for one vacated. A probe stops at
+// the first but has to walk past the second, or it would miss a key inserted
+// beyond one that has since been removed.
+fn empty() -> int { return 0 - 1; }
+fn deleted() -> int { return 0 - 2; }
 
-struct HashSet<K> {
-    slots: [int];
-    keys:  [K];
-    size:  int;
+type HashSet<K> {
+    slots: List<int>,
+    keys: List<K>,
+    size: int,
     capacity: int
 }
 
-fn new() {
-    var cap = 16;
-    var slots = [];
-    var i = 0;
-    while (i < cap) {
-        slots.push(0 - 1);
-        i += 1;
+fn filled(capacity: int) -> List<int> {
+    var slots: List<int> = [];
+    var at = 0;
+    while (at < capacity) {
+        slots.push(empty());
+        at = at + 1;
     }
-    return HashSet { slots: slots, keys: [], size: 0, capacity: cap };
+    return slots;
 }
 
-fn hs_start_idx(key, cap) {
-    var h = key.hash() % cap;
-    if (h < 0) { h = 0 - h; }
+fn new<K>() -> HashSet<K> {
+    var keys: List<K> = [];
+    return new HashSet { slots: filled(16), keys: keys, size: 0, capacity: 16 };
+}
+
+fn start_at<K: Hash>(key: K, capacity: int) -> int {
+    var h = key.hash() % capacity;
+    if (h < 0) { return 0 - h; }
     return h;
 }
 
-fn hs_contains(set, key) {
-    var cap = set.capacity;
-    var idx = hs_start_idx(key, cap);
+fn probe_add<K: Hash>(slots: List<int>, keys: List<K>, capacity: int, key: K) -> bool {
+    var at = start_at(key, capacity);
     var probes = 0;
-    while (probes < cap) {
-        var s = set.slots[idx];
-        if (s == 0 - 1) { return false; }
-        if (s != 0 - 2 && set.keys[s] == key) { return true; }
-        idx = (idx + 1) % cap;
-        probes += 1;
-    }
-    return false;
-}
-
-fn hs_probe_add(slots, keys, cap, key) {
-    var idx = hs_start_idx(key, cap);
-    var probes = 0;
-    var first_deleted = 0 - 1;
-    while (probes < cap) {
-        var s = slots[idx];
-        if (s == 0 - 1) {
-            var insert_at = idx;
-            if (first_deleted != 0 - 1) { insert_at = first_deleted; }
+    var vacated = empty();
+    while (probes < capacity) {
+        var slot = slots[at];
+        if (slot == empty()) {
+            var insert_at = at;
+            if (vacated != empty()) { insert_at = vacated; }
             slots[insert_at] = keys.len();
             keys.push(key);
             return true;
         }
-        if (s == 0 - 2) {
-            if (first_deleted == 0 - 1) { first_deleted = idx; }
+        if (slot == deleted()) {
+            if (vacated == empty()) { vacated = at; }
         } else {
-            if (keys[s] == key) { return false; }
+            if (keys[slot] == key) { return false; }
         }
-        idx = (idx + 1) % cap;
-        probes += 1;
+        at = (at + 1) % capacity;
+        probes = probes + 1;
     }
-    if (first_deleted != 0 - 1) {
-        slots[first_deleted] = keys.len();
+    if (vacated != empty()) {
+        slots[vacated] = keys.len();
         keys.push(key);
         return true;
     }
     return false;
 }
 
-fn hs_resize(set) {
-    var old_slots = set.slots;
-    var old_keys  = set.keys;
-    var old_cap   = set.capacity;
-    var new_cap   = old_cap * 2;
-
-    var new_slots = [];
-    var i = 0;
-    while (i < new_cap) {
-        new_slots.push(0 - 1);
-        i += 1;
-    }
-    var new_keys = [];
-
-    i = 0;
-    while (i < old_cap) {
-        var s = old_slots[i];
-        if (s >= 0) {
-            hs_probe_add(new_slots, new_keys, new_cap, old_keys[s]);
+impl HashSet<K> {
+    fn contains(self, key: K) -> bool {
+        var at = start_at(key, self.capacity);
+        var probes = 0;
+        while (probes < self.capacity) {
+            var slot = self.slots[at];
+            if (slot == empty()) { return false; }
+            if (slot != deleted() && self.keys[slot] == key) { return true; }
+            at = (at + 1) % self.capacity;
+            probes = probes + 1;
         }
-        i += 1;
+        return false;
     }
 
-    set.slots    = new_slots;
-    set.keys     = new_keys;
-    set.capacity = new_cap;
-}
-
-fn hs_add(set, key) {
-    if (set.size * 4 >= set.capacity * 3) {
-        hs_resize(set);
-    }
-    var before = set.keys.len();
-    hs_probe_add(set.slots, set.keys, set.capacity, key);
-    if (set.keys.len() > before) {
-        set.size = set.size + 1;
-    }
-}
-
-fn hs_remove(set, key) {
-    var cap = set.capacity;
-    var idx = hs_start_idx(key, cap);
-    var probes = 0;
-    var sl = set.slots;
-    while (probes < cap) {
-        var s = sl[idx];
-        if (s == 0 - 1) { return; }
-        if (s != 0 - 2 && set.keys[s] == key) {
-            sl[idx] = 0 - 2;
-            set.size = set.size - 1;
-            return;
+    fn add(self, key: K) {
+        if (self.size * 2 >= self.capacity) { self.grow(); }
+        if (probe_add(self.slots, self.keys, self.capacity, key)) {
+            self.size = self.size + 1;
         }
-        idx = (idx + 1) % cap;
-        probes += 1;
     }
-}
 
-fn hs_values(set) {
-    var result = [];
-    var i = 0;
-    while (i < set.capacity) {
-        if (set.slots[i] >= 0) {
-            result.push(set.keys[set.slots[i]]);
+    fn remove(self, key: K) -> bool {
+        var at = start_at(key, self.capacity);
+        var probes = 0;
+        while (probes < self.capacity) {
+            var slot = self.slots[at];
+            if (slot == empty()) { return false; }
+            if (slot != deleted() && self.keys[slot] == key) {
+                self.slots[at] = deleted();
+                self.size = self.size - 1;
+                return true;
+            }
+            at = (at + 1) % self.capacity;
+            probes = probes + 1;
         }
-        i += 1;
+        return false;
     }
-    return result;
-}
 
-impl HashSet {
-    fn add(self, key)      { hs_add(self, key); }
-    fn contains(self, key) { return hs_contains(self, key); }
-    fn remove(self, key)   { hs_remove(self, key); }
-    fn values(self)        { return hs_values(self); }
-    fn size(self)          { return self.size; }
-    fn iter(self) {
-        var vs = hs_values(self);
-        var i = 0;
-        while (i < vs.len()) {
-            yield(vs[i]);
-            i += 1;
+    fn size(self) -> int { return self.size; }
+
+    // Walks the slots rather than `keys`, which still holds what `remove`
+    // tombstoned.
+    fn items(self) -> List<K> {
+        var out: List<K> = [];
+        var at = 0;
+        while (at < self.capacity) {
+            var slot = self.slots[at];
+            if (slot >= 0) { out.push(self.keys[slot]); }
+            at = at + 1;
         }
+        return out;
+    }
+
+    fn grow(self) {
+        var was = self.capacity;
+        self.capacity = was * 2;
+        var slots = filled(self.capacity);
+        var keys: List<K> = [];
+        var at = 0;
+        while (at < was) {
+            var slot = self.slots[at];
+            if (slot >= 0) {
+                probe_add(slots, keys, self.capacity, self.keys[slot]);
+            }
+            at = at + 1;
+        }
+        self.slots = slots;
+        self.keys = keys;
     }
 }

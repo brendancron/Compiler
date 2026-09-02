@@ -7,39 +7,31 @@ on:
     branches: [main]
 
 jobs:
+  # The name is what the main branch ruleset requires as a status check, so it
+  # is not free to change with what the job happens to run.
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: bootstrap
 
     steps:
+      # The fixtures live at the repo root and the harness finds them by walking
+      # up from the test binary, so the whole tree has to be checked out.
       - uses: actions/checkout@v4
 
-      - name: Install LLVM 20
-        run: |
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update -q
-          sudo apt-get install -y llvm-20-dev clang-20
-          sudo ln -sf /usr/bin/clang-20 /usr/bin/clang
-          echo "LLVM_SYS_201_PREFIX=/usr/lib/llvm-20" >> $GITHUB_ENV
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache dependencies
-        uses: actions/cache@v4
+      - name: Install OCaml
+        uses: ocaml/setup-ocaml@v3
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            bootstrap/target
-          key: ${{ runner.os }}-cargo-llvm20-${{ hashFiles('bootstrap/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-llvm20-
+          ocaml-compiler: '5'
+          dune-cache: true
+          opam-pin: false
+
+      - name: Install dependencies
+        working-directory: bootstrap2
+        run: opam install . --deps-only --with-test --yes
 
       - name: Build
-        run: cargo build
+        working-directory: bootstrap2
+        run: opam exec -- dune build
 
       - name: Test
-        run: RUSTFLAGS="-A warnings" cargo test
+        working-directory: bootstrap2
+        run: opam exec -- dune test

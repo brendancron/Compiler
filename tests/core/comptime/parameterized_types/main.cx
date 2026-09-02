@@ -1,0 +1,18 @@
+type Pair<A, B> {
+    first: A,
+    second: B
+}
+
+type Box<T> {
+    value: T
+}
+
+var p1 = new Pair { first: 1, second: "one" };
+var p2 = new Pair { first: true, second: 99 };
+var b  = new Box { value: [1, 2, 3] };
+
+print(p1.first);
+print(p1.second);
+print(p2.first);
+print(p2.second);
+print(b.value[1]);

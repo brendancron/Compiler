@@ -16,10 +16,10 @@ impl Hash for bool {
 impl Hash for string {
     fn hash(self) -> int {
         var h = 5381;
-        var i = 0;
-        while (i < self.len()) {
-            h = (h * 31 + ord(self[i])) % 1000000007;
-            i += 1;
+        var at = 0;
+        while (at < self.len()) {
+            h = (h * 31 + ord(self[at])) % 1000000007;
+            at = at + 1;
         }
         return h;
     }

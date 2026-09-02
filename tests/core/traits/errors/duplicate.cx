@@ -1,0 +1,7 @@
+type Circle { radius: int }
+impl Circle {
+    fn area(self) -> int { return 1; }
+}
+impl Circle {
+    fn area(self) -> int { return 2; }
+}

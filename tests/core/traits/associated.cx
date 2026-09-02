@@ -1,0 +1,15 @@
+// A function with no `self` is reached through the type rather than through a
+// value of it, which is what a constructor wants.
+type Counter { value: int }
+
+impl Counter {
+    fn zero() -> Counter { return new Counter { value: 0 }; }
+    fn at(start: int) -> Counter { return new Counter { value: start }; }
+    fn bump(self) -> int { self.value = self.value + 1; return self.value; }
+}
+
+var c = Counter.zero();
+print(str(c.bump()) + " " + str(c.bump()));
+
+var from_ten = Counter.at(10);
+print(from_ten.bump());

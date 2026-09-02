@@ -1,0 +1,9 @@
+print("tab:\tdone");
+print("quote:\"q\" slash:\\");
+print("line1\nline2");
+
+var nl = '\n';
+var tab = '\t';
+print(str(nl == '\n') + " " + str(tab == '\t') + " " + str('\'' == '\'') + " " + str('\\' == '\\'));
+print("a\tb".split('\t'));
+print("\n  padded\t\n".trim());

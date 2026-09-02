@@ -1,0 +1,14 @@
+var xs = [1, 2];
+var ys = xs;
+ys[1] = 77;
+print(xs[1]);
+
+print(same(xs, ys));
+print(same(xs, [1, 77]));
+print(xs == [1, 77]);
+
+var a = [1];
+var b = [1];
+print(str(same(a, b)) + " " + str(a == b));
+b[0] = 2;
+print(a == b);

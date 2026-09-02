@@ -1,0 +1,20 @@
+// Each variant fixes the type parameter to a different concrete type, so one
+// function answers with a different type per arm — no cast, no sentinel, and
+// still exhaustive.
+type Query<T> {
+    Count  -> Query<int>,
+    Name   -> Query<string>,
+    Exists -> Query<bool>,
+}
+
+fn run_query<T>(q: Query<T>) -> T {
+    match q {
+        Query::Count  => { return 3; }
+        Query::Name   => { return "widgets"; }
+        Query::Exists => { return true; }
+    }
+}
+
+print(run_query(new Query::Count));
+print(run_query(new Query::Name));
+print(run_query(new Query::Exists));

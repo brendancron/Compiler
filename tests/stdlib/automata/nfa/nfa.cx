@@ -1,7 +1,7 @@
 import "../../../../stdlib/automata/Nfa";
 
 // Test 1: accepts exactly [42]
-var nfa1 = Nfa.nfa_new(0);
+var nfa1 = Nfa.new(0);
 nfa1.add_state(1);
 nfa1.add_symbol(42);
 nfa1.add_transition(0, 42, 1);
@@ -12,7 +12,7 @@ print(nfa1.accepts([1]));       // false
 print(nfa1.accepts([42, 42]));  // false
 
 // Test 2: epsilon transition (0 -ε-> 1 -42-> 2)
-var nfa2 = Nfa.nfa_new(0);
+var nfa2 = Nfa.new(0);
 nfa2.add_state(1);
 nfa2.add_state(2);
 nfa2.add_symbol(42);
@@ -23,7 +23,7 @@ print(nfa2.accepts([42]));   // true
 print(nfa2.accepts([]));      // false
 
 // Test 3: alternation — accepts [1] or [2]
-var nfa3 = Nfa.nfa_new(0);
+var nfa3 = Nfa.new(0);
 nfa3.add_state(1);
 nfa3.add_state(2);
 nfa3.add_symbol(1);
@@ -39,7 +39,7 @@ print(nfa3.accepts([1, 2]));   // false
 print(nfa3.accepts([]));        // false
 
 // Test 4: kleene star — zero or more 1s
-var nfa4 = Nfa.nfa_new(0);
+var nfa4 = Nfa.new(0);
 nfa4.add_symbol(1);
 nfa4.add_transition(0, 1, 0);
 nfa4.add_accept(0);
@@ -49,7 +49,7 @@ print(nfa4.accepts([1, 1, 1]));   // true
 print(nfa4.accepts([2]));         // false
 
 // Test 5: concatenation — accepts [1, 2]
-var nfa5 = Nfa.nfa_new(0);
+var nfa5 = Nfa.new(0);
 nfa5.add_state(1);
 nfa5.add_state(2);
 nfa5.add_symbol(1);
@@ -64,7 +64,7 @@ print(nfa5.accepts([]));         // false
 print(nfa5.accepts([2, 1]));   // false
 
 // Test 6: epsilon chain (0 -ε-> 1 -ε-> 2, accept = {2})
-var nfa6 = Nfa.nfa_new(0);
+var nfa6 = Nfa.new(0);
 nfa6.add_state(1);
 nfa6.add_state(2);
 nfa6.add_epsilon(0, 1);

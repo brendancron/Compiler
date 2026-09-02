@@ -1,0 +1,25 @@
+fn labelled<label: string>(x: int) -> int {
+    print(label + ": " + str(x));
+    return x;
+}
+
+fn size<n: int>() {
+    print(n);
+}
+
+size<4>();
+size<9>();
+size<4>();
+
+print(labelled<"count">(3));
+print(labelled<"total">(7));
+
+fn prefixed<prefix: string>(x: int) -> string {
+    return prefix + str(x);
+}
+
+fn outer<tag: string>(x: int) -> string {
+    return prefixed<tag>(x);
+}
+
+print(outer<"tag ">(9));

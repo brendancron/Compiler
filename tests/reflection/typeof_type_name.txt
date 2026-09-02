@@ -1,0 +1,4 @@
+Dog Card
+int string
+true
+Card 2

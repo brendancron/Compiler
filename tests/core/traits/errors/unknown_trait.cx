@@ -1,0 +1,4 @@
+type Circle { radius: int }
+impl Shows for Circle {
+    fn describe(self) -> string { return "circle"; }
+}

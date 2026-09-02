@@ -1,5 +1,5 @@
 import "../../../stdlib/collections/HashMap";
-import "../../../stdlib/lang/Option";
+import { Option } from "../../../stdlib/lang/Option";
 
 var m = HashMap.new();
 

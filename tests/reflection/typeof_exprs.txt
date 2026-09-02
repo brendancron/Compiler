@@ -1,0 +1,6 @@
+float
+int
+bool
+string
+Type
+((int) -> int, int) -> int

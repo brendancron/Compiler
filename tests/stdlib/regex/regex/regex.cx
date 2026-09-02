@@ -1,5 +1,5 @@
 import "../../../../stdlib/lang/Regex";
-import "../../../../stdlib/lang/Option";
+import { Option } from "../../../../stdlib/lang/Option";
 
 // ── test: literal ─────────────────────────────────────────────────────────────
 var lit = Regex.compile("abc");

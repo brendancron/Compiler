@@ -1,0 +1,13 @@
+effect Ask { ctl get(): int; }
+
+type Color { Red, Blue }
+
+fn use(c: Color) -> <Ask> int {
+    match c {
+        Color::Red => { return get(); }
+        Color::Blue => { return 0; }
+    }
+}
+
+run { print(use(new Color::Red)); }
+handle Ask { ctl get() { resume 5; print("after"); } }

@@ -1,0 +1,15 @@
+fn add(a: int, b: int) -> int {
+  return a + b;
+}
+
+// Cronyx accepts `:` for a return type as well as `->`.
+fn greet(name: string): string {
+  return "hello, " + name;
+}
+
+var count: int = 3;
+var ratio: float = 0.5;
+
+print(add(count, 4));
+print(greet("world"));
+print(ratio);

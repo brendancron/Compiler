@@ -1,0 +1,10 @@
+trait Named {
+    fn name(self) -> string;
+}
+trait Greeted: Named {
+    fn greeting(self) -> string;
+}
+type Robot { serial: int }
+impl Greeted for Robot {
+    fn greeting(self) -> string { return "hello"; }
+}

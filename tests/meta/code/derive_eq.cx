@@ -1,0 +1,30 @@
+// One deriver, two types it was never written for: the shape names them.
+type Dog { name: string, age: int }
+type Point { x: int, y: int, z: int }
+
+meta fn derive_eq(shape: TypeShape) {
+    match shape {
+        TypeShape::Product(t, fields) => {
+            var check = code(true);
+            for (f in fields) {
+                var field = f.name;
+                check = code(check && self.field == other.field);
+            }
+            gen impl t {
+                fn eq(self, other: t) -> bool { return check; }
+            }
+        }
+        TypeShape::Sum(t, variants) => {}
+        TypeShape::Scalar => {}
+        TypeShape::Other => {}
+    }
+}
+meta derive_eq(typeof(Dog).shape);
+meta derive_eq(typeof(Point).shape);
+
+var rex = new Dog { name: "rex", age: 3 };
+var older = new Dog { name: "rex", age: 4 };
+var here = new Point { x: 1, y: 2, z: 3 };
+var there = new Point { x: 1, y: 2, z: 4 };
+print(str(rex.eq(rex)) + " " + str(rex.eq(older)));
+print(str(here.eq(here)) + " " + str(here.eq(there)));

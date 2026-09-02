@@ -1,0 +1,10 @@
+fn each(items: Array<int>, g: (int) -> int) -> int {
+    var total = 0;
+    for (v in items) { total = total + g(v); }
+    return total;
+}
+
+print(each([1, 2, 3]) { it * 2 });
+print(each([1, 2, 3]) { it });
+print(each([1, 2, 3]) { var doubled = it * 2; return doubled + 1; });
+print(each([1, 2, 3], (x) => x + 10));

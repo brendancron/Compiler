@@ -1,0 +1,21 @@
+// Reached through the type rather than through a value of it, for a type the
+// language supplies. A method on one of these already works; this is the same
+// impl block, minus the `self`.
+impl int {
+    fn zero() -> int { return 0; }
+    fn double(self) -> int { return self * 2; }
+}
+
+impl string {
+    fn empty() -> string { return ""; }
+}
+
+impl bool {
+    fn yes() -> bool { return true; }
+}
+
+print(int.zero());
+print(int.zero().double());
+print(21.double());
+print(string.empty() + "here");
+print(bool.yes());

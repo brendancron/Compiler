@@ -1,0 +1,6 @@
+9 3
+Array<int>
+7 3
+Array<Array<int>>
+b Array<string>
+9 (Array<int>) -> int

@@ -1,0 +1,2 @@
+var c = code(1 + 2);
+print(c);

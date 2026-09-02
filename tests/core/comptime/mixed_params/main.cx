@@ -1,0 +1,8 @@
+fn buffer<T, n: int>(fill: T) -> Array<T> {
+    print(n);
+    return [fill];
+}
+
+print(buffer<int, 16>(1)[0]);
+print(buffer<string, 16>("a")[0]);
+print(buffer<bool, 4>(true)[0]);

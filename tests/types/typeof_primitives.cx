@@ -1,6 +1,0 @@
-var x = 42;
-var b = true;
-var s = "hello";
-print(typeof(x));
-print(typeof(b));
-print(typeof(s));

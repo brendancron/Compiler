@@ -1,0 +1,3 @@
+fn f(p) {
+    return p.0;
+}

@@ -1,79 +1,46 @@
 import "StringBuilder";
 
-fn substring(s, start, end) {
-    var chars = s.chars();
-    var sb = StringBuilder.new();
-    var i = start;
-    while (i < end) {
-        sb.append(chars[i]);
-        i += 1;
+fn substring(text: string, start: int, stop: int) -> string {
+    var out = StringBuilder.new();
+    var at = start;
+    while (at < stop) {
+        out.append(str(text[at]));
+        at = at + 1;
     }
-    return sb.build();
+    return out.build();
 }
 
-fn index_of(s, sub) {
-    var slen = s.len();
-    var sublen = sub.len();
-    var i = 0;
-    while (i <= slen - sublen) {
-        if (substring(s, i, i + sublen) == sub) {
-            return i;
-        }
-        i += 1;
+fn index_of(text: string, needle: string) -> int {
+    return text.index_of(needle);
+}
+
+fn repeat(text: string, times: int) -> string {
+    var out = StringBuilder.new();
+    var done = 0;
+    while (done < times) {
+        out.append(text);
+        done = done + 1;
     }
-    return -1;
+    return out.build();
 }
 
-fn repeat(s, n) {
-    var sb = StringBuilder.new();
-    var i = 0;
-    while (i < n) {
-        sb.append(s);
-        i += 1;
-    }
-    return sb.build();
+fn pad_left(text: string, width: int, filler: string) -> string {
+    var short = width - text.len();
+    if (short <= 0) { return text; }
+    return repeat(filler, short) + text;
 }
 
-fn pad_left(s, width, pad_char) {
-    var diff = width - s.len();
-    if (diff <= 0) {
-        return s;
-    }
-    return repeat(pad_char, diff) + s;
+fn pad_right(text: string, width: int, filler: string) -> string {
+    var short = width - text.len();
+    if (short <= 0) { return text; }
+    return text + repeat(filler, short);
 }
 
-fn pad_right(s, width, pad_char) {
-    var diff = width - s.len();
-    if (diff <= 0) {
-        return s;
-    }
-    return s + repeat(pad_char, diff);
-}
-
-fn is_digit(c) {
-    var o = ord(c);
-    return o >= 48 && o <= 57;
-}
-
-fn is_upper(c) {
-    var o = ord(c);
-    return o >= 65 && o <= 90;
-}
-
-fn is_lower(c) {
-    var o = ord(c);
-    return o >= 97 && o <= 122;
-}
-
-fn is_alpha(c) {
-    return is_upper(c) || is_lower(c);
-}
-
-fn is_alphanumeric(c) {
-    return is_alpha(c) || is_digit(c);
-}
-
-fn is_whitespace(c) {
-    var o = ord(c);
-    return o == 32 || o == 9 || o == 10 || o == 13;
+fn is_digit(c: char) -> bool { return c >= '0' && c <= '9'; }
+fn is_upper(c: char) -> bool { return c >= 'A' && c <= 'Z'; }
+fn is_lower(c: char) -> bool { return c >= 'a' && c <= 'z'; }
+fn is_alpha(c: char) -> bool { return is_upper(c) || is_lower(c); }
+fn is_alphanumeric(c: char) -> bool { return is_alpha(c) || is_digit(c); }
+fn is_whitespace(c: char) -> bool {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }

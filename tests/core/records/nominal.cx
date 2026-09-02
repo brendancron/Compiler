@@ -1,0 +1,20 @@
+type Point {
+    x: int,
+    y: int
+}
+
+// Same fields, different type.
+type Pixel {
+    x: int,
+    y: int
+}
+
+var p = new Point { x: 1, y: 2 };
+print(str(p.x) + " " + str(p.y) + " " + str(typeof(p).name));
+p.x = 9;
+print(p.x);
+
+fn shift(q: Point) -> Point {
+    return new Point { x: q.x + 1, y: q.y };
+}
+print(str(shift(p).x) + " " + str(typeof(shift).name));

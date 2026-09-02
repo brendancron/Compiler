@@ -1,0 +1,13 @@
+// Only what reflection describes gets a shape of its own; the rest says so.
+fn kind(shape: TypeShape) -> string {
+    match shape {
+        TypeShape::Scalar => { return "scalar"; }
+        TypeShape::Product(name, fields) => { return "product"; }
+        TypeShape::Sum(name, variants) => { return "sum"; }
+        TypeShape::Other => { return "other"; }
+    }
+}
+
+print(str(kind(typeof(1).shape)) + " " + str(kind(typeof(1.5).shape)) + " " + str(kind(typeof(true).shape)));
+print(str(kind(typeof("s").shape)) + " " + str(kind(typeof('c').shape)));
+print(str(kind(typeof([1, 2]).shape)) + " " + str(kind(typeof((1, 2)).shape)) + " " + str(kind(typeof(kind).shape)));

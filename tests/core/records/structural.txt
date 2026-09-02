@@ -1,0 +1,5 @@
+1 2
+9 { x: int, y: int }
+Alice
+Bob
+77

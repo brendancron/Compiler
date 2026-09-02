@@ -1,4 +1,4 @@
-enum Option<T> {
+type Option<T> {
     Some(T),
-    None,
+    None
 }

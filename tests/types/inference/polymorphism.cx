@@ -1,0 +1,8 @@
+// Inferred as 'a -> 'a and used at three different types.
+fn id(x) {
+  return x;
+}
+
+print(id(1));
+print(id("text"));
+print(id(true));

@@ -1,0 +1,2 @@
+type Dog { age: int }
+derive Show for Dog;

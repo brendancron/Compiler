@@ -1,0 +1,21 @@
+type Cell { v: int }
+
+fn a() -> int { print("a"); return 1; }
+fn b() -> int { print("b"); return 2; }
+fn c() -> int { print("c"); return 3; }
+
+fn add(x: int, y: int) -> int { return x + y; }
+
+var cell = new Cell { v: 0 };
+fn target() -> Cell { print("target"); return cell; }
+
+print(a() + b());
+print(add(a(), b()));
+print([a(), b(), c()]);
+
+target().v = a();
+print(cell.v);
+
+var xs = [0, 0];
+xs[a()] = b();
+print(xs[1]);

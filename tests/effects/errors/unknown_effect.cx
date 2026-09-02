@@ -1,0 +1,5 @@
+run {
+    print(1);
+} handle nope {
+    fn x() { }
+}

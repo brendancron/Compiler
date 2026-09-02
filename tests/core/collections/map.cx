@@ -1,0 +1,16 @@
+var ages: Map<string, int> = [("alice", 30), ("bob", 25)];
+
+ages.insert("carol", 41);
+
+print(str(ages.len()) + " " + str(typeof(ages).name));
+print(str(ages.contains("alice")) + " " + str(ages.contains("dave")));
+print(str(ages.get_or("bob", 0)) + " " + str(ages.get_or("dave", -1)));
+
+ages.insert("bob", 26);
+print(str(ages.len()) + " " + str(ages.get_or("bob", 0)));
+
+var counts: Map<char, int> = [('a', 2), ('b', 5)];
+print(counts.get_or('b', 0));
+
+var empty: Map<string, bool> = [];
+print(str(empty.len()) + " " + str(empty.contains("x")));

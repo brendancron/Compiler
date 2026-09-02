@@ -1,0 +1,31 @@
+effect log { fn log(msg: string): unit; }
+effect ask { fn ask(): int; }
+
+fn helper(n: int) -> int {
+    return n + 1;
+}
+
+fn work(n: int): string {
+    log("start");
+    return str(helper(n)) + "!";
+}
+
+fn counted(xs: Set<int>): string {
+    log("counting");
+    return str(xs.len());
+}
+
+fn both(n: int): string {
+    log("both");
+    var extra = ask();
+    return work(n + extra);
+}
+
+run {
+    run {
+        print(work(1));
+        var s: Set<int> = [1, 2, 2];
+        print(counted(s));
+        print(both(1));
+    } handle ask { fn ask() { return 10; } }
+} handle log { fn log(msg: string) { print(msg); } }

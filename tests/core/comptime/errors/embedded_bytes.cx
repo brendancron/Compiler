@@ -1,0 +1,4 @@
+fn tag<label: string>() {
+    print(label);
+}
+tag<embed("hello.txt")>();

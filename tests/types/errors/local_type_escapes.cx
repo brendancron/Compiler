@@ -1,0 +1,7 @@
+fn f() -> unit {
+    type Hidden { a: int }
+    print(new Hidden { a: 1 }.a);
+}
+
+f();
+print(new Hidden { a: 2 }.a);

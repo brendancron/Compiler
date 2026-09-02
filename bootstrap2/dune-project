@@ -1,0 +1,23 @@
+(lang dune 3.24)
+
+(name bootstrap2)
+
+(generate_opam_files true)
+
+(source
+ (github brendancron/CronyxLang))
+
+(authors "Brendan Cron <brendancron@gmail.com>")
+
+(maintainers "Brendan Cron <brendancron@gmail.com>")
+
+(package
+ (name bootstrap2)
+ (synopsis "A self-hosting-oriented compiler for the Cronyx language")
+ (description
+  "The second bootstrap compiler for Cronyx: scanner, parser, type checker, metaprogramming, effect handlers via a selective CPS transform, and a tree-walking interpreter.")
+ (depends ocaml)
+ (tags
+  (compiler language metaprogramming "algebraic effects")))
+
+; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

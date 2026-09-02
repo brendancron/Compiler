@@ -1,4 +1,6 @@
-import "../../../stdlib/lang/String";
+import { substring, index_of, repeat, pad_left, pad_right,
+         is_digit, is_alpha, is_alphanumeric, is_whitespace }
+    from "../../../stdlib/lang/String";
 
 print(substring("hello world", 0, 5));
 print(substring("hello world", 6, 11));
@@ -14,15 +16,15 @@ print(repeat("x", 0));
 print(pad_left("42", 5, "0"));
 print(pad_right("hi", 5, "."));
 
-print(is_digit("5"));
-print(is_digit("a"));
-print(is_alpha("z"));
-print(is_alpha("3"));
-print(is_alphanumeric("a"));
-print(is_alphanumeric("5"));
-print(is_alphanumeric("!"));
-print(is_whitespace(" "));
-print(is_whitespace("a"));
+print(is_digit('5'));
+print(is_digit('a'));
+print(is_alpha('z'));
+print(is_alpha('3'));
+print(is_alphanumeric('a'));
+print(is_alphanumeric('5'));
+print(is_alphanumeric('!'));
+print(is_whitespace(' '));
+print(is_whitespace('a'));
 
 print("hello".starts_with("hel"));
 print("hello".ends_with("llo"));

@@ -1,5 +1,5 @@
 import "../../../../stdlib/lang/Toml";
-import "../../../../stdlib/lang/Option";
+import { Option } from "../../../../stdlib/lang/Option";
 
 var src = "[alpha]\nfoo = \"hello\"\nbar = true\nbaz = 42\n\n[beta]\nx = { key = \"val\", flag = false }\ny = \"world\"\n";
 
@@ -48,11 +48,11 @@ match (Toml.get_section(doc, "beta")) {
                 var tbl = Toml.as_table(e.val);
                 print(tbl.len());               // 2
                 match (Toml.get_inline(tbl, "key")) {
-                    Option::Some(p) => { print(p.s); }   // val
+                    Option::Some(p) => { print(Toml.prim_as_string(p)); }   // val
                     Option::None    => { print("missing key"); }
                 }
                 match (Toml.get_inline(tbl, "flag")) {
-                    Option::Some(p) => { print(p.b); }   // false
+                    Option::Some(p) => { print(Toml.prim_as_bool(p)); }   // false
                     Option::None    => { print("missing flag"); }
                 }
             }

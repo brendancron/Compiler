@@ -1,0 +1,31 @@
+var xs = [1, 2, 3];
+var total = 0;
+for (n in xs) {
+    total = total + n;
+}
+print(total);
+
+var names: List<string> = ["alice", "bob"];
+for (name in names) {
+    print(name);
+}
+
+for (c in "héllo") {
+    print(c);
+}
+
+for (row in [[1, 2], [3]]) {
+    for (v in row) {
+        print(v);
+    }
+}
+
+var calls = 0;
+fn source() -> Array<int> {
+    calls = calls + 1;
+    return [7, 8];
+}
+for (n in source()) {
+    print(n);
+}
+print(calls);

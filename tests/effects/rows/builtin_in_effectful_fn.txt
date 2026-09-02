@@ -1,0 +1,7 @@
+start
+2!
+counting
+2
+both
+start
+12!

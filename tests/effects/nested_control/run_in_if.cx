@@ -1,0 +1,12 @@
+effect Ask { ctl get(): int; }
+
+fn use() -> <Ask> int { return get(); }
+
+fn main() -> unit {
+    if (true) {
+        run { print(use()); }
+        handle Ask { ctl get() { resume 5; print("after"); } }
+    }
+}
+
+main();

@@ -1,0 +1,28 @@
+// A `final ctl` never resumes, so nothing is ever handed back and each call
+// site may read the result as whatever it needs.
+effect Error {
+    final ctl throw(msg: string);
+}
+
+fn as_int(s: string) -> int {
+    if (s == "42") { return 42; }
+    return throw("not an int: " + s);
+}
+
+fn as_word(n: int) -> string {
+    if (n == 0) { return "zero"; }
+    return throw("not zero");
+}
+
+run {
+    print(str(as_int("42")) + " " + str(as_word(0)));
+} handle Error {
+    final ctl throw(msg) { print("caught: " + msg); }
+}
+
+run {
+    print(as_int("nope"));
+    print("unreachable");
+} handle Error {
+    final ctl throw(msg) { print("caught: " + msg); }
+}

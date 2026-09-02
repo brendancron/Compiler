@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Build and run the OCaml bootstrap (bootstrap2) on a .cx file.
+#
+#   ./cx2 tests/core/functions/fib.cx
+#   ./cx2 --dump-tokens --dump-ast myprog.cx
+#
+# File arguments are resolved relative to your current directory, not the repo.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/bootstrap2"
+dune build --root "$root" --no-print-directory ./bin/main.exe
+exec "$root/_build/default/bin/main.exe" "$@"

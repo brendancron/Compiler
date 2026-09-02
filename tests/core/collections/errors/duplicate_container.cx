@@ -1,0 +1,13 @@
+type Bag<T> { items: Array<T> }
+
+impl FromArray<T> for Bag<T> {
+    fn from_array(items: Array<T>) -> Bag<T> {
+        return new Bag { items: items };
+    }
+}
+
+impl FromArray<T> for Bag<T> {
+    fn from_array(other: Array<T>) -> Bag<T> {
+        return new Bag { items: other };
+    }
+}

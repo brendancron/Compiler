@@ -1,0 +1,22 @@
+// The inner handler needs no continuation, but the body performs an effect
+// handled further out, which does.
+effect E { ctl ask(): int; }
+effect Log { fn note(): unit; }
+
+fn f() -> <E> int {
+    var t = 0;
+    run {
+        note();
+        t = ask();
+    } handle Log { fn note() { print("noted"); } }
+    return t;
+}
+
+run {
+    print(f());
+} handle E {
+    ctl ask() {
+        resume 7;
+        print("after");
+    }
+}

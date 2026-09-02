@@ -3,3 +3,4 @@ true
 false
 8
 100
+not a number: seven

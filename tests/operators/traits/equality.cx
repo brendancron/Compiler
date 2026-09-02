@@ -1,0 +1,15 @@
+type Point { x: int, y: int }
+
+impl Eq for Point {
+    fn eq(self, rhs: Point) -> bool {
+        return self.x == rhs.x && self.y == rhs.y;
+    }
+}
+
+var p1 = new Point { x: 1, y: 2 };
+var p2 = new Point { x: 1, y: 2 };
+var p3 = new Point { x: 3, y: 4 };
+
+print(p1 == p2);
+print(p1 != p2);
+print(p1 == p3);

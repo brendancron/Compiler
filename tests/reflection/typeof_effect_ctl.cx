@@ -1,0 +1,16 @@
+// A row is written between the arrow and the result, which is where the
+// effect an arrow carries belongs.
+
+effect stream {
+    ctl yield(i: int): unit;
+}
+
+fn range(low: int, high: int) {
+    var i = low;
+    while (i < high) {
+        yield(i);
+        i += 1;
+    }
+}
+
+print(typeof(range).name);

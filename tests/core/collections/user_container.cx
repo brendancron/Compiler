@@ -1,0 +1,48 @@
+type Ring<T> {
+    items: Array<T>,
+    head: int
+}
+
+impl FromArray<T> for Ring<T> {
+    fn from_array(items: Array<T>) -> Ring<T> {
+        return new Ring { items: items, head: 0 };
+    }
+}
+
+impl Index<int> for Ring<T> {
+    type Output = T;
+
+    fn get(self, i: int) -> T {
+        var at = self.head + i;
+        while (at >= self.items.len()) {
+            at = at - self.items.len();
+        }
+        return self.items[at];
+    }
+}
+
+impl IndexSet<int> for Ring<T> {
+    fn set(self, i: int, v: T) -> T {
+        var at = self.head + i;
+        while (at >= self.items.len()) {
+            at = at - self.items.len();
+        }
+        self.items[at] = v;
+        return v;
+    }
+}
+
+var ring: Ring<int> = [1, 2, 3];
+print(str(ring[0]) + " " + str(ring[1]) + " " + str(ring[4]));
+
+ring.head = 1;
+print(str(ring[0]) + " " + str(ring[2]));
+
+ring[0] = 9;
+print(str(ring[0]) + " " + str(typeof(ring).name));
+
+var words: Ring<string> = ["a", "b"];
+print(str(words[3]) + " " + str(typeof(words).name));
+
+var also: List<int> = [7, 8];
+print(str(also.len()) + " " + str(also[1]) + " " + str(ring[0]));

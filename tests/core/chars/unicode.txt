@@ -1,0 +1,10 @@
+11
+11
+13
+é char
+true false
+true
+[héllo, wörld]
+true
+héllo
+3 Array<byte>

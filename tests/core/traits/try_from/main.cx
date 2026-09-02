@@ -1,0 +1,44 @@
+effect Fallible {
+    final ctl invalid(text: string);
+}
+
+trait TryFrom<S> {
+    fn from(source: S) -> <Fallible> Self;
+}
+
+impl TryFrom<string> for int {
+    fn from(source: string) -> <Fallible> int {
+        if (source.len() == 0) { return invalid(source); }
+        var total = 0;
+        for (c in source.chars()) {
+            if (c < '0' || c > '9') { return invalid(source); }
+            total = total * 10 + (ord(c) - ord('0'));
+        }
+        return total;
+    }
+}
+
+impl TryFrom<string> for bool {
+    fn from(source: string) -> <Fallible> bool {
+        if (source == "true") { return true; }
+        if (source == "false") { return false; }
+        return invalid(source);
+    }
+}
+
+fn do_work<S, T: TryFrom<S>>(source: S) -> <Fallible> T {
+    return T.from(source);
+}
+
+run {
+    var n: int = do_work("42");
+    print(n);
+
+    var flag: bool = do_work("true");
+    print(flag);
+
+    var bad: int = do_work("seven");
+    print(bad);
+} handle Fallible {
+    final ctl invalid(text) { print("not a value: " + text); }
+}

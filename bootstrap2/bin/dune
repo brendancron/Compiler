@@ -1,0 +1,4 @@
+(executable
+ (public_name bootstrap2)
+ (name main)
+ (libraries bootstrap2))

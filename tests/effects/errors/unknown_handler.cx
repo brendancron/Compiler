@@ -1,0 +1,5 @@
+effect logger { fn log(msg: string): unit; }
+
+run {
+    log("x");
+} with nope;

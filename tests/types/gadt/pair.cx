@@ -1,0 +1,20 @@
+// `Pair` builds its head out of two parameters at once, and `Fst` binds a `B`
+// the head never mentions — an existential, recovered only by matching. The
+// recursive `eval` has to stay polymorphic inside an arm that refines the very
+// parameter it is generic in.
+type Expr<T> {
+    Lit(int)                     -> Expr<int>,
+    Pair<A, B>(Expr<A>, Expr<B>) -> Expr<(A, B)>,
+    Fst<A, B>(Expr<(A, B)>)      -> Expr<A>,
+}
+
+fn eval<T>(e: Expr<T>) -> T {
+    match e {
+        Expr::Lit(n)     => { return n; }
+        Expr::Pair(a, b) => { return (eval(a), eval(b)); }
+        Expr::Fst(p)     => { return eval(p).0; }
+    }
+}
+
+print(eval(new Expr::Fst(new Expr::Pair(new Expr::Lit(7), new Expr::Lit(8)))));
+print(eval(new Expr::Pair(new Expr::Lit(1), new Expr::Lit(2))).1);

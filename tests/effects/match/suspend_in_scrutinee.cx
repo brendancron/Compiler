@@ -1,0 +1,20 @@
+// The value being matched is what performs the effect.
+type C { A, B }
+
+effect Ask { ctl pick(): C; }
+
+fn choose() -> <Ask> int {
+    match pick() {
+        C::A => { return 1; }
+        C::B => { return 2; }
+    }
+}
+
+run {
+    print(choose());
+} handle Ask {
+    ctl pick() {
+        resume new C::B;
+        print("h");
+    }
+}

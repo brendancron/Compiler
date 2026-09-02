@@ -1,0 +1,2 @@
+(int, int) -> <stream> unit
+(int) -> <stream> unit

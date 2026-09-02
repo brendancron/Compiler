@@ -1,0 +1,15 @@
+// `Nil` builds a vector of length zero, so it cannot be the one this function
+// takes, and an arm for it could never run.
+type Zero { }
+type Succ<N> { }
+
+type Vec<N, T> {
+    Nil                   -> Vec<Zero, T>,
+    Cons<M>(T, Vec<M, T>) -> Vec<Succ<M>, T>,
+}
+
+fn first(v: Vec<Succ<Zero>, int>) -> int {
+    match v {
+        Vec::Nil => { return 0; }
+    }
+}

@@ -1,3 +1,10 @@
+// `embed` yields the file's bytes, undecoded — what is embedded need not be
+// text, and a program that wants text says so.
 var hello = embed("hello.txt");
 
-print(hello);
+print(hello.len());
+print(str(hello[0]) + " " + str(hello[7]));
+
+var text = "";
+for (b in hello) { text = text + str(b); }
+print(text);

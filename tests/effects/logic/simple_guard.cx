@@ -1,6 +1,6 @@
 effect logic {
-    ctl choose(options): int;
-    ctl guard(cond): unit;
+    ctl choose(options: Array<int>): int;
+    ctl guard(cond: bool): unit;
 }
 
 run {

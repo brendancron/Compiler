@@ -1,0 +1,41 @@
+trait Named {
+    fn name(self) -> string;
+}
+
+trait Greeted: Named {
+    fn greeting(self) -> string;
+}
+
+type Dog { call: string }
+type Robot { serial: int }
+
+impl Named for Dog {
+    fn name(self) -> string {
+        return self.call;
+    }
+}
+
+impl Greeted for Dog {
+    fn greeting(self) -> string {
+        return "good dog, " + self.name();
+    }
+}
+
+impl Named for Robot {
+    fn name(self) -> string {
+        return "unit-" + str(self.serial);
+    }
+}
+
+impl Greeted for Robot {
+    fn greeting(self) -> string {
+        return "hello, " + self.name();
+    }
+}
+
+fn announce<T: Greeted>(x: T) {
+    print(x.greeting() + " (" + x.name() + ")");
+}
+
+announce(new Dog { call: "rex" });
+announce(new Robot { serial: 7 });

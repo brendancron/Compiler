@@ -1,0 +1,2 @@
+Point
+product: x y
