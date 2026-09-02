@@ -25,6 +25,8 @@ let functions : (string * (unit -> Types.infer_ty list * Types.infer_ty)) list =
         let t = Types.fresh () in
         [ t; t ], Types.IBool )
   (* What a derived `Eq` reaches, through an impl so a type has to ask. *)
+  ; "readfile", (fun () -> [ Types.IStr ], Types.IStr)
+  ; "writefile", (fun () -> [ Types.IStr; Types.IStr ], Types.IUnit)
   ; ( "__structural_eq"
     , fun () ->
         let t = Types.fresh () in
@@ -32,6 +34,14 @@ let functions : (string * (unit -> Types.infer_ty list * Types.infer_ty)) list =
   ]
 
 (* ---- values ---- *)
+
+(* A relative path is relative to the file that wrote the call, the way an
+   import and an `embed` are. Where the program was started from is not
+   something the source can see. *)
+let beside (span : Ast.span) path =
+  if Filename.is_relative path && not (String.equal span.Ast.file "")
+  then Filename.concat (Filename.dirname span.Ast.file) path
+  else path
 
 let values ~out =
   let native name arity apply = name, Value.Fn { Value.name; arity; apply } in
@@ -58,6 +68,27 @@ let values ~out =
       | _ -> Value.fail span "Cannot apply ord to these arguments.")
   ; two "same" (fun _ a b -> Value.Bool (Value.same a b))
   ; two "__structural_eq" (fun _ a b -> Value.Bool (Value.values_equal a b))
+  ; one "readfile" (fun span v ->
+      match v with
+      | Value.Str path ->
+        let written = Utf8.encode path in
+        (match In_channel.with_open_bin (beside span written) In_channel.input_all with
+         | contents -> Value.Str (Utf8.decode contents)
+         (* The path as written, the way `embed` reports one: what the reader
+            has in front of them is not where it resolved to. *)
+         | exception Sys_error _ -> Value.fail span "Cannot read '%s'." written)
+      | _ -> Value.fail span "readfile takes a path.")
+  ; two "writefile" (fun span p v ->
+      match p, v with
+      | Value.Str path, Value.Str contents ->
+        let written = Utf8.encode path in
+        (match
+           Out_channel.with_open_bin (beside span written) (fun channel ->
+             Out_channel.output_string channel (Utf8.encode contents))
+         with
+         | () -> Value.Unit
+         | exception Sys_error _ -> Value.fail span "Cannot write '%s'." written)
+      | _ -> Value.fail span "writefile takes a path and its contents.")
   ; native "clock" (Some 0) (fun _ _ -> Value.Float (Sys.time ()))
   ; one (Ast.method_name "string" "as_name") (fun span v ->
       match v with
