@@ -59,7 +59,6 @@ type token_type =
   | Code
   | Derive
   | Defer
-  | Op
   | Handle
   | Handler
   | Resume
@@ -143,7 +142,6 @@ let token_type_to_string = function
   | Code -> "CODE"
   | Derive -> "DERIVE"
   | Defer -> "DEFER"
-  | Op -> "OP"
   | Handle -> "HANDLE"
   | Handler -> "HANDLER"
   | Resume -> "RESUME"

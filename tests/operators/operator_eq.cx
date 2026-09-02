@@ -3,8 +3,10 @@ type Point {
     y: int
 }
 
-op ==(a: Point, b: Point) -> bool {
-        return a.x == b.x && a.y == b.y;
+impl Eq for Point {
+    fn eq(self, rhs: Point) -> bool {
+        return self.x == rhs.x && self.y == rhs.y;
+    }
 }
 
 var p1 = new Point { x: 1, y: 2 };

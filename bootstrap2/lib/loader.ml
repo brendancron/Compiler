@@ -133,7 +133,7 @@ let declared_name (s : Ast.stmt) =
 
 let is_declaration (s : Ast.stmt) =
   match s.Ast.it with
-  | `Fn _ | `Type_decl _ | `Trait_decl _ | `Impl_decl _ | `Op_decl _ | `Effect_decl _
+  | `Fn _ | `Type_decl _ | `Trait_decl _ | `Impl_decl _ | `Effect_decl _
   | `Handler_decl _ | `Import _ | `Meta _ | `Gen _ | `Meta_fn _ | `Derive _ -> true
   | _ -> false
 
@@ -321,8 +321,6 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
                     })
                   impl.Ast.ib_methods
             } )
-      | `Op_decl (op, params, sg, body) ->
-        `Op_decl (op, List.map param params, signature sg, List.map (stmt locals) body)
       | `Fn (name, params, sg, body) ->
         let inner =
           List.fold_left

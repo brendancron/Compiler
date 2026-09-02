@@ -36,7 +36,6 @@ and checked_stmt_kind =
   | (checked_expr, checked_stmt, checked_stmt Ast.handler) Ast.effects
   | Ast.type_defs
   | (checked_expr, checked_stmt) Ast.matching
-  | checked_stmt Ast.op_defs
   | (checked_stmt, Types.infer_ty) Ast.method_defs
   ]
 
@@ -645,8 +644,6 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   | `While (cond, body) -> assigned_in_stmt body (assigned_in_expr cond acc)
   | `Return e -> opt assigned_in_expr e acc
   | `Effect_decl _ | `Type_decl _ | `Trait_decl _ -> acc
-  | `Op_decl (_, _, _, body) ->
-    List.fold_left (fun acc st -> assigned_in_stmt st acc) acc body
   | `Impl_decl (_, _, _, impl) ->
     List.fold_left
       (fun acc (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
@@ -1349,110 +1346,6 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     unify_at v.Ast.span (element_of ctx.registry target) v.Ast.ann;
     node v.Ast.ann (`Index_assign (target, index, v))
 
-and declare_ops registry (body : Ast.desugared_stmt list) =
-  List.iter
-    (fun (s : Ast.desugared_stmt) ->
-      match s.Ast.it with
-      | `Op_decl (op, params, signature, _) ->
-        let named (p : Ast.param) =
-          match p.Ast.ty with
-          | Some { Ast.it = Ast.Ty_name n; _ } | Some { Ast.it = Ast.Ty_app (n, _); _ } -> n
-          | _ -> fail s.Ast.span "An operator's operands must be annotated."
-        in
-        let emitted = Ast.op_entry_name op params signature in
-        let result_name () =
-          match signature.Ast.ret with
-          | Some { Ast.it = Ast.Ty_name n; _ } | Some { Ast.it = Ast.Ty_app (n, _); _ } -> n
-          | _ -> fail s.Ast.span "An operator must declare its result type."
-        in
-        let taken what name = fail s.Ast.span "%s is already declared for %s." what name in
-        (match op, params with
-         (* One operand builds the type from a literal, two read an element. *)
-         | Ast.Op_index, [ items ] ->
-           let owner = result_name () in
-           if Registry.container registry owner <> None then taken "A literal" owner;
-           with_type_params (type_params_of s.Ast.span signature.Ast.comptime) (fun () ->
-             let element =
-               match Types.repr (annotated_or_fresh items.Ast.ty) with
-               | Types.INamed (name, [ element ], _) when String.equal name Types.array_name ->
-                 element
-               | _ ->
-                 fail
-                   s.Ast.span
-                   "A literal entry takes one array of the elements it builds from."
-             in
-             let body =
-               Types.IFn ([ element ], annotated_or_fresh signature.Ast.ret, Types.REmpty)
-             in
-             Registry.register_container
-               registry
-               owner
-               { Registry.entry = emitted
-               ; scheme =
-                   { Types.quantified = List.map fst (Types.free_vars body)
-                   ; quantified_rows = []
-                   ; quantified_fields = []
-                   ; body
-                   }
-               })
-         (* Two entries differ by what indexes them, so `taken` is about one
-            index type rather than about the whole type. *)
-         | Ast.Op_index, [ target; index ] ->
-           let owner = named target
-           and by = named index in
-           (match Registry.exact_index registry owner by with
-            | Some { Registry.get = Some _; _ } -> taken ("Indexing by " ^ by) owner
-            | _ -> ());
-           Registry.register_index_get registry owner by emitted
-         | Ast.Op_index_set, [ target; index; _ ] ->
-           let owner = named target
-           and by = named index in
-           (match Registry.exact_index registry owner by with
-            | Some { Registry.set = Some _; _ } -> taken ("Index assignment by " ^ by) owner
-            | _ -> ());
-           Registry.register_index_set registry owner by emitted
-         | Ast.Op_index, _ ->
-           fail
-             s.Ast.span
-             "'[]' takes one operand to build from a literal, or two to read an element."
-         | Ast.Op_index_set, _ -> fail s.Ast.span "'[]=' takes three operands."
-         | Ast.Op_binary binary, [ lhs; rhs ] ->
-           let operand (p : Ast.param) =
-             match p.Ast.ty with
-             | Some t ->
-               (match Types.concrete (infer_ty_of_annotation t) with
-                | Some ty -> ty
-                | None -> fail s.Ast.span "An operator's operands must be concrete types.")
-             | None -> fail s.Ast.span "An operator's operands must be annotated."
-           in
-           let lhs_ty = operand lhs
-           and rhs_ty = operand rhs in
-           let result =
-             match signature.Ast.ret with
-             | Some t ->
-               (match Types.concrete (infer_ty_of_annotation t) with
-                | Some ty -> ty
-                | None -> fail s.Ast.span "An operator's result must be a concrete type.")
-             | None -> fail s.Ast.span "An operator must declare its result type."
-           in
-           if Registry.find_exact registry binary lhs_ty rhs_ty <> None
-           then
-             fail
-               s.Ast.span
-               "Operator %s is already defined for %s and %s."
-               (Ast.string_of_binop binary)
-               (Types.string_of_ty lhs_ty)
-               (Types.string_of_ty rhs_ty);
-           Registry.register
-             registry
-             binary
-             lhs_ty
-             rhs_ty
-             { Registry.result = Some result; emit = Registry.Call emitted }
-         | Ast.Op_binary _, _ -> fail s.Ast.span "An operator takes exactly two operands.")
-      | _ -> ())
-    body
-
 and declare_traits (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
@@ -1779,22 +1672,6 @@ and hoist env (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
-      | `Op_decl (op, params, signature, _) ->
-        let name = Ast.op_entry_name op params signature in
-        let type_params = type_params_of s.Ast.span signature.Ast.comptime in
-        Hashtbl.replace ctx_fn_params name type_params;
-        with_type_params type_params (fun () ->
-          let param_types =
-            List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) params
-          in
-          bind
-            env
-            name
-            (Types.mono
-               (Types.IFn
-                  ( param_types
-                  , annotated_or_fresh signature.Ast.ret
-                  , Types.fresh_row () ))))
       | `Impl_decl (trait, type_name, params, impl) ->
         (* Declared, like a written `<T>`, so a kind constraint from the body
            must not default it. *)
@@ -1984,32 +1861,6 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     Ast.annotated span fn_type (`Fn (name, params, signature, body)))
   | `Defer inner -> node (`Defer (infer_stmt env ctx assigned inner))
   | `Type_decl (name, params, body) -> node (`Type_decl (name, params, body))
-  | `Op_decl (op, params, signature, body) ->
-    let mangled = Ast.op_entry_name op params signature in
-    with_type_params
-      (Option.value ~default:[] (Hashtbl.find_opt ctx_fn_params mangled))
-      (fun () ->
-    let scope = new_env (Some env) in
-    let param_types =
-      match lookup env mangled with
-      | Some { Types.body = Types.IFn (ps, _, _); _ }
-        when List.length ps = List.length params -> ps
-      | _ -> List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) params
-    in
-    List.iter2
-      (fun (p : Ast.param) ty -> bind scope p.Ast.name (Types.mono ty))
-      params
-      param_types;
-    let declared_ret = annotated_or_fresh signature.Ast.ret in
-    let declared_row = Types.fresh_row () in
-    let body =
-      in_function_body ctx ~ret:declared_ret ~row:declared_row (fun () ->
-        infer_block scope ctx body)
-    in
-    Ast.annotated
-      span
-      (Types.IFn (param_types, declared_ret, declared_row))
-      (`Op_decl (op, params, signature, body)))
   | `Trait_decl (name, params, methods) -> node (`Trait_decl (name, params, methods))
   | `Impl_decl (trait, type_name, params, impl) ->
     let inferred =
@@ -2467,7 +2318,6 @@ and resolve_stmt (s : checked_stmt) : Ast.typed_stmt =
     | #Ast.type_defs as t -> t
     | #Ast.matching as m ->
       (Ast.map_matching resolve_expr resolve_stmt m :> Ast.typed_stmt_kind)
-    | #Ast.op_defs as o -> (Ast.map_op_defs resolve_stmt o :> Ast.typed_stmt_kind)
     | #Ast.method_defs as m ->
       (Ast.map_method_defs resolve_stmt Types.resolve m :> Ast.typed_stmt_kind)
   in
@@ -2647,7 +2497,6 @@ let check ~registry (program : Ast.desugared_stmt list)
   each declare_types;
   each declare_traits;
   each (declare_impls registry);
-  each (declare_ops registry);
   each (hoist env);
   let assigned = assigned_names program in
   let checked =

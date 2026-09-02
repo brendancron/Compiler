@@ -17,7 +17,7 @@ let fail span fmt =
    counts imports and the meta forms too. *)
 let is_visible_to_meta (s : Ast.stmt) =
   match s.Ast.it with
-  | `Fn _ | `Type_decl _ | `Trait_decl _ | `Impl_decl _ | `Op_decl _ | `Effect_decl _
+  | `Fn _ | `Type_decl _ | `Trait_decl _ | `Impl_decl _ | `Effect_decl _
   | `Handler_decl _ -> true
   | _ -> false
 
@@ -230,12 +230,6 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
           { a with Ast.arm_body = sequence (hidden shadowed a.Ast.arm_params) a.Ast.arm_body }
         in
         `Handler_decl (n, { h with Ast.arms = List.map arm h.Ast.arms })
-      | `Op_decl (op, params, sg, body) ->
-        `Op_decl
-          ( op
-          , List.map param params
-          , signature sg
-          , sequence (hidden shadowed (param_names params)) body )
     in
     { s with Ast.it }
   and expr_in shadowed e = expr shadowed e in
@@ -457,7 +451,6 @@ let expand context ~meta_fns ~named ~seen (root : Ast.stmt) : Ast.stmt =
       | #Ast.stmts as st -> (Ast.map_stmts expr stmt st :> Ast.stmt_kind)
       | #Ast.loops as l -> (Ast.map_loops expr stmt l :> Ast.stmt_kind)
       | #Ast.matching as m -> (Ast.map_matching expr stmt m :> Ast.stmt_kind)
-      | #Ast.op_defs as o -> (Ast.map_op_defs stmt o :> Ast.stmt_kind)
       | #Ast.method_defs as m -> (Ast.map_method_defs stmt Fun.id m :> Ast.stmt_kind)
       | other -> other
     in

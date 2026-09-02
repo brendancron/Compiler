@@ -206,13 +206,6 @@ let rec write_stmt buf indent (s : Ast.stmt) =
       (Printf.sprintf "run%s" (String.concat "" (List.map label handlers)))
       (body @ List.concat_map arms handlers)
   | `Resume value -> line "%s(resume %s)\n" pad (opt_expr value)
-  | `Op_decl (op, params, _, body) ->
-    nested
-      (Printf.sprintf
-         "op %s (%s)"
-         (Ast.string_of_op op)
-         (String.concat " " (List.map string_of_param params)))
-      body
   | `Type_decl (name, params, body) ->
     line
       "%s(type %s%s%s)\n"
@@ -415,8 +408,6 @@ let rec write_typed_stmt buf indent (s : Ast.typed_stmt) =
       (body @ List.concat_map (fun h -> List.concat_map (fun a -> a.Ast.arm_body) h.Ast.arms) handlers)
   | `Resume value -> line "%s(resume %s)\n" pad (opt_typed_expr value)
   | `Type_decl (name, _, _) -> line "%s(type %s)\n" pad name
-  | `Op_decl (op, _, _, body) ->
-    nested (Printf.sprintf "op %s" (Ast.string_of_op op)) body
   | `Trait_decl (name, _, _) -> line "%s(trait %s)\n" pad name
   | `Impl_decl (trait, type_name, _, impl) ->
     nested

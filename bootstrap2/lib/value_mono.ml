@@ -39,7 +39,7 @@ let traits : (string, unit) Hashtbl.t = Hashtbl.create 8
    read as a comptime value parameter by whoever tests the bound. *)
 let children (s : desugared_stmt) : desugared_stmt list =
   match s.it with
-  | `Block body | `Fn (_, _, _, body) | `Op_decl (_, _, _, body) -> body
+  | `Block body | `Fn (_, _, _, body) -> body
   | `Defer inner -> [ inner ]
   | `If (_, t, e) -> t :: Option.to_list e
   | `While (_, body) -> [ body ]
@@ -161,7 +161,6 @@ and subst_stmt env (s : desugared_stmt) : desugared_stmt =
          e
        :> desugared_stmt_kind)
     | #type_defs as t -> t
-    | #op_defs as o -> (map_op_defs (subst_stmt env) o :> desugared_stmt_kind)
     | #method_defs as m ->
       (map_method_defs (subst_stmt env) Fun.id m :> desugared_stmt_kind)
   in
@@ -314,7 +313,6 @@ and stmt state (s : desugared_stmt) : desugared_stmt =
       (map_effects (expr state) (stmt state) (map_handler (stmt state)) e
        :> desugared_stmt_kind)
     | #type_defs as t -> t
-    | #op_defs as o -> (map_op_defs (stmt state) o :> desugared_stmt_kind)
     | `Impl_decl (trait, type_name, params, impl) ->
       `Impl_decl
         ( trait

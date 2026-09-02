@@ -256,18 +256,6 @@ and stmt depth (s : Ast.stmt) : string =
       (match e with
        | None -> "resume;"
        | Some v -> Printf.sprintf "resume %s;" (expr v))
-  | `Op_decl (op, params, sg, body) ->
-    braced
-      (Printf.sprintf
-         "op %s%s(%s)%s"
-         (match op with
-          | Ast.Op_binary b -> Ast.string_of_binop b
-          | Ast.Op_index -> "[]"
-          | Ast.Op_index_set -> "[]=")
-         (comptime_params sg.Ast.comptime)
-         (String.concat ", " (List.map param params))
-         (signature sg))
-      body
   | `Trait_decl (name, params, sigs) ->
     line
       (Printf.sprintf

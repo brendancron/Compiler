@@ -3,8 +3,12 @@ type Vec2 {
     y: int
 }
 
-op +(a: Vec2, b: Vec2) -> Vec2 {
-        return new Vec2 { x: a.x + b.x, y: a.y + b.y };
+impl Add<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn add(self, rhs: Vec2) -> Vec2 {
+        return new Vec2 { x: self.x + rhs.x, y: self.y + rhs.y };
+    }
 }
 
 var v1 = new Vec2 { x: 1, y: 2 };

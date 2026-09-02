@@ -185,16 +185,6 @@ type type_body =
 
 type type_defs = [ `Type_decl of string * string list * type_body ]
 
-(* [Op_index] covers both `[…]` forms: one parameter builds a value from a
-   literal, two read an element. Writing is `[]=`, which reads as an
-   assignment and cannot be confused with either. *)
-type op_ref =
-  | Op_binary of binop
-  | Op_index
-  | Op_index_set
-
-type 's op_defs = [ `Op_decl of op_ref * param list * signature * 's list ]
-
 type method_sig =
   { ms_name : string
   ; ms_params : param list
@@ -385,7 +375,6 @@ and stmt_kind =
   | (expr, stmt, stmt handler_clause) effects
   | stmt handler_defs
   | type_defs
-  | stmt op_defs
   | (stmt, unit) method_defs
   | (expr, stmt) matching
   ]
@@ -417,7 +406,6 @@ and desugared_stmt_kind =
   [ (desugared_expr, desugared_stmt) stmts
   | (desugared_expr, desugared_stmt, desugared_stmt handler) effects
   | type_defs
-  | desugared_stmt op_defs
   | (desugared_stmt, unit) method_defs
   | (desugared_expr, desugared_stmt) matching
   ]
@@ -448,7 +436,6 @@ and typed_stmt_kind =
   [ (typed_expr, typed_stmt) stmts
   | (typed_expr, typed_stmt, typed_stmt handler) effects
   | type_defs
-  | typed_stmt op_defs
   | (typed_stmt, Types.ty) method_defs
   | (typed_expr, typed_stmt) matching
   ]
@@ -575,11 +562,6 @@ let map_nominal (f : 'a -> 'b) (e : 'a nominal) : 'b nominal =
   | `New_variant (ty, variant, payload) ->
     `New_variant (ty, variant, map_payload f payload)
 
-let map_op_defs (fs : 's1 -> 's2) (o : 's1 op_defs) : 's2 op_defs =
-  match o with
-  | `Op_decl (op, params, signature, body) ->
-    `Op_decl (op, params, signature, List.map fs body)
-
 (* `#` is not in any identifier the scanner can produce, so a generated name is
    unforgeable. Always two parts or more, or the separator would not appear and
    the name would be one a program could write. *)
@@ -599,37 +581,10 @@ let deriver_trait name =
   then Some (String.sub name n (String.length name - n))
   else None
 
-let op_name op (operands : string list) =
-  let symbol =
-    match op with
-    | Op_index -> "index"
-    | Op_index_set -> "index_set"
-    | Op_binary Add -> "add"
-    | Op_binary Sub -> "sub"
-    | Op_binary Mul -> "mul"
-    | Op_binary Div -> "div"
-    | Op_binary Mod -> "mod"
-    | Op_binary Equal -> "eq"
-    | Op_binary Not_equal -> "ne"
-    | Op_binary Less -> "lt"
-    | Op_binary Less_equal -> "le"
-    | Op_binary Greater -> "gt"
-    | Op_binary Greater_equal -> "ge"
-  in
-  generated ("op" :: symbol :: operands)
-
 let type_head (t : type_expr option) =
   match t with
   | Some { it = Ty_name n; _ } | Some { it = Ty_app (n, _); _ } -> n
   | _ -> "_"
-
-(* A literal entry is identified by what it builds, every other operator by its
-   operands: two containers built from the same array type would otherwise
-   mangle to one name and the later declaration would answer for both. *)
-let op_entry_name op (params : param list) (signature : signature) =
-  match op, params with
-  | Op_index, [ _ ] -> op_name op [ type_head signature.ret ]
-  | _ -> op_name op (List.map (fun (p : param) -> type_head p.ty) params)
 
 let method_name type_name method_ = generated [ type_name; method_ ]
 
@@ -781,11 +736,6 @@ let string_of_binop = function
   | Less_equal -> "<="
   | Greater -> ">"
   | Greater_equal -> ">="
-
-let string_of_op = function
-  | Op_binary op -> string_of_binop op
-  | Op_index -> "[]"
-  | Op_index_set -> "[]="
 
 let binop_of_token : Token.token_type -> binop option = function
   | Token.Plus -> Some Add

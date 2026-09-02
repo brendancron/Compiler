@@ -27,7 +27,7 @@ Source text to tokens. Every span a diagnostic is reported against — file, lin
 
 ### Parser
 
-Tokens to the surface AST: the program as written, including the `meta`, `gen`, `code`, `import` and `op` nodes no later stage sees. Nothing is resolved. A name is a string, and a type annotation is syntax rather than a type.
+Tokens to the surface AST: the program as written, including the `meta`, `gen`, `code` and `import` nodes no later stage sees. Nothing is resolved. A name is a string, and a type annotation is syntax rather than a type.
 
 ### Loader
 
@@ -55,7 +55,7 @@ Copies a generic body per concrete type its call sites use, because an operator 
 
 ### Resolve
 
-Turns every construct whose meaning depended on a type into a primitive or a call — operators, compound assignment, indexing, collection literals, method calls. It also flattens `impl` and `op` declarations into ordinary functions, so nothing downstream knows that methods or operators exist.
+Turns every construct whose meaning depended on a type into a primitive or a call — operators, compound assignment, indexing, collection literals, method calls. It also flattens every `impl` into ordinary functions, so nothing downstream knows that methods or operators exist.
 
 ### Reflect
 

@@ -3,25 +3,33 @@ type Ring<T> {
     head: int
 }
 
-op []<T>(items: Array<T>) -> Ring<T> {
-    return new Ring { items: items, head: 0 };
+impl FromArray<T> for Ring<T> {
+    fn from_array(items: Array<T>) -> Ring<T> {
+        return new Ring { items: items, head: 0 };
+    }
 }
 
-op []<T>(r: Ring<T>, i: int) -> T {
-    var at = r.head + i;
-    while (at >= r.items.len()) {
-        at = at - r.items.len();
+impl Index<int> for Ring<T> {
+    type Output = T;
+
+    fn get(self, i: int) -> T {
+        var at = self.head + i;
+        while (at >= self.items.len()) {
+            at = at - self.items.len();
+        }
+        return self.items[at];
     }
-    return r.items[at];
 }
 
-op []=<T>(r: Ring<T>, i: int, v: T) -> T {
-    var at = r.head + i;
-    while (at >= r.items.len()) {
-        at = at - r.items.len();
+impl IndexSet<int> for Ring<T> {
+    fn set(self, i: int, v: T) -> T {
+        var at = self.head + i;
+        while (at >= self.items.len()) {
+            at = at - self.items.len();
+        }
+        self.items[at] = v;
+        return v;
     }
-    r.items[at] = v;
-    return v;
 }
 
 var ring: Ring<int> = [1, 2, 3];

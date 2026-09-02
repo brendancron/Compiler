@@ -86,7 +86,6 @@ and type_directed self (s : Ast.typed_stmt) =
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
         List.exists type_directed m.Ast.md_body)
       impl.Ast.ib_methods
-  | `Op_decl (_, _, _, body) -> List.exists type_directed body
   | _ -> false
 
 let rec subst_expr mapping (e : Ast.typed_expr) : Ast.typed_expr =
@@ -127,7 +126,6 @@ and subst_stmt mapping (s : Ast.typed_stmt) : Ast.typed_stmt =
          e
        :> Ast.typed_stmt_kind)
     | #Ast.type_defs as t -> t
-    | #Ast.op_defs as o -> (Ast.map_op_defs (subst_stmt mapping) o :> Ast.typed_stmt_kind)
     | #Ast.method_defs as m ->
       (Ast.map_method_defs (subst_stmt mapping) (Types.subst_generic mapping) m
        :> Ast.typed_stmt_kind)
@@ -239,7 +237,6 @@ and rewrite_stmt state (s : Ast.typed_stmt) : Ast.typed_stmt =
          e
        :> Ast.typed_stmt_kind)
     | #Ast.type_defs as t -> t
-    | #Ast.op_defs as o -> (Ast.map_op_defs (rewrite_stmt state) o :> Ast.typed_stmt_kind)
     | #Ast.method_defs as m ->
       (Ast.map_method_defs (rewrite_stmt state) Fun.id m :> Ast.typed_stmt_kind)
     | #Ast.matching as m ->

@@ -143,7 +143,6 @@ and stmt (s : stmt) : desugared_stmt =
     | #effects as e -> (map_effects expr stmt (clause sp) e :> desugared_stmt_kind)
     | #type_defs as t -> t
     | #matching as m -> (map_matching expr stmt m :> desugared_stmt_kind)
-    | #op_defs as o -> (map_op_defs stmt o :> desugared_stmt_kind)
     | #method_defs as m -> (map_method_defs stmt Fun.id m :> desugared_stmt_kind)
     | `Handler_decl _ -> `Block []
   in
@@ -175,7 +174,6 @@ let program (p : program) : (desugared_stmt list, error) result =
   and children (s : stmt) =
     match s.it with
     | `Block body | `Fn (_, _, _, body) | `Meta body | `Meta_fn (_, _, _, body) -> body
-    | `Op_decl (_, _, _, body) -> body
     | `Defer inner | `Gen inner -> [ inner ]
     | `If (_, t, e) -> t :: Option.to_list e
     | `While (_, body) -> [ body ]

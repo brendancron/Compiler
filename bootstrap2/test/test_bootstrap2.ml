@@ -281,7 +281,6 @@ let error_cases =
   ; "tests/core/enums/errors/not_a_sum"
   ; "tests/operators/errors/duplicate"
   ; "tests/operators/errors/undeclared"
-  ; "tests/operators/errors/unannotated"
   ; "tests/core/traits/errors/incomplete"
   ; "tests/core/traits/errors/unknown_trait"
   ; "tests/core/traits/errors/duplicate"

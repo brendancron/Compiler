@@ -620,9 +620,6 @@ and declaration s : Ast.stmt option =
     | Token.Type ->
       ignore (advance s);
       Some (type_decl s sp)
-    | Token.Op ->
-      ignore (advance s);
-      Some (op_decl s sp)
     | Token.Trait ->
       ignore (advance s);
       Some (trait_decl s sp)
@@ -941,30 +938,6 @@ and effect_decl s sp : Ast.stmt =
   let ops = loop [] in
   ignore (consume s Token.Right_brace "Expected '}' after effect operations.");
   Ast.at sp (`Effect_decl (name, params, ops))
-
-and op_decl s sp : Ast.stmt =
-  let tok = advance s in
-  let op =
-    match tok.Token.token_type with
-    | Token.Left_bracket ->
-      ignore (consume s Token.Right_bracket "Expected ']' after '['.");
-      if matches s [ Token.Equal ] <> None then Ast.Op_index_set else Ast.Op_index
-    | other ->
-      (match Ast.binop_of_token other with
-       | Some op -> Ast.Op_binary op
-       | None -> raise (error s tok "Expected an operator after 'op'."))
-  in
-  let comptime = comptime_params s in
-  ignore (consume s Token.Left_paren "Expected '(' after the operator.");
-  let params =
-    listed_until s Token.Right_paren (fun s ->
-      let name = consume_identifier s "Expected a parameter name." in
-      { Ast.name; ty = type_annotation s })
-  in
-  ignore (consume s Token.Right_paren "Expected ')' after operands.");
-  let signature = signature ~comptime s in
-  ignore (consume s Token.Left_brace "Expected '{' before the operator body.");
-  Ast.at sp (`Op_decl (op, params, signature, block s))
 
 and trait_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected a trait name." in

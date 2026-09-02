@@ -1,3 +1,13 @@
 type Vec2 { x: int, y: int }
-op +(a: Vec2, b: Vec2) -> Vec2 { return a; }
-op +(a: Vec2, b: Vec2) -> Vec2 { return b; }
+
+impl Add<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn add(self, rhs: Vec2) -> Vec2 { return self; }
+}
+
+impl Add<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn add(self, rhs: Vec2) -> Vec2 { return rhs; }
+}

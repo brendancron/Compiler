@@ -1,1 +1,1 @@
-[7:1] A literal is already declared for Bag.
+[9:1] Type 'Bag' already has a method 'from_array'.

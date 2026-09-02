@@ -2,8 +2,12 @@
 // there is no separate slice operator to implement.
 type Ring { items: List<int> }
 
-op [](self: Ring, r: Range) -> List<int> {
-    return self.items[r];
+impl Index<Range> for Ring {
+    type Output = List<int>;
+
+    fn get(self, r: Range) -> List<int> {
+        return self.items[r];
+    }
 }
 
 var r = new Ring { items: [1, 2, 3, 4] };

@@ -22,9 +22,6 @@ let rec record (s : Ast.typed_stmt) =
           (row_of m.Ast.md_ann);
         List.iter record m.Ast.md_body)
       impl.Ast.ib_methods
-  | `Op_decl (op, params, signature, body) ->
-    Hashtbl.replace declared_rows (Ast.op_entry_name op params signature) (row_of s.Ast.ann);
-    List.iter record body
   | `Block body | `Fn (_, _, _, body) -> List.iter record body
   | `If (_, then_branch, else_branch) ->
     record then_branch;
@@ -225,10 +222,6 @@ and stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =
     [ node
         (Ast.map_effects (expr registry) (one registry) (Ast.map_handler (one registry)) e
          :> Ast.resolved_stmt_kind)
-    ]
-  | `Op_decl (op, params, signature, body) ->
-    [ node
-        (`Fn (Ast.op_entry_name op params signature, params, signature, block registry body))
     ]
   | `Impl_decl (trait, type_name, _, impl) ->
     List.map
