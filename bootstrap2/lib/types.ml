@@ -564,7 +564,15 @@ and strongest a b =
     Collection x
   | Collection _, Any -> a
   | Any, Collection _ -> b
-  | Bound x, Bound y -> Bound (List.sort_uniq compare (x @ y))
+  (* Compared by name and arity rather than structurally: `T: Add<T>` puts the
+     variable inside its own kind, and walking the arguments to compare them
+     would not terminate. *)
+  | Bound x, Bound y ->
+    let same (a : bound) (b : bound) =
+      String.equal a.bd_trait b.bd_trait
+      && List.length a.bd_args = List.length b.bd_args
+    in
+    Bound (x @ List.filter (fun b -> not (List.exists (same b) x)) y)
   | Bound _, Any -> a
   | Any, Bound _ -> b
   | Collection _, other | other, Collection _ ->
@@ -789,15 +797,34 @@ let instantiate ?(bound = []) (s : scheme) : infer_ty =
           | Some copy -> copy
           | None ->
             (* A kind may carry a type of its own, and sharing it across copies
-               would pin every instantiation to whatever the first one chose. *)
-            let copy =
-              fresh_with
-                (match kind with
+               would pin every instantiation to whatever the first one chose.
+               The copy is registered before its kind is walked: `T: Add<T>`
+               carries the variable being copied, and finding the copy already
+               there is what ends the recursion. *)
+            let copy = fresh () in
+            Hashtbl.add types id copy;
+            (match copy with
+             | IVar cell ->
+               let copied =
+                 match kind with
                  | Collection elem -> Collection (walk elem)
                  | Projection (owner, member) -> Projection (walk owner, member)
-                 | other -> other)
-            in
-            Hashtbl.add types id copy;
+                 | Bound bounds ->
+                   Bound
+                     (List.map
+                        (fun b ->
+                          { b with
+                            bd_args = List.map walk b.bd_args
+                          ; bd_bindings =
+                              List.map (fun (member, t) -> member, walk t) b.bd_bindings
+                          })
+                        bounds)
+                 | other -> other
+               in
+               (match !cell with
+                | Unbound (fresh_id, _) -> cell := Unbound (fresh_id, copied)
+                | Link _ -> ())
+             | _ -> ());
             copy)
         else original
       | ITuple items -> ITuple (List.map walk items)

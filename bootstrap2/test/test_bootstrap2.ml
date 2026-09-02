@@ -178,6 +178,7 @@ let cases =
   ; "tests/operators/traits/asymmetric"
   ; "tests/operators/traits/equality"
   ; "tests/operators/traits/indexing"
+  ; "tests/operators/traits/generic_bound"
   ; "tests/core/traits/basic_impl/main"
   ; "tests/core/traits/multiple_impls/main"
   ; "tests/core/traits/inherent/main"
@@ -399,7 +400,6 @@ let expected_failing : (string * blocker) list =
     (* A tuple has no declaration to derive from, so its impl is the checker's
        to synthesize from the components' — the one case no deriver reaches. *)
   ; "tests/operators/traits/tuple_eq", Waiting "Eq for a tuple of Eq components"
-  ; "tests/operators/traits/generic_bound", Waiting "operators dispatched through traits"
   ; ( "tests/operators/traits/errors/missing_impl"
     , Waiting "operators dispatched through traits" )
   ]

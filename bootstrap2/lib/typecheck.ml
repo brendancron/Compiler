@@ -565,17 +565,6 @@ let type_params_of span (comptime : Ast.comptime_param list) =
           in
           let bd_args = List.map infer_ty_of_annotation args
           and bd_bindings = List.map (fun (m, b) -> m, infer_ty_of_annotation b) bindings in
-          (* `T: Add<T>` would put the parameter inside its own kind, which the
-             walkers that inspect a kind are not written to survive. *)
-          if List.exists
-               (fun t -> Types.repr t == Types.repr var)
-               (bd_args @ List.map snd bd_bindings)
-          then
-            fail
-              span
-              "A bound on '%s' cannot mention '%s' itself yet."
-              p.Ast.cp_name
-              p.Ast.cp_name;
           Types.constrain
             var
             (Types.Bound [ { Types.bd_trait = trait; bd_args; bd_bindings } ])
@@ -769,8 +758,16 @@ let binop_result registry (op : Ast.binop) a b =
     (* Unifying here would make an asymmetric operator unreachable, so it only
        happens when there is nothing to look up. *)
     Types.unify a b;
-    Types.unify a (Types.fresh_with (Registry.constraint_of op));
-    Registry.unresolved_result op a
+    (* A parameter already bounded by the operator's own trait answers through
+       that bound: the impl says what the result is, and the ad-hoc kinds would
+       only contradict it. *)
+    (match Types.repr a, List.find_opt (fun (_, (binary, _)) -> binary = op) operator_traits with
+     | Types.IVar { contents = Types.Unbound (_, Types.Bound traits) }, Some (trait, _)
+       when List.exists (fun (b : Types.bound) -> String.equal b.Types.bd_trait trait) traits ->
+       Types.project a "Output"
+     | _ ->
+       Types.unify a (Types.fresh_with (Registry.constraint_of op));
+       Registry.unresolved_result op a)
 
 let rec infer_expr env ctx (e : Ast.desugared_expr) : checked_expr =
   try infer_expr_impl env ctx e with
@@ -2434,6 +2431,36 @@ let pure params ret =
   in
   scheme_of (Types.IFn (params, ret, row))
 
+(* Which goals are being proved, so a bound that names the parameter it
+   constrains — `T: Add<T>` — is taken to hold while it is still being proved
+   rather than asked for again forever. *)
+let proving : (string * string) list ref = ref []
+
+let satisfies name (b : Types.bound) =
+  List.exists
+    (fun declared ->
+      List.length declared = List.length b.Types.bd_args
+      &&
+      try
+        List.iter2 Types.unify b.Types.bd_args declared;
+        true
+      with
+      | Types.Type_error _ -> false)
+    (Hashtbl.find_all ctx_impls (name, b.Types.bd_trait))
+  (* `Add<T, Output = T>` — the impl reached has to have bound the associated
+     name to what the bound said it would. *)
+  && List.for_all
+       (fun (member, expected) ->
+         match Hashtbl.find_opt ctx_assoc (name, member) with
+         | None -> false
+         | Some found ->
+           (try
+              Types.unify found expected;
+              true
+            with
+            | Types.Type_error _ -> false))
+       b.Types.bd_bindings
+
 let admits registry kind (t : Types.infer_ty) =
   match kind with
   | Types.Collection elem ->
@@ -2457,29 +2484,14 @@ let admits registry kind (t : Types.infer_ty) =
      | Some name ->
        List.for_all
          (fun (b : Types.bound) ->
-           List.exists
-             (fun declared ->
-               List.length declared = List.length b.Types.bd_args
-               &&
-               try
-                 List.iter2 Types.unify b.Types.bd_args declared;
-                 true
-               with
-               | Types.Type_error _ -> false)
-             (Hashtbl.find_all ctx_impls (name, b.Types.bd_trait))
-           (* `Add<T, Output = T>` — the impl reached has to have bound the
-              associated name to what the bound said it would. *)
-           && List.for_all
-                (fun (member, expected) ->
-                  match Hashtbl.find_opt ctx_assoc (name, member) with
-                  | None -> false
-                  | Some found ->
-                    (try
-                       Types.unify found expected;
-                       true
-                     with
-                     | Types.Type_error _ -> false))
-                b.Types.bd_bindings)
+           let goal = b.Types.bd_trait, name in
+           if List.mem goal !proving
+           then true
+           else (
+             proving := goal :: !proving;
+             Fun.protect
+               ~finally:(fun () -> proving := List.tl !proving)
+               (fun () -> satisfies name b)))
          traits
      | None -> false)
   | Types.Any -> true
@@ -2494,6 +2506,26 @@ let admits registry kind (t : Types.infer_ty) =
        (match kind with
         | Types.Addable -> has Ast.Add
         | _ -> List.exists has [ Ast.Sub; Ast.Mul; Ast.Div; Ast.Mod; Ast.Less; Ast.Greater ]))
+
+(* The primitives implement the operator traits, so a bound reaches them, but
+   their impls are entries in the registry rather than methods to call. Reading
+   them back out is what keeps the two accounts from disagreeing. *)
+let declare_builtin_impls registry =
+  List.iter
+    (fun (trait, (binary, _)) ->
+      List.iter
+        (fun ty ->
+          match Registry.find registry binary ty ty with
+          | None -> ()
+          | Some entry ->
+            let name = Option.get (Types.type_name ty) in
+            Hashtbl.add ctx_impls (name, trait) [ Types.of_ty ty ];
+            Hashtbl.replace
+              ctx_assoc
+              (name, "Output")
+              (Types.of_ty (Registry.result_of entry ty)))
+        [ Types.Int; Types.Float; Types.Str; Types.Chr; Types.Byte; Types.Bool ])
+    operator_traits
 
 let declare_builtins env =
   (* A receiver of unknown type has to see the length method to be ambiguous. *)
@@ -2537,6 +2569,7 @@ let check ~registry (program : Ast.desugared_stmt list)
   reset_effects ();
   let env = new_env None in
   declare_builtins env;
+  declare_builtin_impls registry;
   let ctx =
     { registry
     ; return_type = None
