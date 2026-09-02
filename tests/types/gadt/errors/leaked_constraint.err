@@ -1,2 +1,2 @@
-[14:11] No operator + for int and string.
+[14:11] No operator + for int and string: int does not implement Add<string>.
 [18:7] Expected int, got string.

@@ -1,3 +1,0 @@
-type Vec2 { x: int, y: int }
-var a = new Vec2 { x: 1, y: 2 };
-var b = a - a;

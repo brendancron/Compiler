@@ -32,6 +32,12 @@ let functions : (string * (unit -> Types.infer_ty list * Types.infer_ty)) list =
     , fun () ->
         let t = Types.fresh () in
         [ t; t ], Types.IBool )
+  (* What a derived `Eq` is: the comparison the interpreter already performs on
+     any two values, reached through an impl so a type has to ask for it. *)
+  ; ( "__structural_eq"
+    , fun () ->
+        let t = Types.fresh () in
+        [ t; t ], Types.IBool )
   ]
 
 (* ---- values ---- *)
@@ -60,6 +66,7 @@ let values ~out =
       | Value.Chr c -> Value.Int (Uchar.to_int c)
       | _ -> Value.fail span "Cannot apply ord to these arguments.")
   ; two "same" (fun _ a b -> Value.Bool (Value.same a b))
+  ; two "__structural_eq" (fun _ a b -> Value.Bool (Value.values_equal a b))
   ; native "clock" (Some 0) (fun _ _ -> Value.Float (Sys.time ()))
   ; one (Ast.method_name "string" "as_name") (fun span v ->
       match v with

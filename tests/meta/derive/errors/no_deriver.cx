@@ -1,2 +1,2 @@
 type Dog { age: int }
-derive Eq for Dog;
+derive Show for Dog;

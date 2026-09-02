@@ -21,6 +21,39 @@ let is_visible_to_meta (s : Ast.stmt) =
   | `Handler_decl _ -> true
   | _ -> false
 
+(* `derive Eq for X` in full. A deriver would walk the type's shape and compare
+   the fields; the interpreter already compares two values of any shape, so this
+   reaches that instead and the impl is the same three lines for every type. *)
+let derived_eq span target : Ast.stmt =
+  let at it = Ast.at span it in
+  let ty name = { Ast.it = Ast.Ty_name name; span; ann = () } in
+  Ast.at
+    span
+    (`Impl_decl
+      ( Some ("Eq", [])
+      , target
+      , []
+      , { Ast.ib_assoc = []
+        ; ib_methods =
+            [ { Ast.md_name = "eq"
+              ; md_params =
+                  [ { Ast.name = "self"; ty = None }; { Ast.name = "rhs"; ty = Some (ty target) } ]
+              ; md_signature =
+                  { Ast.ret = Some (ty "bool"); row = Some []; comptime = [] }
+              ; md_body =
+                  [ at
+                      (`Return
+                        (Some
+                           (at
+                              (`Call
+                                ( at (`Var "__structural_eq")
+                                , [ at (`Var "self"); at (`Var "rhs") ] )))))
+                  ]
+              ; md_ann = ()
+              }
+            ]
+        } ))
+
 (* ---- what a block emits ---- *)
 
 let emitter = Ast.generated [ "meta"; "emit" ]
@@ -468,9 +501,27 @@ let rec strip context ~inside (program : Ast.program) =
   List.concat_map
     (fun (s : Ast.stmt) ->
       (* `derive A, B for X` is `meta` running one deriver per trait. *)
+      (* `Eq` is the compiler's to derive: what a deriver would generate is the
+         comparison the interpreter already performs, so the impl is written
+         here rather than by walking the type's shape. *)
+      let derived =
+        match s.Ast.it with
+        | `Derive (traits, target)
+          when List.exists
+                 (fun t ->
+                   String.equal t "Eq" && not (Hashtbl.mem named (Ast.deriver_name t)))
+                 traits -> [ derived_eq s.Ast.span target ]
+        | _ -> []
+      in
       let s =
         match s.Ast.it with
         | `Derive (traits, target) ->
+          let traits =
+            List.filter
+              (fun t ->
+                not (String.equal t "Eq" && not (Hashtbl.mem named (Ast.deriver_name t))))
+              traits
+          in
           let call trait =
             let name = Ast.deriver_name trait in
             if not (Hashtbl.mem named name)
@@ -513,7 +564,8 @@ let rec strip context ~inside (program : Ast.program) =
             declarations;
           statements
       in
-      beside
+      derived
+      @ beside
       @
       match s.Ast.it with
       (* Every call to it has happened by the time the program runs, so it is

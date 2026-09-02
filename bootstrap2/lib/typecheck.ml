@@ -754,11 +754,24 @@ let binop_result registry (op : Ast.binop) a b =
     (match Registry.find registry op lhs rhs with
      | Some entry -> Types.of_ty (Registry.result_of entry lhs)
      | None ->
+       (* Naming the trait says what to write; the operator alone leaves the
+          reader to work out which impl was missing. *)
+       let missing =
+         match List.find_opt (fun (_, (binary, _)) -> binary = op) operator_traits with
+         | Some (trait, _) ->
+           Printf.sprintf
+             ": %s does not implement %s<%s>"
+             (Types.string_of_ty lhs)
+             trait
+             (Types.string_of_ty rhs)
+         | None -> ""
+       in
        Types.error
-         "No operator %s for %s and %s."
+         "No operator %s for %s and %s%s."
          (Ast.string_of_binop op)
          (Types.string_of_ty lhs)
-         (Types.string_of_ty rhs))
+         (Types.string_of_ty rhs)
+         missing)
   | _ ->
     (* Unifying here would make an asymmetric operator unreachable, so it only
        happens when there is nothing to look up. *)
@@ -2416,6 +2429,12 @@ let admits registry kind (t : Types.infer_ty) =
    their impls are entries in the registry rather than methods to call. Reading
    them back out is what keeps the two accounts from disagreeing. *)
 let declare_builtin_impls registry =
+  (* Every scalar compares, so `T: Eq` reaches one without a program deriving
+     anything for it. *)
+  List.iter
+    (fun ty ->
+      Hashtbl.add ctx_impls (Option.get (Types.type_name ty), "Eq") [])
+    [ Types.Int; Types.Float; Types.Str; Types.Chr; Types.Byte; Types.Bool; Types.Unit ];
   List.iter
     (fun (trait, (binary, _)) ->
       List.iter
