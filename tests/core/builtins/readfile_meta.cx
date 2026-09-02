@@ -1,0 +1,8 @@
+meta {
+    var banner = readfile("readfile_data.txt");
+    gen fn greet() {
+        print(banner.trim());
+    }
+}
+
+greet();

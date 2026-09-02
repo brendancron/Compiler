@@ -104,6 +104,21 @@ Where it differs is that a non-declaration in an imported unit is **rejected**, 
 
 A file that is not there is a load error naming it, at the span of the call.
 
+## `readfile` and `writefile` resolve the same way
+
+Both take a path relative to the file that wrote the call, resolved through the
+span the builtin is handed — the same rule as `import` and `embed`, so where the
+compiler was started from is never something the source can see.
+
+`readfile` yields a `string` rather than the bytes `embed` gives, because it is
+reached while the program runs and a program that wanted bytes would decode
+them itself. A path that cannot be read is a runtime error naming the path *as
+written*, not as resolved: what the reader has in front of them is the former.
+
+**They work at compile time too.** A `meta` block calling `readfile` reads while
+compiling, and what it read can be baked into generated code — `embed` with a
+shape decided by the program rather than by the compiler.
+
 ## Spans carry a file
 
 `Ast.span` was `{ line; col }`, and concatenating four units would have made `[3:5]` name nothing. It now carries the file, threaded through the *token* so that no `span_of_token` call site changed. `Ast.locate ~entry` prints a bare `[3:5]` while a span is in the unit being compiled and `[lib.cx 2:12]` once it is not, rendered relative to the entry's directory.

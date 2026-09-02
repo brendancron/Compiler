@@ -107,6 +107,9 @@ let cases =
   ; "tests/core/resolution/symbol_res"
   ; "tests/core/resolution/hoisting"
   ; "tests/core/builtins/print_value"
+  ; "tests/core/builtins/readfile"
+  ; "tests/core/builtins/writefile"
+  ; "tests/core/builtins/readfile_meta"
   ; "tests/core/variadic/basics"
   ; "tests/core/variadic/generic"
   ; "tests/reflection/typeof_effect_transitive"
@@ -309,7 +312,10 @@ let error_cases =
 (* Accepted, then failing while running. Separate from [error_cases], which
    never reach the interpreter. *)
 let runtime_cases =
-  [ "tests/core/collections/index_out_of_range"; "tests/core/slices/negative_index" ]
+  [ "tests/core/builtins/readfile_missing"
+  ; "tests/core/collections/index_out_of_range"
+  ; "tests/core/slices/negative_index"
+  ]
 
 (* The fixtures live outside the dune project root, so find them at runtime. *)
 let repo_root () =
@@ -379,8 +385,6 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m7/safe_div", Parked
   ; "tests/compile/m8/gadt", Parked
     (* Unplanned *)
-  ; "tests/core/builtins/readfile", Unplanned
-  ; "tests/core/builtins/writefile", Unplanned
   ; "tests/effects/async/async", Unplanned
     (* A resumption re-enters the scope without re-executing the `defer`
        that set the flag, and the pass marks no such re-entry point. *)
