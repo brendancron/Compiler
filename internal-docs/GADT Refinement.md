@@ -4,7 +4,7 @@ How a match arm learns what a constructor says about the scrutinee, why the way
 it does that now is unsound, and which of four fixes to take.
 
 The declaration syntax and what shipped are in
-[type-system.md](type-system.md); this is only the refinement.
+[type-system.md](Type%20System.md); this is only the refinement.
 
 ## What refinement has to do
 
@@ -228,7 +228,7 @@ Three steps, in this order.
    parameter has to win unification, or an operator aliasing it leaves the
    scheme's recorded id pointing at nothing; and `Specialize` needed both a
    self-call exclusion and a depth cap, because polymorphic recursion cannot be
-   monomorphized at all. See [type-system.md](type-system.md).
+   monomorphized at all. See [type-system.md](Type%20System.md).
 
    `If<A>` no longer depends on retraction for its genericity, which is what
    step 3 was waiting for.

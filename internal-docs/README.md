@@ -7,7 +7,7 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 | Document                                                     | Subject                                                               |
 | ------------------------------------------------------------ | --------------------------------------------------------------------- |
 | [architecture.md](Architecture.md)                           | `bootstrap2` pipeline diagram                                         |
-| [type-system.md](type-system.md)                             | Type system and type checking for `bootstrap2` (OCaml)                |
+| [type-system.md](Type%20System.md)                             | Type system and type checking for `bootstrap2` (OCaml)                |
 | [effects.md](Algebraic%20Effects.md)                                     | Effect rows and the selective CPS pass (design)                       |
 | [Data Structures.md](Data%20Structures.md)                   | The datatypes and how each is used                                    |
 | [Collection Literals.md](Collection%20Literals.md)           | How `[...]` picks a collection type                                   |

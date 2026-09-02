@@ -1,5 +1,3 @@
-# Type system and type checking — bootstrap2
-
 Status: **implemented.** `lib/types.ml` and `lib/typecheck.ml` run after `Desugar`; every program goes through the checker. See [Architecture](Architecture.md) for where that sits now.
 
 This records the design of the OCaml bootstrap's static type system, what was carried over from the Rust bootstrap's checker (`bootstrap/src/semantics/types/`), what was done differently, and what is still missing.

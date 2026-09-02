@@ -1,4 +1,3 @@
-# Collection literals
 
 `[1, 2, 3]` is one syntax that builds any of the collection types. Which one it builds is decided by inference, not by the literal.
 

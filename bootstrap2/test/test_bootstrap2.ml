@@ -182,6 +182,7 @@ let cases =
   ; "tests/core/traits/try_from/main"
   ; "tests/core/traits/associated"
   ; "tests/core/traits/associated_builtin"
+  ; "tests/core/traits/associated_type"
   ; "tests/core/traits/builtin_receiver/main"
   ; "tests/effects/methods/methods"
   ; "tests/core/comptime/type_params/main"
@@ -387,12 +388,9 @@ let expected_failing : (string * blocker) list =
        is a re-entry point the pass does not currently mark. *)
   ; ( "tests/core/defer/defer_multishot_abort"
     , Waiting "a re-entered scope re-arming its deferred statements" )
-  ; "tests/core/traits/associated_type", Waiting "associated types on a trait"
   ; "tests/core/traits/supertrait", Waiting "a trait requiring another"
   ; "tests/core/traits/errors/missing_supertrait", Waiting "a trait requiring another"
-    (* Operators resolved through an impl instead of the operator registry.
-       Every one of these needs associated types first: the result of `+` has
-       to come from the impl rather than from the operand. *)
+    (* Operators resolved through an impl instead of the operator registry. *)
   ; "tests/operators/traits/vec2_add", Waiting "operators dispatched through traits"
   ; "tests/operators/traits/derive_eq", Waiting "an Eq the prelude declares and a deriver fills in"
     (* A tuple has no declaration to derive from, so its impl is the checker's

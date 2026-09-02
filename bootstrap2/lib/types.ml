@@ -45,6 +45,9 @@ and kind =
      A method call resolves through the trait's declared signature, so the
      owner need not be known. *)
   | Bound of (string * infer_ty list) list
+  (* `T.Item` before `T` is known. The owner is carried rather than the answer,
+     so the binding is looked up once the owner unifies with something named. *)
+  | Projection of infer_ty * string
 
 and tv =
   | Unbound of int * kind
@@ -205,6 +208,7 @@ let string_of_kind = function
   | Any -> "any"
   | Collection _ -> "a collection"
   | Bound traits -> String.concat " and " (List.map fst traits)
+  | Projection (_, member) -> Printf.sprintf "an associated '%s'" member
   | Addable -> "int, float or string"
   | Numeric -> "int or float"
 
@@ -401,6 +405,33 @@ let rec row_occurs id (r : infer_row) =
 (* A variable used by both `+` and `-` must end up Numeric, not Addable. *)
 let extra_admits : (kind -> infer_ty -> bool) ref = ref (fun _ _ -> false)
 
+(* What an impl bound an associated name to. The table belongs to the checker,
+   so a projection asks for it through here. *)
+let assoc_binding : (string -> string -> infer_ty option) ref = ref (fun _ _ -> None)
+
+(* An owner already known needs no variable standing in for it. *)
+let project (owner : infer_ty) (member : string) : infer_ty =
+  match Option.bind (infer_type_name owner) (fun name -> !assoc_binding name member) with
+  | Some bound -> bound
+  | None -> fresh_with (Projection (owner, member))
+
+(* A projection whose owner has become known stands for what the impl bound,
+   so it stops being a variable. Called wherever a type is inspected, since the
+   owner may be settled long after the projection was built. *)
+let rec settle (t : infer_ty) : infer_ty =
+  match repr t with
+  | IVar ({ contents = Unbound (_, Projection (owner, member)) } as cell) as self ->
+    (match infer_type_name (settle owner) with
+     | None -> self
+     | Some name ->
+       (match !assoc_binding name member with
+        | None -> self
+        | Some bound ->
+          note cell;
+          cell := Link bound;
+          repr bound))
+  | other -> other
+
 (* Finding the label is also agreeing on what it was instantiated at, so the
    arguments are unified rather than compared. *)
 let rec rewrite_row label args (r : infer_row) : infer_row =
@@ -519,6 +550,12 @@ and strongest a b =
     error "A collection is not %s." (string_of_kind other)
   | Bound _, other | other, Bound _ ->
     error "A bounded type parameter is not %s." (string_of_kind other)
+  (* Yielding to [Any] would drop the owner, and with it the only route back to
+     what the projection stands for. A real constraint still wins: by the time
+     one applies, what the projection resolves to has to satisfy it anyway. *)
+  | Projection _, Any -> a
+  | Any, Projection _ -> b
+  | Projection _, other | other, Projection _ -> other
   | Numeric, _ | _, Numeric -> Numeric
   | Addable, _ | _, Addable -> Addable
   | Any, Any -> Any
@@ -528,11 +565,12 @@ and kind_admits kind (t : infer_ty) =
   | Any, _ -> true
   | Numeric, (IInt | IFloat) -> true
   | Addable, (IInt | IFloat | IStr) -> true
+  | Projection _, _ -> true
   | (Numeric | Addable | Collection _ | Bound _), _ -> !extra_admits kind t
 
 and unify (a : infer_ty) (b : infer_ty) : unit =
-  let a = repr a
-  and b = repr b in
+  let a = settle a
+  and b = settle b in
   match a, b with
   | IVar r1, IVar r2 when r1 == r2 -> ()
   | ( IVar ({ contents = Unbound (id1, k1) } as r1)
@@ -725,6 +763,7 @@ let instantiate ?(bound = []) (s : scheme) : infer_ty =
               fresh_with
                 (match kind with
                  | Collection elem -> Collection (walk elem)
+                 | Projection (owner, member) -> Projection (walk owner, member)
                  | other -> other)
             in
             Hashtbl.add types id copy;
@@ -979,7 +1018,7 @@ let rec resolve_row (r : infer_row) : row =
   List.sort compare (List.map (fun (l, args) -> l, List.map resolve args) labels)
 
 and resolve (t : infer_ty) : ty =
-  match repr t with
+  match settle t with
   | IInt -> Int
   | IFloat -> Float
   | IStr -> Str
@@ -1010,5 +1049,6 @@ and resolve (t : infer_ty) : ty =
       (* A bound is discharged by unification, so one still unbound here
          belongs to a definition nothing ever instantiated. *)
       | Bound _ -> Generic id
+      | Projection _ -> Generic id
       | Any -> Generic id)
   | IVar { contents = Link _ } -> assert false (* repr collapsed these *)

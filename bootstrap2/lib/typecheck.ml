@@ -406,12 +406,7 @@ let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
      becomes one too. The copy [Type_mono] makes has a concrete owner, and the
      lookup succeeds there. *)
   | Ast.Ty_assoc (owner, member) ->
-    let owner = infer_ty_of_annotation owner in
-    (match Option.bind (Types.infer_type_name owner) (fun name ->
-             Hashtbl.find_opt ctx_assoc (name, member))
-     with
-     | Some bound -> bound
-     | None -> Types.fresh ())
+    Types.project (infer_ty_of_annotation owner) member
   | Ast.Ty_fn (params, ret, row) ->
     Types.IFn
       ( List.map infer_ty_of_annotation params
@@ -939,13 +934,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
        (* An associated name stands for whatever the impl bound it to, which is
           not known from a bound alone, so it reads as a variable here and is
           pinned when the receiver's own impl is reached. *)
-       let projected name =
-         match Option.bind (Types.infer_type_name receiver.Ast.ann) (fun owner ->
-                 Hashtbl.find_opt ctx_assoc (owner, name))
-         with
-         | Some bound -> bound
-         | None -> Types.fresh ()
-       in
+       let projected name = Types.project receiver.Ast.ann name in
        let in_scope =
          ("Self", receiver.Ast.ann)
          :: List.map (fun name -> name, projected name) trait_body.Ast.tb_assoc
@@ -2278,6 +2267,9 @@ let admits registry kind (t : Types.infer_ty) =
          traits
      | None -> false)
   | Types.Any -> true
+  (* Nothing is known about what it stands for until its owner is, and by then
+     it is no longer a variable with this kind. *)
+  | Types.Projection _ -> true
   | Types.Addable | Types.Numeric ->
     (match Types.concrete t with
      | None -> false
@@ -2325,6 +2317,7 @@ let check ~registry (program : Ast.desugared_stmt list)
   =
   Types.reset ();
   Types.extra_admits := admits registry;
+  Types.assoc_binding := (fun owner member -> Hashtbl.find_opt ctx_assoc (owner, member));
   reset_effects ();
   let env = new_env None in
   declare_builtins env;
