@@ -1,0 +1,17 @@
+type Money { cents: int }
+
+impl PartialOrd for Money {
+    fn partial_cmp(self, rhs: Money) -> Option<Ordering> {
+        if (self.cents < rhs.cents) { return new Option::Some(new Ordering::Less); }
+        if (self.cents > rhs.cents) { return new Option::Some(new Ordering::Greater); }
+        return new Option::Some(new Ordering::Equal);
+    }
+}
+
+var a = new Money { cents: 100 };
+var b = new Money { cents: 250 };
+
+print(a < b);
+print(a > b);
+print(a <= b);
+print(b >= b);

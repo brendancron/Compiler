@@ -1,1 +1,1 @@
-[12:7] Expected int, float or string, got Foo.
+[12:7] Expected Add, got Foo.

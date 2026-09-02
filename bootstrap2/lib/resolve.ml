@@ -59,6 +59,16 @@ let accessor registry (target : Ast.resolved_expr) (index : Ast.resolved_expr) p
   | None ->
     fail target.Ast.span "Cannot index %s." (Types.string_of_ty target.Ast.ann)
 
+let ordering_test (op : Ast.binop) =
+  match op with
+  | Ast.Less -> Some "__is_less"
+  | Ast.Less_equal -> Some "__is_less_equal"
+  | Ast.Greater -> Some "__is_greater"
+  | Ast.Greater_equal -> Some "__is_greater_equal"
+  | _ -> None
+
+let ordering_result = Types.Sum ("Option", [ Types.Sum ("Ordering", []) ])
+
 let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
   let span = e.Ast.span
   and ann = e.Ast.ann in
@@ -71,10 +81,27 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
         { Ast.it = `Binop (op, target, expr registry v); span; ann }
       in
       `Assign (name, combined)
+    | `Unop (Ast.Neg, a) ->
+      let a = expr registry a in
+      (match Registry.find_unary registry Ast.Neg a.Ast.ann with
+       | Some { Registry.emit = Registry.Call name; _ } ->
+         `Call (fn_ref span name [ a ] ann, [ a ])
+       | Some { Registry.emit = Registry.Primitive; _ } | None -> `Unop (Ast.Neg, a))
     | `Binop (op, a, b) ->
       let a = expr registry a
       and b = expr registry b in
       (match Registry.find registry op a.Ast.ann b.Ast.ann with
+       (* The method answers with an `Ordering`; which comparison was written
+          decides how that becomes a bool. *)
+       | Some { Registry.emit = Registry.Call name; _ } when ordering_test op <> None ->
+         let compared : Ast.resolved_expr =
+           { Ast.it = `Call (fn_ref span name [ a; b ] ordering_result, [ a; b ])
+           ; span
+           ; ann = ordering_result
+           }
+         in
+         let test = Option.get (ordering_test op) in
+         `Call (fn_ref span test [ compared ] Types.Bool, [ compared ])
        (* One entry answers both, since a type that says what equal means has
           said what unequal means. *)
        | Some { Registry.emit = Registry.Call name; _ } when op = Ast.Not_equal ->

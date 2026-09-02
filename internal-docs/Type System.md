@@ -18,7 +18,7 @@ Types are needed downstream, not merely for error reporting. That decides severa
 |----------|----------|
 | Numerics | Split `int` / `float`. No implicit widening. |
 | Annotations | Optional everywhere; full inference. |
-| Numeric ambiguity | Constrained type variables, defaulting to `int`. |
+| Operator constraints | A bound on the operator's own trait, not a built-in kind. |
 | Polymorphism | Full let-polymorphism, with the value restriction. |
 | First cut | Typed AST end-to-end, interpreter runs on it. |
 | Desugar spans | Fixed before the checker is written. |
@@ -33,7 +33,7 @@ type infer_ty =
   | IFn of infer_ty list * infer_ty * infer_row
   | IVar of tv ref
 and tv = Unbound of int * kind | Link of infer_ty
-and kind = Any | Addable | Numeric | Collection of infer_ty | Bound of bound list | Projection of infer_ty * string
+and kind = Any | Collection of infer_ty | Bound of bound list | Projection of infer_ty * string
 
 (* After inference: fully resolved. No unification variable can appear. *)
 type ty =
@@ -88,16 +88,16 @@ Two traversals after the hoist, because Hindley–Milner cannot finish a node's 
 
 The hoist pass also produces the function signature table (`(string, ty) Hashtbl.t`) that codegen wants for emitting declarations before any body is compiled.
 
-## Numeric constraints and defaulting
+## Operator constraints
 
-Two numeric types plus annotation-free inference makes `fn double(x) { return x + x; }` ambiguous — nothing pins `x` to `int` or `float`. The resolution is a single built-in constraint rather than a general type-class mechanism:
+Two numeric types plus annotation-free inference makes `fn double(x) { return x + x; }` ambiguous — nothing pins `x` to `int` or `float`. It resolves through the same traits a written bound would name, so there is no separate mechanism for operators:
 
 - A fresh variable is `Unbound (id, Any)`.
-- An arithmetic operator unifies its operands with each other and marks the result `Numeric`; `+` marks it `Addable`, which admits `Str` too.
-- Unifying a `Numeric` variable with `Int` or `Float` succeeds; with `Str`, `Bool`, `Unit`, or a function type it fails with "Expected int or float, got string".
-- Unifying two variables takes the stronger constraint.
-- At `resolve` time, a still-unbound `Numeric` or `Addable` variable **defaults to `Int`**. A still-unbound `Any` variable becomes `Generic`, since it is polymorphic rather than ambiguous.
-- A variable introduced by a **written** type parameter — `fn f<T>`, `impl Box<T>` — is registered in `Types.declared_params` and never defaults, however constrained. The author said the definition is generic in `T`; defaulting it to `int` because the body adds would contradict them.
+- An operator unifies its operands with each other and bounds the result by the operator's own trait — `Add`, `PartialOrd`, `Neg`. Since the operands were just unified, the bound also says `Output = T`.
+- Unifying that variable with a type having no such impl fails with "Expected Add, got Foo", which names what to write.
+- Unifying two variables takes the stronger constraint; a projection wins over any of them, being the only kind that says where a type comes from.
+- At `resolve` time a still-unbound variable becomes `Generic`, since it is polymorphic rather than ambiguous.
+- A variable introduced by a **written** type parameter — `fn f<T>`, `impl Box<T>` — is registered in `Types.declared_params`, which keeps it the survivor when two variables merge so a recursive occurrence still quantifies over the identity the author gave it.
 
 Forgetting that registration is invisible for a long time. The binding still generalizes, so the definition type checks and so does every call; only the *body's* annotations are wrong, and they are wrong in a way that looks right at the first instantiation. `impl` parameters were created with a bare `fresh ()` for exactly this reason, and the symptom was a `Pair<Vec2>` whose method had been resolved at `int` — passing the checker and failing in the interpreter.
 

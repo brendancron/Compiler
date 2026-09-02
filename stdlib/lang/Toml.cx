@@ -1,4 +1,3 @@
-import { Option } from "Option";
 
 // Enough TOML for a configuration file: [sections], string, bool and int
 // values, and one level of inline table. No arrays, no multi-line strings,

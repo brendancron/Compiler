@@ -32,6 +32,8 @@ type t =
        does not name a function. *)
     entries : (string * string, string) Hashtbl.t
   ; exact : (Ast.binop * Types.ty * Types.ty, entry) Hashtbl.t
+  ; (* `-x`. One operand, so it cannot share [exact]'s key. *)
+    unary : (Ast.unop * Types.ty, entry) Hashtbl.t
   ; (* Any two operands of the same type, which cannot be enumerated. *)
     homogeneous : (Ast.binop, entry) Hashtbl.t
   }
@@ -43,6 +45,7 @@ let create () =
   ; associated = Hashtbl.create 8
   ; entries = Hashtbl.create 32
   ; exact = Hashtbl.create 64
+  ; unary = Hashtbl.create 8
   ; homogeneous = Hashtbl.create 8
   }
 
@@ -113,6 +116,8 @@ let container_element t name (target : Types.infer_ty) =
      | _ -> None)
 
 let register t op lhs rhs entry = Hashtbl.replace t.exact (op, lhs, rhs) entry
+let register_unary t op operand entry = Hashtbl.replace t.unary (op, operand) entry
+let find_unary t op operand = Hashtbl.find_opt t.unary (op, operand)
 
 let register_homogeneous t op entry = Hashtbl.replace t.homogeneous op entry
 
@@ -127,13 +132,6 @@ let result_of entry operand =
   match entry.result with
   | Some ty -> ty
   | None -> operand
-
-let constraint_of (op : Ast.binop) =
-  match op with
-  | Ast.Add -> Types.Addable
-  | Ast.Sub | Ast.Mul | Ast.Div | Ast.Mod -> Types.Numeric
-  | Ast.Less | Ast.Less_equal | Ast.Greater | Ast.Greater_equal -> Types.Numeric
-  | Ast.Equal | Ast.Not_equal -> Types.Any
 
 let unresolved_result (op : Ast.binop) operand =
   match op with
@@ -166,4 +164,6 @@ let builtins () =
   List.iter
     (fun op -> register_homogeneous t op (prim Types.Bool))
     [ Ast.Equal; Ast.Not_equal ];
+  register_unary t Ast.Neg Types.Int (prim Types.Int);
+  register_unary t Ast.Neg Types.Float (prim Types.Float);
   t

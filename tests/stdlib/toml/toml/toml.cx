@@ -1,5 +1,4 @@
 import "../../../../stdlib/lang/Toml";
-import { Option } from "../../../../stdlib/lang/Option";
 
 var src = "[alpha]\nfoo = \"hello\"\nbar = true\nbaz = 42\n\n[beta]\nx = { key = \"val\", flag = false }\ny = \"world\"\n";
 

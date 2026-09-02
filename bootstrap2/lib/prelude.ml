@@ -51,6 +51,49 @@ trait Eq {
     fn eq(self, rhs: Self) -> bool;
 }
 
+type Ordering { Less, Equal, Greater }
+
+// One method answers all four comparisons. `None` is two values with no order
+// between them, which is what a float NaN is.
+trait PartialOrd {
+    fn partial_cmp(self, rhs: Self) -> Option<Ordering>;
+}
+
+// `Resolve` lowers `a < b` to `__is_less(partial_cmp(a, b))`. A match is a
+// statement, so the Ordering cannot become a bool where the operator stood.
+fn __is_less(o: Option<Ordering>) -> bool {
+    match o {
+        Option::Some(c) => { match c { Ordering::Less => { return true; } _ => { return false; } } }
+        Option::None => { return false; }
+    }
+}
+
+fn __is_less_equal(o: Option<Ordering>) -> bool {
+    match o {
+        Option::Some(c) => { match c { Ordering::Greater => { return false; } _ => { return true; } } }
+        Option::None => { return false; }
+    }
+}
+
+fn __is_greater(o: Option<Ordering>) -> bool {
+    match o {
+        Option::Some(c) => { match c { Ordering::Greater => { return true; } _ => { return false; } } }
+        Option::None => { return false; }
+    }
+}
+
+fn __is_greater_equal(o: Option<Ordering>) -> bool {
+    match o {
+        Option::Some(c) => { match c { Ordering::Less => { return false; } _ => { return true; } } }
+        Option::None => { return false; }
+    }
+}
+
+trait Neg {
+    type Output;
+    fn neg(self) -> Output;
+}
+
 trait Index<Idx> {
     type Output;
     fn get(self, at: Idx) -> Output;
@@ -64,6 +107,13 @@ trait IndexSet<Idx>: Index<Idx> {
 // type it was annotated with says what to build from it.
 trait FromArray<T> {
     fn from_array(items: Array<T>) -> Self;
+}
+
+// In the prelude rather than the stdlib because the language itself hands one
+// back: `partial_cmp` answers `None` for two values with no order between them.
+type Option<T> {
+    Some(T),
+    None
 }
 
 // What `a[i:j]` puts between the brackets. The four shapes are four variants

@@ -171,7 +171,7 @@ impl FromArray<T> for Ring<T> {
 
 Building from a literal and reading an element are separate traits, though both are written `[…]`: one takes the elements and yields the container, the other takes the container and yields an element. The entry is identified by what it builds, so two containers over `Array<T>` do not collide.
 
-See [Collection Literals](Collection%20Literals.md) for how that one works in detail. Numeric literals already behave this way — `1` is an `int` or a `float` depending on context, defaulting to `int`.
+See [Collection Literals](Collection%20Literals.md) for how that one works in detail. A numeric literal does not behave this way: `1` is an `int`, and `var x: float = 1;` is a type error rather than a widening.
 
 String literals stay simple: a string literal is a `string`. Making them target-typed would attach a constraint to nearly every literal in a program, and it is deferred rather than decided.
 
