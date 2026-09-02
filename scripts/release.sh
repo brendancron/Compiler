@@ -29,8 +29,8 @@ git rev-parse -q --verify "refs/tags/$version" >/dev/null && die "tag $version a
 # The tag has to name a commit the remote already has, or the release points at
 # something nobody can check out.
 branch=$(git rev-parse --abbrev-ref HEAD)
-git fetch -q origin "$branch"
-[ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/$branch")" ] \
+git fetch -q origin "$branch" 2>/dev/null || die "origin has no branch '$branch' — push it first"
+[ "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)" ] \
   || die "HEAD and origin/$branch differ — push or pull first"
 
 echo "==> Testing"
