@@ -368,10 +368,18 @@ type blocker =
 (* The suite asserts each still fails, so one that starts working is reported
    rather than sitting unnoticed. *)
 let expected_failing : (string * blocker) list =
-    (* An unwind destroys any handler frame it passes, including a `ctl` arm
-       with statements left after its `resume`. Delivering it through the
-       continuation is the monadic-yield shape we depart from. *)
-  [ "tests/effects/abort_under_conversion", Waiting "an abort that spares an arm's sequel"
+    (* One bug, twice. A continuation re-enters the scopes it was captured
+       inside without re-establishing what entering them installed: the abort
+       catcher here, the armed `defer` below.
+
+       The catcher is on the stack, but beneath the arm that resumed, so the
+       unwind passes through the arm and takes whatever followed its `resume`
+       with it. Wrapping continuations in their enclosing scopes does not fix
+       it — the suspension is inside a function the `run` block called, so the
+       scope encloses it dynamically and nothing lexical can see it. The fix is
+       for a continuation to capture the active scope stack and restore it when
+       invoked, which is a change to how [Interp] represents one. *)
+  [ "tests/effects/abort_under_conversion", Waiting "a continuation that restores its scopes"
     (* Unplanned *)
   ; "tests/core/for_tuple/for_tuple", Unplanned
     (* Parked — native compilation, deliberately out of scope *)
@@ -386,10 +394,11 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m8/gadt", Parked
     (* Unplanned *)
   ; "tests/effects/async/async", Unplanned
-    (* A resumption re-enters the scope without re-executing the `defer`
-       that set the flag, and the pass marks no such re-entry point. *)
+    (* The same missing re-entry, and a semantics to settle before fixing it:
+       a resumption re-runs only what followed the suspension, so a `defer`
+       paired with an acquisition that ran once would release it per pass. *)
   ; ( "tests/core/defer/defer_multishot_abort"
-    , Waiting "a re-entered scope re-arming its deferred statements" )
+    , Waiting "a continuation that restores its scopes" )
     (* Operators resolved through an impl instead of the operator registry. *)
     (* A tuple has no declaration to derive from. *)
   ]
