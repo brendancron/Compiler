@@ -253,6 +253,27 @@ type receiver =
   | Owner of string
   | Via_trait of string
 
+(* A trait and everything it requires, so a bound reaches an inherited method.
+   [seen] guards a cycle, which nothing rejects yet. *)
+let rec trait_closure ?(seen = []) (trait : string) : string list =
+  if List.mem trait seen
+  then seen
+  else (
+    let seen = trait :: seen in
+    match Hashtbl.find_opt ctx_traits trait with
+    | None -> seen
+    | Some (_, body) ->
+      List.fold_left
+        (fun seen (super, _) -> trait_closure ~seen super)
+        seen
+        body.Ast.tb_super)
+
+let declares trait name =
+  match Hashtbl.find_opt ctx_traits trait with
+  | None -> false
+  | Some (_, body) ->
+    List.exists (fun (m : Ast.method_sig) -> String.equal m.Ast.ms_name name) body.Ast.tb_methods
+
 let listed names =
   match List.rev names with
   | [] -> ""
@@ -270,9 +291,15 @@ let receiver_of span registry (receiver : (_, Types.infer_ty) Ast.node) name ele
   | None ->
     (match Types.repr receiver.Ast.ann with
      | Types.IVar { contents = Types.Unbound (_, Types.Bound traits) } ->
-       (match traits with
-        | (trait, _) :: _ -> Via_trait trait
-        | [] -> fail span "Cannot call '%s': the receiver's type is not known here." name)
+       (* The bound may name several traits and each may require others, so the
+          one that answers is the one declaring the method rather than the one
+          written first. *)
+       let reachable = List.concat_map (fun (trait, _) -> trait_closure trait) traits in
+       (match List.find_opt (fun trait -> declares trait name) reachable, traits with
+        | Some trait, _ -> Via_trait trait
+        | None, (trait, _) :: _ -> Via_trait trait
+        | None, [] ->
+          fail span "Cannot call '%s': the receiver's type is not known here." name)
      | Types.IVar { contents = Types.Unbound (_, Types.Collection elem) } ->
        let holds owner =
          String.equal owner Types.array_name || Registry.container registry owner <> None
@@ -920,7 +947,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
        let trait_params, trait_body =
          Option.value
            (Hashtbl.find_opt ctx_traits trait)
-           ~default:([], { Ast.tb_assoc = []; tb_methods = [] })
+           ~default:([], { Ast.tb_super = []; tb_assoc = []; tb_methods = [] })
        in
        let trait_methods = trait_body.Ast.tb_methods in
        (* `Self` is the type the bound stands for, and the trait's own
@@ -1439,6 +1466,28 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
           (fun (t, args) ->
             Hashtbl.add ctx_impls (type_name, t) (List.map infer_ty_of_annotation args))
           trait
+      | _ -> ())
+    body;
+  (* A second pass: an impl may satisfy a supertrait further down the file, so
+     nothing can be concluded until every one has been registered. *)
+  List.iter
+    (fun (s : Ast.desugared_stmt) ->
+      match s.Ast.it with
+      | `Impl_decl (Some (trait, _), type_name, _, _) ->
+        (match Hashtbl.find_opt ctx_traits trait with
+         | None -> ()
+         | Some (_, body) ->
+           List.iter
+             (fun (super, _) ->
+               if not (Hashtbl.mem ctx_impls (type_name, super))
+               then
+                 fail
+                   s.Ast.span
+                   "'%s' for '%s' is missing the supertrait '%s'."
+                   trait
+                   type_name
+                   super)
+             body.Ast.tb_super)
       | _ -> ())
     body
 

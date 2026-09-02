@@ -198,9 +198,12 @@ type method_sig =
   ; ms_signature : signature
   }
 
-(* A trait declares the names; an impl binds each to a type. *)
+(* A trait declares the names; an impl binds each to a type. [tb_super] is a
+   bound on `Self`: implementing this one means implementing those too, and a
+   bound on it reaches their methods. *)
 type trait_body =
-  { tb_assoc : string list
+  { tb_super : (string * type_expr list) list
+  ; tb_assoc : string list
   ; tb_methods : method_sig list
   }
 

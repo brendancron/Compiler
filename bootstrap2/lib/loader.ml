@@ -289,7 +289,11 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
           ( resolve_type name
           , params
           , { body with
-              Ast.tb_methods =
+              Ast.tb_super =
+                List.map
+                  (fun (super, args) -> resolve_type super, List.map type_expr args)
+                  body.Ast.tb_super
+            ; tb_methods =
                 List.map
                   (fun (m : Ast.method_sig) ->
                     { m with

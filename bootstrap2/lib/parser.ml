@@ -952,6 +952,19 @@ and op_decl s sp : Ast.stmt =
 and trait_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected a trait name." in
   let params = type_params s in
+  let supers =
+    match matches s [ Token.Colon ] with
+    | None -> []
+    | Some _ ->
+      let rec loop acc =
+        let super = consume_identifier s "Expected a trait name after ':'." in
+        let acc = (super, type_arguments s) :: acc in
+        match matches s [ Token.Comma ] with
+        | Some _ -> loop acc
+        | None -> List.rev acc
+      in
+      loop []
+  in
   ignore (consume s Token.Left_brace "Expected '{' after the trait name.");
   let rec loop assoc acc =
     if check s Token.Right_brace || is_at_end s
@@ -977,7 +990,10 @@ and trait_decl s sp : Ast.stmt =
   in
   let assoc, methods = loop [] [] in
   ignore (consume s Token.Right_brace "Expected '}' after the trait body.");
-  Ast.at sp (`Trait_decl (name, params, { Ast.tb_assoc = assoc; tb_methods = methods }))
+  Ast.at
+    sp
+    (`Trait_decl
+      (name, params, { Ast.tb_super = supers; tb_assoc = assoc; tb_methods = methods }))
 
 and impl_decl s sp : Ast.stmt =
   let first = consume_identifier s "Expected a type or trait name after 'impl'." in

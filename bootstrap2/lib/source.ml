@@ -270,11 +270,27 @@ and stmt depth (s : Ast.stmt) : string =
   | `Trait_decl (name, params, sigs) ->
     line
       (Printf.sprintf
-         "trait %s%s {"
+         "trait %s%s%s {"
          name
          (match params with
           | [] -> ""
-          | ps -> Printf.sprintf "<%s>" (String.concat ", " ps)))
+          | ps -> Printf.sprintf "<%s>" (String.concat ", " ps))
+         (match sigs.Ast.tb_super with
+          | [] -> ""
+          | supers ->
+            ": "
+            ^ String.concat
+                ", "
+                (List.map
+                   (fun (super, args) ->
+                     match args with
+                     | [] -> super
+                     | args ->
+                       Printf.sprintf
+                         "%s<%s>"
+                         super
+                         (String.concat ", " (List.map type_expr args)))
+                   supers)))
     ^ String.concat
         ""
         (List.map
