@@ -159,6 +159,8 @@ and stmt depth (s : Ast.stmt) : string =
   let braced head body = line (Printf.sprintf "%s {" head) ^ block (depth + 1) body ^ line "}" in
   match s.Ast.it with
   | `Expr e -> line (expr e ^ ";")
+  | `Var_tuple (names, init) ->
+    line (Printf.sprintf "var (%s) = %s;" (String.concat ", " names) (expr init))
   | `Var_decl (name, ty, init) ->
     line
       (Printf.sprintf
@@ -192,8 +194,14 @@ and stmt depth (s : Ast.stmt) : string =
           | Some st -> expr st))
     ^ nested depth body
     ^ line "}"
-  | `For_in (name, iterable, body) ->
-    line (Printf.sprintf "for (%s in %s) {" name (expr iterable))
+  | `For_in (names, iterable, body) ->
+    line
+      (Printf.sprintf
+         "for (%s in %s) {"
+         (match names with
+          | [ only ] -> only
+          | names -> "(" ^ String.concat ", " names ^ ")")
+         (expr iterable))
     ^ nested depth body
     ^ line "}"
   | `Fn (name, params, sg, body) ->

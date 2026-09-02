@@ -270,9 +270,16 @@ type 'e reflect = [ `Typeof of 'e ]
 
 type 'e quote = [ `Code of 'e ]
 
+(* The names a binder introduces. More than one takes a tuple apart. *)
+type binder = string list
+
 type ('e, 's) stmts =
   [ `Expr of 'e
   | `Var_decl of string * type_expr option * 'e option
+  (* `var (a, b) = pair;`. One statement binding several names, because
+     expanding it into several would need a block, and a block would scope them
+     away from what follows. *)
+  | `Var_tuple of binder * 'e
   | `Block of 's list
   | `If of 'e * 's * 's option
   | `While of 'e * 's
@@ -297,7 +304,7 @@ type 's aborts =
 
 type ('e, 's) loops =
   [ `For of 's option * 'e option * 'e option * 's
-  | `For_in of string * 'e * 's
+  | `For_in of binder * 'e * 's
   ]
 
 type expr = (expr_kind, unit) node
@@ -638,6 +645,7 @@ let map_stmts (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) stmts)
   match s with
   | `Expr e -> `Expr (fe e)
   | `Var_decl (name, ty, init) -> `Var_decl (name, ty, Option.map fe init)
+  | `Var_tuple (names, init) -> `Var_tuple (names, fe init)
   | `Block body -> `Block (List.map fs body)
   | `If (c, t, e) -> `If (fe c, fs t, Option.map fs e)
   | `While (c, body) -> `While (fe c, fs body)
@@ -652,7 +660,7 @@ let map_loops (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) loops)
   match s with
   | `For (init, cond, step, body) ->
     `For (Option.map fs init, Option.map fe cond, Option.map fe step, fs body)
-  | `For_in (name, iterable, body) -> `For_in (name, fe iterable, fs body)
+  | `For_in (names, iterable, body) -> `For_in (names, fe iterable, fs body)
 
 let map_arm (fs : 's1 -> 's2) (a : 's1 arm) : 's2 arm =
   { arm_name = a.arm_name

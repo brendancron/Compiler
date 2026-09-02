@@ -43,7 +43,7 @@ let children (s : desugared_stmt) : desugared_stmt list =
   | `Run (body, handlers) ->
     body @ List.concat_map (fun h -> List.concat_map (fun a -> a.arm_body) h.arms) handlers
   | `Impl_decl (_, _, _, body) -> List.concat_map (fun m -> m.md_body) body.ib_methods
-  | `Expr _ | `Var_decl _ | `Return _ | `Effect_decl _ | `Resume _ | `Type_decl _
+  | `Expr _ | `Var_decl _ | `Var_tuple _ | `Return _ | `Effect_decl _ | `Resume _ | `Type_decl _
   | `Trait_decl _ -> []
 
 let rec note_traits (s : desugared_stmt) =

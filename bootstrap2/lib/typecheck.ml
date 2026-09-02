@@ -608,6 +608,7 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   in
   match s.Ast.it with
   | `Expr e -> assigned_in_expr e acc
+  | `Var_tuple (_, init) -> assigned_in_expr init acc
   | `Defer inner -> assigned_in_stmt inner acc
   | `Var_decl (_, _, init) -> opt assigned_in_expr init acc
   | `Block body | `Fn (_, _, _, body) ->
@@ -1765,6 +1766,14 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
   let node it : checked_stmt = Ast.annotated span Types.IUnit it in
   match s.Ast.it with
   | `Expr e -> node (`Expr (infer_expr env ctx e))
+  (* The arity is written, so the tuple it takes apart is known before the
+     initializer is looked at — an annotation would say nothing more. *)
+  | `Var_tuple (names, init) ->
+    let init = infer_expr env ctx init in
+    let parts = List.map (fun _ -> Types.fresh ()) names in
+    unify_at init.Ast.span (Types.ITuple parts) init.Ast.ann;
+    List.iter2 (fun name part -> bind env name (Types.mono part)) names parts;
+    node (`Var_tuple (names, init))
   | `Var_decl (name, annotation, init) ->
     let declared = annotated_or_fresh annotation in
     let init =

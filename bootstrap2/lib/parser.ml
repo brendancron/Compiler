@@ -776,6 +776,14 @@ and fn_decl
   Ast.at sp (`Fn (name, params, signature, block s))
 
 and var_decl s sp : Ast.stmt =
+  if check s Token.Left_paren
+  then (
+    let names = binder s "Expected variable name." in
+    ignore (consume s Token.Equal "A destructuring 'var' must be initialized.");
+    let init = expression s in
+    ignore (consume s Token.Semicolon "Expected ';' after variable declaration.");
+    Ast.at sp (`Var_tuple (names, init)))
+  else (
   let name = consume_identifier s "Expected variable name." in
   let ty = type_annotation s in
   let init =
@@ -784,7 +792,36 @@ and var_decl s sp : Ast.stmt =
     | None -> None
   in
   ignore (consume s Token.Semicolon "Expected ';' after variable declaration.");
-  Ast.at sp (`Var_decl (name, ty, init))
+  Ast.at sp (`Var_decl (name, ty, init)))
+
+(* `(a, b)` takes a tuple apart where a name would stand. Only names inside:
+   a binder has to bind, so a nested pattern that could fail to match is not
+   one — `Some(x)` belongs in a `match`. *)
+and binder s message : Ast.binder =
+  match matches s [ Token.Left_paren ] with
+  | None -> [ consume_identifier s message ]
+  | Some _ ->
+    let names = comma_separated s (fun s -> consume_identifier s message) in
+    ignore (consume s Token.Right_paren "Expected ')' after the names.");
+    if List.length names < 2
+    then raise (error s (peek s) "A destructuring binder takes two names or more.");
+    names
+
+(* `(a, b) in` rather than a parenthesised expression. *)
+and binder_ahead s =
+  let rec look at =
+    match (peek_at s at).Token.token_type with
+    | Token.Identifier _ ->
+      (match (peek_at s (at + 1)).Token.token_type with
+       | Token.Comma -> look (at + 2)
+       | Token.Right_paren ->
+         (match (peek_at s (at + 2)).Token.token_type with
+          | Token.Identifier "in" -> true
+          | _ -> false)
+       | _ -> false)
+    | _ -> false
+  in
+  look 1
 
 (* Assumes the '{' has been consumed; consumes the closing '}'. *)
 and block s : Ast.stmt list =
@@ -861,11 +898,12 @@ and for_stmt s sp : Ast.stmt =
     &&
     match (peek s).Token.token_type, s.tokens.(s.current + 1).Token.token_type with
     | Token.Identifier _, Token.Identifier "in" -> true
+    | Token.Left_paren, Token.Identifier _ -> binder_ahead s
     | _ -> false
   in
   if iterates
   then (
-    let name = consume_identifier s "Expected a loop variable." in
+    let name = binder s "Expected a loop variable." in
     ignore (advance s);
     let iterable = expression s in
     ignore (consume s Token.Right_paren "Expected ')' after the iterable.");

@@ -323,6 +323,7 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
         `Block (List.map (stmt inner) body)
       | `Var_decl (name, ty, init) ->
         `Var_decl (name, Option.map type_expr ty, Option.map (expr locals) init)
+      | `Var_tuple (names, init) -> `Var_tuple (names, expr locals init)
       | `Import _ -> `Block []
       | `Meta body -> `Meta (List.map (stmt locals) body)
       | `Gen inner -> `Gen (stmt locals inner)
@@ -330,8 +331,9 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
         `Meta_fn (name, List.map param params, signature sg, List.map (stmt locals) body)
       | #Ast.stmts as st -> (Ast.map_stmts (expr locals) (stmt locals) st :> Ast.stmt_kind)
       (* A loop variable binds for the body alone, so not via [bound_by]. *)
-      | `For_in (name, over, body) ->
-        `For_in (name, expr locals over, stmt (S.add name locals) body)
+      | `For_in (names, over, body) ->
+        `For_in
+          (names, expr locals over, stmt (List.fold_left (Fun.flip S.add) locals names) body)
       | `For (init, cond, step, body) ->
         let inner =
           match init with

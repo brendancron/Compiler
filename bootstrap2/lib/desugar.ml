@@ -23,6 +23,20 @@ let fresh prefix =
   incr counter;
   generated [ prefix; string_of_int !counter ]
 
+(* One name binds the value; several take it apart by position. The arity is
+   written down, so this needs no type — which is what keeps destructuring out
+   of the checker entirely. *)
+let bound span (names : binder) (value : expr) : stmt list =
+  let decl n init : stmt = { it = `Var_decl (n, None, Some init); span; ann = () } in
+  match names with
+  | [ only ] -> [ decl only value ]
+  | names ->
+    let whole = fresh "tuple" in
+    decl whole value
+    :: List.mapi
+         (fun index n -> decl n (at span (`Tuple_get (at span (`Var whole), index))))
+         names
+
 let rec expr (e : expr) : desugared_expr =
   let sp = e.span in
   let it : desugared_expr_kind =
@@ -75,7 +89,7 @@ and stmt (s : stmt) : desugared_stmt =
        The sequence is bound once so an expression is evaluated once, and `len`
        and `[]` are ordinary source so the checker resolves them for whatever
        the sequence turns out to be. *)
-    | `For_in (name, iterable, body) ->
+    | `For_in (names, iterable, body) ->
       let sp = iterable.span in
       let seq = fresh "seq"
       and index = fresh "i" in
@@ -92,10 +106,8 @@ and stmt (s : stmt) : desugared_stmt =
       let inner : stmt =
         { it =
             `Block
-              [ var_decl_of body.span name (at body.span (`Index (read seq, read index)))
-              ; body
-              ; step
-              ]
+              (bound body.span names (at body.span (`Index (read seq, read index)))
+               @ [ body; step ])
         ; span = body.span
         ; ann = ()
         }
@@ -184,7 +196,7 @@ let program (p : program) : (desugared_stmt list, error) result =
             | Named _ -> [])
           handlers
     | `Impl_decl (_, _, _, body) -> List.concat_map (fun m -> m.md_body) body.ib_methods
-    | `Expr _ | `Var_decl _ | `Return _ | `Import _ | `Derive _ | `Effect_decl _
+    | `Expr _ | `Var_decl _ | `Var_tuple _ | `Return _ | `Import _ | `Derive _ | `Effect_decl _
     | `Resume _ | `Type_decl _ | `Trait_decl _ -> []
   in
   List.iter collect p;

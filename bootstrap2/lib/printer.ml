@@ -157,6 +157,8 @@ let rec write_stmt buf indent (s : Ast.stmt) =
       | Ast.Wildcard dir -> Printf.sprintf "%S/*" dir
     in
     line "%s(import %s)\n" pad shown
+  | `Var_tuple (names, init) ->
+    line "%s(var (%s) %s)\n" pad (String.concat " " names) (string_of_expr init)
   | `Var_decl (name, ty, init) ->
     line "%s(var %s%s %s)\n" pad name (annotation ty) (opt_expr init)
   | `Block body -> nested "block" body
@@ -179,8 +181,10 @@ let rec write_stmt buf indent (s : Ast.stmt) =
           | Some labels -> string_of_row labels))
       body
   | `Return value -> line "%s(return %s)\n" pad (opt_expr value)
-  | `For_in (name, iterable, body) ->
-    nested (Printf.sprintf "for %s in %s" name (string_of_expr iterable)) [ body ]
+  | `For_in (names, iterable, body) ->
+    nested
+      (Printf.sprintf "for %s in %s" (String.concat ", " names) (string_of_expr iterable))
+      [ body ]
   | `For (init, cond, step, body) ->
     line "%s(for %s %s\n" pad (opt_expr cond) (opt_expr step);
     List.iter (write_stmt buf (indent + 1)) (Option.to_list init @ [ body ]);
@@ -382,6 +386,8 @@ let rec write_typed_stmt buf indent (s : Ast.typed_stmt) =
   in
   match s.Ast.it with
   | `Expr e -> line "%s%s\n" pad (string_of_typed_expr e)
+  | `Var_tuple (names, init) ->
+    line "%s(var (%s) %s)\n" pad (String.concat " " names) (string_of_typed_expr init)
   | `Defer s -> line "%s(defer …)\n" pad; ignore s
   | `Var_decl (name, _, init) -> line "%s(var %s %s)\n" pad name (opt_typed_expr init)
   | `Block body -> nested "block" body

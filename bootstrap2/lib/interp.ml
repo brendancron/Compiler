@@ -231,6 +231,11 @@ and exec env (s : Ast.cps_stmt) : unit =
   let span = s.Ast.span in
   match s.Ast.it with
   | `Expr e -> ignore (eval env e)
+  | `Var_tuple (names, init) ->
+    (match eval env init with
+     | Value.Tuple items when List.length items = List.length names ->
+       List.iter2 (fun name v -> define env name v) names items
+     | v -> Value.fail s.Ast.span "Cannot take %s apart." (type_name v))
   (* Nothing catches this in between: a function's own handler is for
      `return`. *)
   | `Scope (scope, body, on_abort) ->

@@ -81,6 +81,8 @@ let cases =
   ; "tests/core/tuples/tuple_basic"
   ; "tests/reflection/typeof_tuple"
   ; "tests/core/tuples/typed"
+  ; "tests/core/tuples/destructure"
+  ; "tests/core/for_tuple/for_tuple"
   ; "tests/core/records/structural"
   ; "tests/reflection/typeof_record"
   ; "tests/reflection/shape_product"
@@ -373,7 +375,6 @@ let expected_failing : (string * blocker) list =
        continuation is the monadic-yield shape we depart from. *)
   [ "tests/effects/abort_under_conversion", Waiting "an abort that spares an arm's sequel"
     (* Unplanned *)
-  ; "tests/core/for_tuple/for_tuple", Unplanned
     (* Parked — native compilation, deliberately out of scope *)
   ; "tests/compile/m0/m0", Parked
   ; "tests/compile/m1/fib", Parked
