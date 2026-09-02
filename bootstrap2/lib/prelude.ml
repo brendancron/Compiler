@@ -45,6 +45,22 @@ trait Rem<Rhs> {
     fn rem(self, rhs: Rhs) -> Output;
 }
 
+// Both operands are the same type and the answer is always a bool, so this one
+// takes no argument and binds nothing. `!=` is the negation of `eq` rather than
+// an entry of its own.
+trait Eq {
+    fn eq(self, rhs: Self) -> bool;
+}
+
+trait Index<Idx> {
+    type Output;
+    fn get(self, at: Idx) -> Output;
+}
+
+trait IndexSet<Idx>: Index<Idx> {
+    fn set(self, at: Idx, v: Output) -> Output;
+}
+
 // What `a[i:j]` puts between the brackets. The four shapes are four variants
 // rather than one pair with sentinels, so a missing bound is missing rather
 // than encoded.

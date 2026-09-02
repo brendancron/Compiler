@@ -134,6 +134,10 @@ let ctx_associated : (string * string, unit) Hashtbl.t = Hashtbl.create 8
 (* A trait's parameters, its associated type names, and its signatures. *)
 let ctx_traits : (string, string list * Ast.trait_body) Hashtbl.t = Hashtbl.create 8
 
+(* Where each trait was declared, so a program's own declaration can be told
+   from the prelude's and allowed to replace it. *)
+let ctx_trait_spans : (string, Ast.span) Hashtbl.t = Hashtbl.create 8
+
 (* What an impl bound each associated name to, keyed by the implementing type.
    The trait is not part of the key: two traits naming the same associated type
    for one type would collide, which no program yet does. *)
@@ -164,6 +168,7 @@ let scoped_declarations f =
   in
   let types = snapshot ctx_types
   and traits = snapshot ctx_traits
+  and trait_spans = snapshot ctx_trait_spans
   and methods = snapshot ctx_methods
   and impls = snapshot ctx_impls
   and associated = snapshot ctx_associated
@@ -176,6 +181,7 @@ let scoped_declarations f =
     ~finally:(fun () ->
       restore ctx_types types;
       restore ctx_traits traits;
+      restore ctx_trait_spans trait_spans;
       restore ctx_methods methods;
       restore ctx_impls impls;
       restore ctx_associated associated;
@@ -193,6 +199,7 @@ let reset_effects () =
   Hashtbl.reset ctx_types;
   Hashtbl.reset ctx_effect_params;
   Hashtbl.reset ctx_traits;
+  Hashtbl.reset ctx_trait_spans;
   Hashtbl.reset ctx_associated;
   Hashtbl.reset ctx_assoc;
   Hashtbl.reset ctx_impls;
@@ -668,7 +675,15 @@ let element_of registry (target : checked_expr) =
      | Some (name, elem)
        when String.equal name Types.array_name || Registry.is_indexed registry name ->
        elem
-     | _ -> fail target.Ast.span "Cannot index %s." (Types.string_of_ty other))
+     | _ ->
+       (* A type that is not a container holds no element to read off its own
+          arguments, so what indexing answers with is what its impl bound. *)
+       (match Types.type_name other with
+        | Some name when Registry.is_indexed registry name ->
+          (match Hashtbl.find_opt ctx_assoc (name, "Output") with
+           | Some elem -> elem
+           | None -> fail target.Ast.span "Cannot index %s." (Types.string_of_ty other))
+        | _ -> fail target.Ast.span "Cannot index %s." (Types.string_of_ty other)))
   | None ->
     let elem = Types.fresh () in
     unify_at target.Ast.span (Types.fresh_with (Types.Collection elem)) target.Ast.ann;
@@ -1400,8 +1415,15 @@ and declare_traits (body : Ast.desugared_stmt list) =
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
       | `Trait_decl (name, params, trait_body) ->
-        if Hashtbl.mem ctx_traits name
-        then fail s.Ast.span "Trait '%s' is already declared." name;
+        (* A program declaring a trait the prelude also declares gets its own,
+           the way one declaring its own `print` does. Two declarations in the
+           program itself are still a mistake. *)
+        let from_prelude (span : Ast.span) = String.equal span.Ast.file Prelude.file in
+        (match Hashtbl.find_opt ctx_trait_spans name with
+         | Some declared when from_prelude declared && not (from_prelude s.Ast.span) -> ()
+         | Some _ -> fail s.Ast.span "Trait '%s' is already declared." name
+         | None -> ());
+        Hashtbl.replace ctx_trait_spans name s.Ast.span;
         Hashtbl.replace ctx_traits name (params, trait_body)
       | _ -> ())
     body
@@ -1480,11 +1502,57 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
            declaration writes to, so the lowering in [Resolve] is unchanged. *)
         Option.iter
           (fun (t, args) ->
+            let entry_name method_ = Ast.method_name type_name method_ in
+            let named what ty =
+              match Types.type_name ty with
+              | Some name -> name
+              | None -> fail span "An operator impl's %s must be a named type." what
+            in
+            let self_concrete () =
+              match Types.concrete (self_ty span type_name params) with
+              | Some ty -> ty
+              | None -> fail span "An operator impl's type must be concrete."
+            in
+            let one_argument () =
+              match args with
+              | [ only ] -> infer_ty_of_annotation only
+              | _ -> fail span "'%s' takes one type argument." t
+            in
+            (match t with
+             | "Eq" ->
+               with_type_params type_params (fun () ->
+                 let self = self_concrete () in
+                 List.iter
+                   (fun op ->
+                     Registry.register
+                       registry
+                       op
+                       self
+                       self
+                       { Registry.result = Some Types.Bool
+                       ; emit = Registry.Call (entry_name "eq")
+                       })
+                   [ Ast.Equal; Ast.Not_equal ])
+             | "Index" ->
+               with_type_params type_params (fun () ->
+                 Registry.register_index_get
+                   registry
+                   (named "type" (self_concrete ()))
+                   (named "index" (Types.resolve (one_argument ())))
+                   (entry_name "get"))
+             | "IndexSet" ->
+               with_type_params type_params (fun () ->
+                 Registry.register_index_set
+                   registry
+                   (named "type" (self_concrete ()))
+                   (named "index" (Types.resolve (one_argument ())))
+                   (entry_name "set"))
+             | _ -> ());
             match List.assoc_opt t operator_traits with
             | None -> ()
             | Some (binary, method_) ->
-              let concrete what t =
-                match Types.concrete t with
+              let concrete what ty =
+                match Types.concrete ty with
                 | Some ty -> ty
                 | None -> fail span "An operator impl's %s must be a concrete type." what
               in

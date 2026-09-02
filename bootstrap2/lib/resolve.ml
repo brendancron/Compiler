@@ -80,6 +80,16 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
       let a = expr registry a
       and b = expr registry b in
       (match Registry.find registry op a.Ast.ann b.Ast.ann with
+       (* One entry answers both, since a type that says what equal means has
+          said what unequal means. *)
+       | Some { Registry.emit = Registry.Call name; _ } when op = Ast.Not_equal ->
+         let equal : Ast.resolved_expr =
+           { Ast.it = `Call (fn_ref span name [ a; b ] Types.Bool, [ a; b ])
+           ; span
+           ; ann = Types.Bool
+           }
+         in
+         `Unop (Ast.Not, equal)
        | Some { Registry.emit = Registry.Call name; _ } ->
          `Call (fn_ref span name [ a; b ] ann, [ a; b ])
        (* Spelled out rather than caught by a wildcard, so a third emission
