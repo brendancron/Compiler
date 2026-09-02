@@ -76,6 +76,8 @@ let cases =
   ; "tests/core/chars/unicode"
   ; "tests/core/operators/not_index"
   ; "tests/core/operators/structural_equality"
+  ; "tests/core/operators/bounded_param"
+  ; "tests/core/operators/partial_ord"
   ; "tests/core/tuples/tuple_basic"
   ; "tests/reflection/typeof_tuple"
   ; "tests/core/tuples/typed"
@@ -382,7 +384,6 @@ let expected_failing : (string * blocker) list =
   ; "tests/effects/async/async", Unplanned
     (* A resumption re-enters the scope without re-executing the `defer`
        that set the flag, and the pass marks no such re-entry point. *)
-  ; "tests/core/operators/bounded_param", Waiting "an unbounded operand resolving through its operator's trait"
   ; ( "tests/core/defer/defer_multishot_abort"
     , Waiting "a re-entered scope re-arming its deferred statements" )
     (* Operators resolved through an impl instead of the operator registry. *)

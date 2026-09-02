@@ -251,6 +251,22 @@ type receiver =
   | Owner of string
   | Via_trait of string
 
+(* Which trait gives an operator its meaning, and whether that trait fixes the
+   result at bool rather than binding an `Output`. *)
+let trait_of_operator (op : Ast.binop) =
+  match op with
+  | Ast.Add -> Some ("Add", false)
+  | Ast.Sub -> Some ("Sub", false)
+  | Ast.Mul -> Some ("Mul", false)
+  | Ast.Div -> Some ("Div", false)
+  | Ast.Mod -> Some ("Rem", false)
+  (* `==` compares any two values of a type structurally, so it constrains an
+     operand no further. What `T: Eq` asks for is an impl to reach, which is a
+     different question from whether the operator works. *)
+  | Ast.Equal | Ast.Not_equal -> None
+  | Ast.Less | Ast.Less_equal | Ast.Greater | Ast.Greater_equal ->
+    Some ("PartialOrd", true)
+
 let operator_traits =
   [ "Add", (Ast.Add, "add")
   ; "Sub", (Ast.Sub, "sub")
@@ -725,15 +741,21 @@ let binop_result registry (op : Ast.binop) a b =
   | _ ->
     (* Unifying would make an asymmetric operator unreachable. *)
     Types.unify a b;
-    (* The impl says what the result is, and the ad-hoc kinds would only
-       contradict it. *)
-    (match Types.repr a, List.find_opt (fun (_, (binary, _)) -> binary = op) operator_traits with
-     | Types.IVar { contents = Types.Unbound (_, Types.Bound traits) }, Some (trait, _)
-       when List.exists (fun (b : Types.bound) -> String.equal b.Types.bd_trait trait) traits ->
-       Types.project a "Output"
-     | _ ->
-       Types.unify a (Types.fresh_with (Registry.constraint_of op));
-       Registry.unresolved_result op a)
+    (match trait_of_operator op with
+     | None -> Registry.unresolved_result op a
+     | Some (trait, produces_bool) ->
+       (* Both operands were just unified, so this is the homogeneous case and
+          the bound says so: `Output = T`. Asking for the projection instead
+          would leave `d(d(x))` with an intermediate that resolves to `Generic`
+          and that monomorphization cannot tell what it was a projection of. *)
+       Types.constrain
+         a
+         (Types.Bound
+            [ { Types.bd_trait = trait
+              ; bd_args = (if produces_bool then [] else [ a ])
+              ; bd_bindings = (if produces_bool then [] else [ "Output", a ])
+              } ]);
+       if produces_bool then Types.IBool else a)
 
 let rec infer_expr env ctx (e : Ast.desugared_expr) : checked_expr =
   try infer_expr_impl env ctx e with
@@ -764,8 +786,24 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
        node target (`Assign (name, value)))
   | `Unop (Ast.Neg, a) ->
     let a = infer_expr env ctx a in
-    Types.unify a.Ast.ann (Types.fresh_with Types.Numeric);
-    node a.Ast.ann (`Unop (Ast.Neg, a))
+    (match Types.concrete a.Ast.ann with
+     | Some operand ->
+       (match Registry.find_unary ctx.registry Ast.Neg operand with
+        | Some entry -> node (Types.of_ty (Registry.result_of entry operand)) (`Unop (Ast.Neg, a))
+        | None ->
+          fail
+            span
+            "Cannot negate %s: it does not implement Neg."
+            (Types.string_of_ty operand))
+     | None ->
+       Types.constrain
+         a.Ast.ann
+         (Types.Bound
+            [ { Types.bd_trait = "Neg"
+              ; bd_args = []
+              ; bd_bindings = [ "Output", a.Ast.ann ]
+              } ]);
+       node a.Ast.ann (`Unop (Ast.Neg, a)))
   | `Unop (Ast.Not, a) ->
     let a = infer_expr env ctx a in
     Types.unify Types.IBool a.Ast.ann;
@@ -1407,6 +1445,35 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
                        ; emit = Registry.Call (entry_name "eq")
                        })
                    [ Ast.Equal; Ast.Not_equal ])
+             (* One entry answers all four: [Resolve] turns the `Ordering` the
+                method returns into the bool the operator wanted. *)
+             | "Neg" ->
+               with_type_params type_params (fun () ->
+                 Registry.register_unary
+                   registry
+                   Ast.Neg
+                   (self_concrete ())
+                   { Registry.result =
+                       (match List.assoc_opt "Output" impl.Ast.ib_assoc with
+                        | Some bound -> Types.concrete (infer_ty_of_annotation bound)
+                        | None ->
+                          fail span "'Neg' for '%s' is missing associated type 'Output'." type_name)
+                   ; emit = Registry.Call (entry_name "neg")
+                   })
+             | "PartialOrd" ->
+               with_type_params type_params (fun () ->
+                 let self = self_concrete () in
+                 List.iter
+                   (fun op ->
+                     Registry.register
+                       registry
+                       op
+                       self
+                       self
+                       { Registry.result = Some Types.Bool
+                       ; emit = Registry.Call (entry_name "partial_cmp")
+                       })
+                   [ Ast.Less; Ast.Less_equal; Ast.Greater; Ast.Greater_equal ])
              (* By the names written: `Index<int> for List<T>` is every List. *)
              | "Index" ->
                Registry.register_index_get registry type_name (written_name ()) (entry_name "get")
@@ -2289,14 +2356,6 @@ let admits registry kind (t : Types.infer_ty) =
      | None -> false)
   | Types.Any -> true
   | Types.Projection _ -> true
-  | Types.Addable | Types.Numeric ->
-    (match Types.concrete t with
-     | None -> false
-     | Some ty ->
-       let has op = Registry.find registry op ty ty <> None in
-       (match kind with
-        | Types.Addable -> has Ast.Add
-        | _ -> List.exists has [ Ast.Sub; Ast.Mul; Ast.Div; Ast.Mod; Ast.Less; Ast.Greater ]))
 
 (* Read back out of the registry, so the two accounts cannot disagree. *)
 let declare_builtin_impls registry =
@@ -2304,6 +2363,16 @@ let declare_builtin_impls registry =
     (fun ty ->
       Hashtbl.add ctx_impls (Option.get (Types.type_name ty), "Eq") [])
     [ Types.Int; Types.Float; Types.Str; Types.Chr; Types.Byte; Types.Bool; Types.Unit ];
+  (* Whatever the registry can compare has an order, which is what a
+     `PartialOrd` bound asks for. *)
+  List.iter
+    (fun ty ->
+      if Registry.find registry Ast.Less ty ty <> None
+      then Hashtbl.add ctx_impls (Option.get (Types.type_name ty), "PartialOrd") [])
+    [ Types.Int; Types.Float; Types.Chr; Types.Byte ];
+  List.iter
+    (fun ty -> Hashtbl.add ctx_impls (Option.get (Types.type_name ty), "Neg") [])
+    [ Types.Int; Types.Float ];
   List.iter
     (fun (trait, (binary, _)) ->
       List.iter

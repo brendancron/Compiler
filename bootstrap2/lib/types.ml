@@ -37,8 +37,6 @@ type infer_ty =
 
 and kind =
   | Any
-  | Addable (* int, float, str — the operand type of `+` *)
-  | Numeric (* int, float *)
   | Collection of infer_ty
   | Bound of bound list
   (* `T.Item` before `T` is known: the owner is carried, not the answer. *)
@@ -201,8 +199,6 @@ let string_of_kind = function
   | Collection _ -> "a collection"
   | Bound traits -> String.concat " and " (List.map (fun b -> b.bd_trait) traits)
   | Projection (_, member) -> Printf.sprintf "an associated '%s'" member
-  | Addable -> "int, float or string"
-  | Numeric -> "int or float"
 
 let rec labels_of_infer_row (r : infer_row) : (string * infer_ty list) list * bool =
   match repr_row r with
@@ -392,7 +388,6 @@ let rec row_occurs id (r : infer_row) =
   | RVar { contents = RLink _ } -> assert false
   | RCons (_, _, rest) -> row_occurs id rest
 
-(* A variable used by both `+` and `-` must end up Numeric, not Addable. *)
 let extra_admits : (kind -> infer_ty -> bool) ref = ref (fun _ _ -> false)
 
 (* The table belongs to the checker, so a projection asks through here. *)
@@ -549,24 +544,18 @@ and strongest a b =
   | Any, Bound _ -> b
   | Collection _, other | other, Collection _ ->
     error "A collection is not %s." (string_of_kind other)
-  (* Yielding to [Any] would drop the owner, and with it the only route back to
-     what the projection stands for. *)
-  | Projection _, Any -> a
-  | Any, Projection _ -> b
-  | Projection _, other | other, Projection _ -> other
-  | Bound _, other | other, Bound _ ->
-    error "A bounded type parameter is not %s." (string_of_kind other)
-  | Numeric, _ | _, Numeric -> Numeric
-  | Addable, _ | _, Addable -> Addable
+  (* A projection survives every merge: it is the only kind that says where a
+     type comes from rather than what it must satisfy, and dropping the owner
+     leaves nothing able to resolve it. *)
+  | Projection _, _ -> a
+  | _, Projection _ -> b
   | Any, Any -> Any
 
 and kind_admits kind (t : infer_ty) =
   match kind, t with
   | Any, _ -> true
-  | Numeric, (IInt | IFloat) -> true
-  | Addable, (IInt | IFloat | IStr) -> true
   | Projection _, _ -> true
-  | (Numeric | Addable | Collection _ | Bound _), _ -> !extra_admits kind t
+  | (Collection _ | Bound _), _ -> !extra_admits kind t
 
 and unify (a : infer_ty) (b : infer_ty) : unit =
   let a = settle a
@@ -642,8 +631,24 @@ let free_vars (t : infer_ty) : (int * kind) list =
   let acc = ref [] in
   let rec walk t =
     match repr t with
+    (* Into the kind as well: a projection's owner may appear nowhere else in
+       the type, and leaving it unquantified makes every instantiation share
+       the one the template built. Recorded before descending, since
+       `T: Add<T>` puts the variable inside its own kind. *)
     | IVar { contents = Unbound (id, kind) } ->
-      if not (List.mem_assoc id !acc) then acc := (id, kind) :: !acc
+      if not (List.mem_assoc id !acc)
+      then (
+        acc := (id, kind) :: !acc;
+        match kind with
+        | Collection elem -> walk elem
+        | Projection (owner, _) -> walk owner
+        | Bound bounds ->
+          List.iter
+            (fun b ->
+              List.iter walk b.bd_args;
+              List.iter (fun (_, t) -> walk t) b.bd_bindings)
+            bounds
+        | Any -> ())
     | ITuple items -> List.iter walk items
     | IRecord f -> walk_fields walk f
     | INamed (_, args, f) ->
@@ -1061,7 +1066,6 @@ and resolve (t : infer_ty) : ty =
     then Generic id
     else (
       match kind with
-      | Numeric | Addable -> Int
       | Collection elem -> array (resolve elem)
       (* A bound is discharged by unification, so one still unbound here
          belongs to a definition nothing ever instantiated. *)
