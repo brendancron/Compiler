@@ -172,7 +172,7 @@ print(ages.get_or("bob", 0));       // 25
 print(ages.get_or("dave", -1));     // -1
 ```
 
-A map's element type is the pair `(K, V)`, so an array of tuples is already the right shape and no separate literal form is needed. That is not a special case: the entry declares it, as `op []<K, V>(pairs: Array<(K, V)>) -> Map<K, V>`.
+A map's element type is the pair `(K, V)`, so an array of tuples is already the right shape and no separate literal form is needed. That is not a special case: the impl declares it, as `impl FromArray<(K, V)> for Map<K, V>`.
 
 There is no `get` returning an `Option`, because there is no `Option` — what a lookup does when a key is absent is part of a fallibility design that has not been settled, and `get_or` is what can be written without settling it. Lookup is a linear scan comparing keys with `==`, so a record key is matched on its fields.
 

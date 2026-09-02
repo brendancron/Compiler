@@ -71,7 +71,7 @@ This is the mechanism already in the checker. `fn double(x) { return x + x; }` i
 Errors land in the two places you would want them:
 
 - **Using `T` in a way no entry could satisfy** is an error at the definition, because the body is checked once.
-- **Instantiating with a type that has no such entry** — `sum` on an `Array<Vec3>` where no `op +` exists for `Vec3` — is an error at the call site, naming the requirement and where it came from.
+- **Instantiating with a type that has no such entry** — `sum` on an `Array<Vec3>` where `Vec3` has no `Add` impl — is an error at the call site, naming the requirement and where it came from.
 
 There is deliberately no way to *write* a constraint. `T: Add` would name a predicate over the operator table as though it were something declarable, and nothing declares it — the entries are what exist. See [Elaboration](Elaboration.md).
 
@@ -162,7 +162,7 @@ type Variant { name: string, payload: [Type] }
 
 `name` is what `derive` already uses. `shape` is what makes structural metaprogramming possible — walking a record's fields, or a sum's variants, without the compiler exposing a bespoke API for each.
 
-**`Type` is opaque for construction.** Its fields can be read, but a value is only obtained from `typeof` or from writing a type expression — there is no `new Type { … }`. A constructed one would correspond to no actual type and would have no type expression to reify back to, so forbidding it keeps reification total. Creating types programmatically is deferred; see [TODO](TODO.md).
+**`Type` is opaque for construction.** Its fields can be read, but a value is only obtained from `typeof` or from writing a type expression — there is no `new Type { … }`. A constructed one would correspond to no actual type and would have no type expression to reify back to, so forbidding it keeps reification total. Creating types programmatically is deferred.
 
 ## Settled
 

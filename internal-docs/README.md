@@ -6,9 +6,9 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 
 | Document                                                     | Subject                                                               |
 | ------------------------------------------------------------ | --------------------------------------------------------------------- |
-| [architecture.md](Architecture.md)                           | `bootstrap2` pipeline diagram                                         |
-| [type-system.md](Type%20System.md)                             | Type system and type checking for `bootstrap2` (OCaml)                |
-| [effects.md](Algebraic%20Effects.md)                                     | Effect rows and the selective CPS pass (design)                       |
+| [Architecture.md](Architecture.md)                           | `bootstrap2` pipeline, a heading per pass                             |
+| [Type System.md](Type%20System.md)                           | Type system and type checking for `bootstrap2` (OCaml)                |
+| [Algebraic Effects.md](Algebraic%20Effects.md)               | Effect rows and the selective CPS pass                                |
 | [Data Structures.md](Data%20Structures.md)                   | The datatypes and how each is used                                    |
 | [Collection Literals.md](Collection%20Literals.md)           | How `[...]` picks a collection type                                   |
 | [Elaboration.md](Elaboration.md)                             | Type-directed resolution of operators, indexing, and literals         |
@@ -16,6 +16,4 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 | [Modules.md](Modules.md)                                     | `import`, and why several files become one program                    |
 | [Metaprocessing.md](Metaprocessing.md)                       | `meta` and `gen`, and compilation calling itself                      |
 | [Reify.md](Reify.md)                                         | Turning a compile-time value back into syntax                         |
-| [Implementation Plan.md](Implementation%20Plan.md)           | The remaining language work, and which fixtures each step affects     |
 | [GADT Refinement.md](GADT%20Refinement.md)                   | Refining a type parameter in a match arm, and the choice of how       |
-| [TODO.md](TODO.md)                                           | Deferred decisions, and why                                           |

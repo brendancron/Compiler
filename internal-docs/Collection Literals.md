@@ -72,17 +72,17 @@ let lower elems (ty : Types.ty) =
   | _               -> assert false   (* the checker rejected anything else *)
 ```
 
-So `[1, 2, 3]` at `List<int>` becomes `List.of([1, 2, 3])`, an ordinary call to ordinary stdlib code. Adding a collection type means adding its name to the candidate list and writing its `of`; the lowering does not change.
+So `[1, 2, 3]` at `List<int>` becomes a call to `List`'s `from_array`, ordinary code like any other. Adding a collection type means implementing `FromArray` for it; the lowering does not change.
 
 The literal node lives in the parsed, desugared, and typed trees and is **gone** after lowering, so nothing downstream can receive an undecided literal.
 
 ## Consequences
 
-**Two allocations.** `List.of` receives a materialized array and copies out of it. Acceptable to start; the lowering can special-case known types later as an optimization rather than a requirement.
+**Two allocations.** `List`'s `from_array` receives a materialized array and copies out of it. Acceptable to start; the lowering can special-case known types later as an optimization rather than a requirement.
 
-**The `of` convention is load-bearing.** Nothing verifies that `Set.of` exists with the right signature until lowering emits a call to it, and a missing one would surface as an undefined variable at a synthesized call site. The checker should verify the constructor when it admits a type into the candidate set, so the error lands on the literal.
+**The constructor is a trait.** A type is a candidate because it implements `FromArray`, and the impl is what registers the entry lowering calls, so the two cannot disagree — a missing constructor is a missing impl, reported where it is written.
 
-**Set and map literals do not denote what they look like.** `[1, 1, 2]` as a `Set` has two elements, and `[("a", 1), ("a", 2)]` as a `Map` has one entry. Each `of` decides whether a duplicate is last-wins or an error.
+**Set and map literals do not denote what they look like.** `[1, 1, 2]` as a `Set` has two elements, and `[("a", 1), ("a", 2)]` as a `Map` has one entry. Each `from_array` decides whether a duplicate is last-wins or an error.
 
 **A map is not a set of pairs.** `Set<(string, int)>` holds `("a", 1)` and `("a", 2)` both, because uniqueness is on the whole element; a map's uniqueness is on the key. They are different types built from the same shape, and the annotation picks.
 
@@ -92,4 +92,4 @@ The literal node lives in the parsed, desugared, and typed trees and is **gone**
 
 ## Deferred
 
-Map literal sugar — see [TODO](TODO.md).
+Map literal sugar is deferred.

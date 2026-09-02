@@ -226,7 +226,7 @@ Three steps, in this order.
    occurrence of a function with a written signature is bound to that signature
    generalized. Two things fell out that the plan did not anticipate: a declared
    parameter has to win unification, or an operator aliasing it leaves the
-   scheme's recorded id pointing at nothing; and `Specialize` needed both a
+   scheme's recorded id pointing at nothing; and `Type_mono` needed both a
    self-call exclusion and a depth cap, because polymorphic recursion cannot be
    monomorphized at all. See [type-system.md](Type%20System.md).
 

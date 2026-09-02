@@ -33,7 +33,7 @@ type infer_ty =
   | IFn of infer_ty list * infer_ty * infer_row
   | IVar of tv ref
 and tv = Unbound of int * kind | Link of infer_ty
-and kind = Any | Addable | Numeric | Collection of infer_ty | Bound of string list
+and kind = Any | Addable | Numeric | Collection of infer_ty | Bound of bound list | Projection of infer_ty * string
 
 (* After inference: fully resolved. No unification variable can appear. *)
 type ty =
@@ -93,8 +93,8 @@ The hoist pass also produces the function signature table (`(string, ty) Hashtbl
 Two numeric types plus annotation-free inference makes `fn double(x) { return x + x; }` ambiguous — nothing pins `x` to `int` or `float`. The resolution is a single built-in constraint rather than a general type-class mechanism:
 
 - A fresh variable is `Unbound (id, Any)`.
-- Arithmetic operators unify their operands with each other and mark the resulting variable `Numeric`.
-- Unifying a `Numeric` variable with `Int` or `Float` succeeds; with `Str`, `Bool`, `Unit`, or a function type it fails with "operator `+` expects a numeric type".
+- An arithmetic operator unifies its operands with each other and marks the result `Numeric`; `+` marks it `Addable`, which admits `Str` too.
+- Unifying a `Numeric` variable with `Int` or `Float` succeeds; with `Str`, `Bool`, `Unit`, or a function type it fails with "Expected int or float, got string".
 - Unifying two variables takes the stronger constraint.
 - At `resolve` time, a still-unbound `Numeric` or `Addable` variable **defaults to `Int`**. A still-unbound `Any` variable becomes `Generic`, since it is polymorphic rather than ambiguous.
 - A variable introduced by a **written** type parameter — `fn f<T>`, `impl Box<T>` — is registered in `Types.declared_params` and never defaults, however constrained. The author said the definition is generic in `T`; defaulting it to `int` because the body adds would contradict them.
@@ -170,7 +170,7 @@ Notes on the parts that differ from the plan above:
 
 - **`print` is variadic**, which no HM type describes. A call is checked structurally — the arguments are inferred and the call carries a signature built from them — and the *binding* is `() -> unit`, so referring to `print` as a value is rejected rather than yielding something unconstrained. What no type describes is the declaration, so `print` cannot be written in Cronyx. The intended answer is a `meta fn` expanding a call at compile time, which needs no type for the arity at all; the alternatives are a top type, trait objects, or a one-argument `print`.
 - **No exhaustiveness check on `return`.** A function returning on only one path infers from the `return` it can see, while the evaluator yields `unit` when control falls off the end. The types are a promise the runtime does not keep.
-- **`Generic` survives where nothing needed it concrete.** `Specialize` copies a generic function or `impl` method per concrete type its call sites use, but only when the body contains something type-directed — an operator, a method, a literal. A function that merely moves values around keeps one copy and a `Generic` in its annotations, which is fine for the interpreter and will not be for codegen.
+- **`Generic` survives where nothing needed it concrete.** `Type_mono` copies a generic function or `impl` method per concrete type its call sites use, but only when the body contains something type-directed — an operator, a method, a literal. A function that merely moves values around keeps one copy and a `Generic` in its annotations, which is fine for the interpreter and will not be for codegen.
 - **Uses before a function's declaration are monomorphic.** Generalization happens when the declaration statement is reached, so a call earlier in the same block sees the hoisted monomorphic type.
 - **The same applies across declarations.** A call to a generic `impl`'s method from anything inferred before that `impl` pins its type variable permanently. The prelude hit this: `impl string`'s `split` calls `List.push`, and placing it above `impl List<T>` fixed `List__push` at `string`.
 
@@ -184,11 +184,11 @@ It also settles the receiver's type where nothing else had. `[1, 2, 3].each()` h
 
 That is what makes an imported function reachable through a dot: `import { map } from "…"` renames the declaration to `List#map`, and the resolved name carries the rename to where the fallback needs it.
 
-**A trait may take type parameters, and a bound carries what it named them at.** `T: TryFrom<S>` is a `Types.Bound` holding the trait and its arguments, and a type satisfies it when an impl exists *at arguments that unify* — not merely when the trait's name appears. A parameter declared earlier is in scope while a later one's bound is read, which is what lets `S` appear in `T`'s.
+**A trait may take type parameters, and a bound carries what it named them at.** `T: TryFrom<S>` is a `Types.Bound` holding the trait and its arguments, and a type satisfies it when an impl exists *at arguments that unify* — not merely when the trait's name appears. Every parameter is in scope while any bound is read, which is what lets `S` appear in `T`'s and `T` appear in its own. A bound may also say what the impl bound an associated name to — `Add<T, Output = T>` — checked alongside the arguments.
 
-**A method without `self` is an associated function**, reached through the type rather than through a value of it — `T.from(source)` where `T` is a parameter, or `Counter.zero()` where it is a declared type. What stands under the receiver only has to carry the type; the receiver is dropped when the call is built, which `Specialize` and `Resolve` learn from the registry.
+**A method without `self` is an associated function**, reached through the type rather than through a value of it — `T.from(source)` where `T` is a parameter, or `Counter.zero()` where it is a declared type. What stands under the receiver only has to carry the type; the receiver is dropped when the call is built, which `Type_mono` and `Resolve` learn from the registry.
 
-Dispatch stays static: `Specialize` copies the caller per concrete argument, so the call becomes a direct one to that type's entry.
+Dispatch stays static: `Type_mono` copies the caller per concrete argument, so the call becomes a direct one to that type's entry.
 
 **A variadic parameter is homogeneous, and the call site is what fills it.** `fn max(first: int, rest: ...int)` declares an ordinary `Array<int>` parameter; `Desugar` collects everything past the fixed arguments into an array literal, so nothing after that pass knows the call was written any other way.
 
@@ -204,7 +204,7 @@ Only functions. A `var` is a statement, and its initializer runs where it is wri
 
 A declared parameter is now the survivor when unification joins two variables. The scheme records an id, and an operator aliasing `T` to a fresh variable would leave that id pointing at nothing and the parameter silently unquantified.
 
-**Two consequences in `Specialize`.** A call a function makes to *itself* no longer makes its body type-directed: copying cannot resolve that call, since every copy asks for one more at a further type. And when a body genuinely does need a copy per type — an operator on the recursive payload — no finite set exists, so specialization is capped and the program rejected with a diagnostic rather than compiled forever. `tests/types/inference/errors/unspecializable_recursion` pins it.
+**Two consequences in `Type_mono`.** A call a function makes to *itself* no longer makes its body type-directed: copying cannot resolve that call, since every copy asks for one more at a further type. And when a body genuinely does need a copy per type — an operator on the recursive payload — no finite set exists, so specialization is capped and the program rejected with a diagnostic rather than compiled forever. `tests/types/inference/errors/unspecializable_recursion` pins it.
 
 **A variant may fix the type parameter, and matching it refines.** `Lit(int) -> Expr<int>` says what that constructor builds rather than leaving it the type applied to its own parameters, and `If<A>(…)` binds a variable the head does not mention. Building one gives the head it declared; matching one says the scrutinee's arguments *are* that head, which is how `return n` typechecks against `T` in the `Lit` arm.
 

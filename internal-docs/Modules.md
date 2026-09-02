@@ -70,7 +70,7 @@ Three things follow, and they are the reason for the choice.
 
 **A module is never a *runtime* value.** It exists at compile time and is gone by the interpreter, so the checker is never asked whether a receiver is a namespace or a value — the question is answered before it runs, in the one part of the checker that was least sound.
 
-**Module-level compiler state stays correct.** `ctx_types`, `ctx_methods`, `Resolve.declared_rows` and the rest are global, which is wrong for *separate* compilation and exactly right for one program. That is step 19 of [Remediation of Builtins](Remediation%20of%20Builtins.md), and it is not a prerequisite here.
+**Module-level compiler state stays correct.** `ctx_types`, `ctx_methods`, `Resolve.declared_rows` and the rest are global, which is wrong for *separate* compilation and exactly right for one program. It is not a prerequisite here.
 
 ## The pass
 
@@ -92,7 +92,7 @@ It owns path resolution, the import graph, the per-unit alias table, and the rew
 
 Where it differs is that a non-declaration in an imported unit is **rejected**, not dropped. Rust filters silently, so a `var` at a module's top level vanishes with no diagnostic; a module is a set of declarations and saying so is cheaper than explaining where the statement went.
 
-**Phase separation falls out of this**, and that is the larger payoff. Racket needs `require for-syntax` because its modules do work at both phases. If importing a unit cannot run anything, there is nothing to separate: "a meta block sees imported declarations, never imported runtime values" stops being a rule to enforce and becomes a consequence of the design. That sentence in the [Implementation Plan](Implementation%20Plan.md) is discharged rather than implemented.
+**Phase separation falls out of this**, and that is the larger payoff. Racket needs `require for-syntax` because its modules do work at both phases. If importing a unit cannot run anything, there is nothing to separate: "a meta block sees imported declarations, never imported runtime values" stops being a rule to enforce and becomes a consequence of the design. The rule is discharged rather than implemented.
 
 **A local shadows a namespace.** If a unit binds `math` as a variable, `math.add` is a field or method access on that value, not the module. The alias table is consulted only when nothing else in scope has the name.
 
@@ -108,11 +108,11 @@ A file that is not there is a load error naming it, at the span of the call.
 
 `Ast.span` was `{ line; col }`, and concatenating four units would have made `[3:5]` name nothing. It now carries the file, threaded through the *token* so that no `span_of_token` call site changed. `Ast.locate ~entry` prints a bare `[3:5]` while a span is in the unit being compiled and `[lib.cx 2:12]` once it is not, rendered relative to the entry's directory.
 
-The prelude is still a string in `bin/main.ml` rather than a unit the loader reads, but it scans under the name `<prelude>`, so a diagnostic from inside it says so instead of pointing at a line in the user's file. That was step 17 of [Remediation of Builtins](Remediation%20of%20Builtins.md).
+The prelude is still a string in `lib/prelude.ml` rather than a unit the loader reads, but it scans under the name `<prelude>`, so a diagnostic from inside it says so instead of pointing at a line in the user's file.
 
 ## What this does not do
 
-**Separate compilation.** Step 6 of [Remediation of Builtins](Remediation%20of%20Builtins.md) records why it is a design rather than a task: `Specialize` runs on typed IR, so a compiled unit would have to carry the typed body of every exported generic. Rust ships generic MIR in rlib metadata, C++ puts templates in headers, OCaml declines to monomorphize. None of it is needed to run 23 fixtures, and choosing it later does not invalidate the mangling.
+**Separate compilation** is a design rather than a task: `Type_mono` runs on typed IR, so a compiled unit would have to carry the typed body of every exported generic. Rust ships generic MIR in rlib metadata, C++ puts templates in headers, OCaml declines to monomorphize. None of it is needed to run 23 fixtures, and choosing it later does not invalidate the mangling.
 
 **Signatures and sealing as a separate feature.** `trait` already describes an interface. If a module wants one it is an interface over declarations, later, not a module type system now.
 
@@ -130,7 +130,7 @@ Three things are deliberately different.
 
 **Namespaces resolve by mangling, not by an export list.** Rust keeps a `ModuleBinding::Namespace { bind_name, exports }` where each export is a `(name, node_id)` pair, with the comment that node IDs are what keep two modules' `add` apart. `bootstrap2` has no node IDs, and `unit__name` is unique by construction. The cost is a collision this design has to state: a module `a_b` with `fn c` and a module `a` with `fn b__c` mangle alike. A reserved separator or a rejection at load is the fix, and it is the same problem `Ast.method_name` already has.
 
-**Namespace access is type checked.** Rust binds an imported namespace to a *fresh type variable* (`runtime_type_checker.rs:681`), so `util.foo()` is unchecked — the same shape as the receiver heuristic that step 12 of [Remediation of Builtins](Remediation%20of%20Builtins.md) removed. Mangling turns `util.foo(x)` into an ordinary call before the checker runs, so it is checked like any other.
+**Namespace access is type checked.** Rust binds an imported namespace to a *fresh type variable* (`runtime_type_checker.rs:681`), so `util.foo()` is unchecked — the same shape as the receiver heuristic this bootstrap removed. Mangling turns `util.foo(x)` into an ordinary call before the checker runs, so it is checked like any other.
 
 **Diagnostics carry a file.** Rust builds a span table per file and then surfaces only the entry's to `main`, so an error inside an imported unit has no location. That is the failure this design's span prerequisite exists to avoid, and it is worth seeing before repeating.
 

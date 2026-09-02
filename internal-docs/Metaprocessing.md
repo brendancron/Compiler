@@ -4,7 +4,7 @@ Status: **built.** `lib/metaprocess.ml` runs `meta` blocks and `meta fn` calls a
 
 A `meta` block runs while the program is being compiled. Reaching one means compiling and running its dependencies, then continuing where compilation left off — so metaprocessing is recursive compilation.
 
-**Literally so.** `Metaprocess` calls Desugar, Monomorphize, Typecheck, Specialize, Resolve, Reflect, Cps, Verify and Interp on the block's statements — the same passes, in the same order, that the rest of the program goes through. There is no second interpreter and no compile-time subset of the language.
+**Literally so.** `Metaprocess` calls Desugar, Value_mono, Typecheck, Type_mono, Resolve, Reflect, Cps, Verify and Interp on the block's statements — the same passes, in the same order, that the rest of the program goes through. There is no second interpreter and no compile-time subset of the language.
 
 ## Two things, not one
 
@@ -247,7 +247,7 @@ That is the simplifying decision, and it decides two other things by itself.
 
 **A type must be a value to be passed as one.** `derive(Dog)` cannot take a bare name, and `typeof` only takes a value. So `derive` is not waiting on metaprocessing — a deriver works today over a `TypeShape` — but on naming the type it is written for.
 
-**`print` cannot become a meta function.** `print(a, b)` with `a` a runtime variable is not reducible at compile time: the argument has no value yet, and the call fails with `Undefined variable 'a'`, which is correct rather than a gap. Moving `print` out of `builtins.ml` therefore needs one of the answers in [Remediation of Builtins](Remediation%20of%20Builtins.md) step 8 — rest parameters, a top type, or a one-argument `print` — and not this.
+**`print` cannot become a meta function.** `print(a, b)` with `a` a runtime variable is not reducible at compile time: the argument has no value yet, and the call fails with `Undefined variable 'a'`, which is correct rather than a gap. Moving `print` out of `builtins.ml` therefore needs rest parameters, a top type, or a one-argument `print` — and not this.
 
 Four rules follow:
 
@@ -472,7 +472,7 @@ meta fn derive(shape: TypeShape) for Hash {
 
 **The name written is not the name registered.** Every deriver is called `derive`, which would collide; `for Hash` is what registers it, under a generated name no program can write. So a second deriver for one trait is *trait 'Hash' already has a deriver*, and a `derive` naming a trait without one is *trait 'Hash' has no deriver* — both while metaprocessing, rather than as a missing method later.
 
-**Why `for Hash` rather than a member of the trait.** Binding by a clause keeps a trait what it is — signatures — and makes a mistyped trait name an error at the declaration rather than a derive that silently does not exist. It also allows a deriver for a trait you did not write, which the alternative cannot: there are no orphan rules here, so `derive Hash for geom.Point;` is as legitimate as writing the impl by hand. Duplicate derivers for one trait are rejected the way duplicate `op` entries are.
+**Why `for Hash` rather than a member of the trait.** Binding by a clause keeps a trait what it is — signatures — and makes a mistyped trait name an error at the declaration rather than a derive that silently does not exist. It also allows a deriver for a trait you did not write, which the alternative cannot: there are no orphan rules here, so `derive Hash for geom.Point;` is as legitimate as writing the impl by hand. Duplicate derivers for one trait are rejected the way duplicate impls are.
 
 **Why a statement rather than an attribute on the declaration.** `derive … for …` can name an imported type, does not touch the type-declaration grammar, and reads as the `impl Hash for Dog` it generates.
 
@@ -509,4 +509,4 @@ All six are built. `meta/derive/basic` and `meta/derive/two_traits` are the fixt
 
 ## Open questions
 
-None. See [TODO](TODO.md) for what is deferred.
+None.

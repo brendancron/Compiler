@@ -28,7 +28,7 @@ Output then goes wherever the innermost handler sends it — a file, a buffer, a
 
 Three consequences, recorded so they are not rediscovered:
 
-- **An operation has a declared signature**, so `print` takes one string. That removes the variadic question rather than answering it — see step 8 of [Remediation of Builtins](Remediation%20of%20Builtins.md) — and makes string interpolation the ergonomic companion.
+- **An operation has a declared signature**, so `print` takes one string. That removes the variadic question rather than answering it, and makes string interpolation the ergonomic companion.
 - **Printing becomes visible in a row.** Any function that prints carries `<out>`, so the program root must be handled implicitly or every program starts with a `run`.
 - **It depends on containment**, which landed as step 11 of the same document. Under row equality a function that printed could not call anything.
 
@@ -259,7 +259,7 @@ CPS runs late, after everything that could introduce a call — see [Architectur
 
 The checker's rows *are* the CPS marking. The Rust bootstrap runs a separate `mark_cps` analysis to recover the same information.
 
-It has to run after `Resolve` in particular, because an operator can be an ordinary function and an ordinary function can perform effects. `a + b` where `op +` performs `logger` is only visibly a call once elaboration has made it one.
+It has to run after `Resolve` in particular, because an operator can be an ordinary function and an ordinary function can perform effects. `a + b` whose `Add` impl performs `logger` is only visibly a call once elaboration has made it one.
 
 Marking should key on **`ctl` reachability, not on a non-empty row**. `fn` operations are tail-resumptive: they resume exactly once with the arm's value, so they are a plain call to the evidence passed in and need no continuation. This is Koka's bind-inversion, and it means `log`- and `ask`-style effects cost nothing at runtime.
 
@@ -267,6 +267,6 @@ Following the discipline the other passes use, the effect constructs (`effect` d
 
 ## Deferred
 
-Handler aliasing, syntax for writing a row variable in an annotation, and whether effect declarations nest — see [TODO](TODO.md). None of them block what is implemented.
+Handler aliasing, syntax for writing a row variable in an annotation, and whether effect declarations nest are all deferred. None of them block what is implemented.
 
 Explicit comptime arguments will hit the same ambiguity in expression position, where `pair<int>(1, 2)` and `a < b` cannot be told apart and `a<b` is idiomatic. Nothing decided here helps there; it needs a turbofish-style marker or inference-only type arguments.

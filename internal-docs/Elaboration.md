@@ -60,11 +60,7 @@ print(v == v);      // true
 
 `!=` is not an impl of its own. A type that has said what equal means has said what unequal means, so `Resolve` lowers `a != b` as the negation of the `eq` call.
 
-**A type that declares nothing gets equality by deriving it**, which is the compiler's own derivation rather than a deriver walking the shape:
-
-```cronyx
-derive Eq for Vec2;
-```
+**`==` works on any two values of a type without an impl**, comparing them structurally. What `derive Eq for Vec2;` adds is the impl a `T: Eq` bound looks for, written by the compiler rather than by a deriver walking the shape.
 
 ## Bounds
 
