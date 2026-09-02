@@ -17,6 +17,34 @@ type TypeShape {
     Other,
 }
 
+// An operator is a trait, so generic code can be bounded by one. The impls for
+// the primitives are the compiler's and emit a machine operation rather than a
+// call; only a type declared in a program reaches the method written here.
+trait Add<Rhs> {
+    type Output;
+    fn add(self, rhs: Rhs) -> Output;
+}
+
+trait Sub<Rhs> {
+    type Output;
+    fn sub(self, rhs: Rhs) -> Output;
+}
+
+trait Mul<Rhs> {
+    type Output;
+    fn mul(self, rhs: Rhs) -> Output;
+}
+
+trait Div<Rhs> {
+    type Output;
+    fn div(self, rhs: Rhs) -> Output;
+}
+
+trait Rem<Rhs> {
+    type Output;
+    fn rem(self, rhs: Rhs) -> Output;
+}
+
 // What `a[i:j]` puts between the brackets. The four shapes are four variants
 // rather than one pair with sentinels, so a missing bound is missing rather
 // than encoded.

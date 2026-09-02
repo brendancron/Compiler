@@ -253,6 +253,16 @@ type receiver =
   | Owner of string
   | Via_trait of string
 
+(* Which operator a trait gives meaning to, and the method that carries it.
+   An impl of one registers the entry an `op` declaration would have. *)
+let operator_traits =
+  [ "Add", (Ast.Add, "add")
+  ; "Sub", (Ast.Sub, "sub")
+  ; "Mul", (Ast.Mul, "mul")
+  ; "Div", (Ast.Div, "div")
+  ; "Rem", (Ast.Mod, "rem")
+  ]
+
 (* A trait and everything it requires, so a bound reaches an inherited method.
    [seen] guards a cycle, which nothing rejects yet. *)
 let rec trait_closure ?(seen = []) (trait : string) : string list =
@@ -1465,6 +1475,47 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
         Option.iter
           (fun (t, args) ->
             Hashtbl.add ctx_impls (type_name, t) (List.map infer_ty_of_annotation args))
+          trait;
+        (* An operator trait's impl is an entry in the same table an `op`
+           declaration writes to, so the lowering in [Resolve] is unchanged. *)
+        Option.iter
+          (fun (t, args) ->
+            match List.assoc_opt t operator_traits with
+            | None -> ()
+            | Some (binary, method_) ->
+              let concrete what t =
+                match Types.concrete t with
+                | Some ty -> ty
+                | None -> fail span "An operator impl's %s must be a concrete type." what
+              in
+              with_type_params type_params (fun () ->
+                let lhs = concrete "type" (self_ty span type_name params) in
+                let rhs =
+                  match args with
+                  | [ rhs ] -> concrete "right operand" (infer_ty_of_annotation rhs)
+                  | _ -> fail span "'%s' takes one type argument." t
+                in
+                let result =
+                  match List.assoc_opt "Output" impl.Ast.ib_assoc with
+                  | Some bound -> concrete "Output" (infer_ty_of_annotation bound)
+                  | None -> fail span "'%s' for '%s' is missing associated type 'Output'." t type_name
+                in
+                if Registry.find_exact registry binary lhs rhs <> None
+                then
+                  fail
+                    span
+                    "Operator %s is already defined for %s and %s."
+                    (Ast.string_of_binop binary)
+                    (Types.string_of_ty lhs)
+                    (Types.string_of_ty rhs);
+                Registry.register
+                  registry
+                  binary
+                  lhs
+                  rhs
+                  { Registry.result = Some result
+                  ; emit = Registry.Call (Ast.method_name type_name method_)
+                  }))
           trait
       | _ -> ())
     body;

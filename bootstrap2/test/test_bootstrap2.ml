@@ -174,6 +174,8 @@ let cases =
   ; "tests/operators/operator_eq"
   ; "tests/operators/operator_chain"
   ; "tests/operators/operator_in_fn"
+  ; "tests/operators/traits/vec2_add"
+  ; "tests/operators/traits/asymmetric"
   ; "tests/core/traits/basic_impl/main"
   ; "tests/core/traits/multiple_impls/main"
   ; "tests/core/traits/inherent/main"
@@ -391,13 +393,11 @@ let expected_failing : (string * blocker) list =
   ; ( "tests/core/defer/defer_multishot_abort"
     , Waiting "a re-entered scope re-arming its deferred statements" )
     (* Operators resolved through an impl instead of the operator registry. *)
-  ; "tests/operators/traits/vec2_add", Waiting "operators dispatched through traits"
   ; "tests/operators/traits/derive_eq", Waiting "an Eq the prelude declares and a deriver fills in"
     (* A tuple has no declaration to derive from, so its impl is the checker's
        to synthesize from the components' — the one case no deriver reaches. *)
   ; "tests/operators/traits/tuple_eq", Waiting "Eq for a tuple of Eq components"
   ; "tests/operators/traits/generic_bound", Waiting "operators dispatched through traits"
-  ; "tests/operators/traits/asymmetric", Waiting "operators dispatched through traits"
   ; "tests/operators/traits/equality", Waiting "operators dispatched through traits"
   ; "tests/operators/traits/indexing", Waiting "operators dispatched through traits"
   ; ( "tests/operators/traits/errors/missing_impl"
