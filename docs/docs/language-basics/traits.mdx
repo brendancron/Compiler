@@ -22,7 +22,7 @@ Each method inside the trait has:
 
 - A name (`describe`)
 - A parameter list starting with `self` — the value the method is being called on
-- A return type after `->` (note: traits use `->` for return types; this differs from the `:` used in normal `fn` declarations)
+- A return type after `->` (a plain `fn` accepts either `->` or `:`; both mean the same thing)
 - A semicolon at the end — there's no body, just a signature
 
 `Describe` is now a trait. By itself it does nothing; it's a contract waiting for types to fill in.
@@ -36,29 +36,29 @@ trait Describe {
     fn describe(self) -> string;
 }
 
-struct Circle {
+type Circle {
     radius: int
 }
 
-struct Rectangle {
-    width: int;
+type Rectangle {
+    width: int,
     height: int
 }
 
 impl Describe for Circle {
     fn describe(self) -> string {
-        return "circle with radius " + to_string(self.radius);
+        return "circle with radius " + str(self.radius);
     }
 }
 
 impl Describe for Rectangle {
     fn describe(self) -> string {
-        return "rectangle " + to_string(self.width) + "x" + to_string(self.height);
+        return "rectangle " + str(self.width) + "x" + str(self.height);
     }
 }
 
-var c = Circle { radius: 5 };
-var r = Rectangle { width: 3, height: 4 };
+var c = new Circle { radius: 5 };
+var r = new Rectangle { width: 3, height: 4 };
 
 print(c.describe());
 print(r.describe());
@@ -73,7 +73,7 @@ A few things worth noticing:
 
 - Inside the impl block, `self` refers to the value `describe` was called on — `self.radius` for `Circle`, `self.width` and `self.height` for `Rectangle`.
 - We call the trait method with familiar dot syntax: `c.describe()`, `r.describe()`. Cronyx looks up which `describe` to use based on the type of `c` and `r`.
-- We used `to_string(...)` to convert integers to strings. That's a built-in helper — Cronyx's `+` for strings only joins strings, so converting first is the way to mix types in a message.
+- We used `str(...)` to convert integers to strings. That's a built-in helper — Cronyx's `+` for strings only joins strings, so converting first is the way to mix types in a message.
 
 If you forget to implement a trait method, or implement it with the wrong signature, the compiler will tell you. Implementations must match the trait's declarations exactly.
 
@@ -86,31 +86,31 @@ trait Show {
     fn show(self) -> string;
 }
 
-struct Point {
-    x: int;
+type Point {
+    x: int,
     y: int
 }
 
-struct Color {
-    r: int;
-    g: int;
+type Color {
+    r: int,
+    g: int,
     b: int
 }
 
 impl Show for Point {
     fn show(self) -> string {
-        return "(" + to_string(self.x) + ", " + to_string(self.y) + ")";
+        return "(" + str(self.x) + ", " + str(self.y) + ")";
     }
 }
 
 impl Show for Color {
     fn show(self) -> string {
-        return "rgb(" + to_string(self.r) + ", " + to_string(self.g) + ", " + to_string(self.b) + ")";
+        return "rgb(" + str(self.r) + ", " + str(self.g) + ", " + str(self.b) + ")";
     }
 }
 
-var p = Point { x: 1, y: 2 };
-var c = Color { r: 255, g: 128, b: 0 };
+var p = new Point { x: 1, y: 2 };
+var c = new Color { r: 255, g: 128, b: 0 };
 
 print(p.show());
 print(c.show());
@@ -132,13 +132,13 @@ trait Summary {
     fn summarize(self) -> string;
 }
 
-struct Article {
-    title: string;
+type Article {
+    title: string,
     author: string
 }
 
-struct Tweet {
-    username: string;
+type Tweet {
+    username: string,
     content: string
 }
 
@@ -154,12 +154,12 @@ impl Summary for Tweet {
     }
 }
 
-fn notify<T: Summary>(item) {
+fn notify<T: Summary>(item: T) {
     print("Breaking news: " + item.summarize());
 }
 
-var a = Article { title: "Cronyx 0.1.4", author: "brendancron" };
-var t = Tweet { username: "cronyx_lang", content: "traits are here" };
+var a = new Article { title: "Cronyx 0.1.4", author: "brendancron" };
+var t = new Tweet { username: "cronyx_lang", content: "traits are here" };
 
 notify(a);
 notify(t);
@@ -170,13 +170,13 @@ Breaking news: Cronyx 0.1.4 by brendancron
 Breaking news: cronyx_lang: traits are here
 ```
 
-`notify<T: Summary>(item)` says "I work for any type `T` as long as `T` implements `Summary`." Inside the body, `item.summarize()` is allowed because the trait bound guarantees the method exists. We pass an `Article`; we pass a `Tweet`; both are accepted because both implement `Summary`.
+`notify<T: Summary>(item: T)` says "I work for any type `T` as long as `T` implements `Summary`." Inside the body, `item.summarize()` is allowed because the trait bound guarantees the method exists. We pass an `Article`; we pass a `Tweet`; both are accepted because both implement `Summary`.
 
 You'll see this pattern everywhere. A function with a trait bound is the standard way to write code that's reusable without giving up type safety — the compiler still checks every call site, it just checks them against the trait's contract instead of against a concrete type. (The angle brackets are *comptime parameters*, which we cover in detail in the metaprogramming section. For now, just read `<T: Summary>` as "any type that implements Summary.")
 
 ## Try it
 
-Define a trait `Area` with one method, `area(self) -> int`. Implement it for `Circle { radius: int }` and `Rectangle { width: int; height: int }`. Then write a generic function `print_area<T: Area>(shape)` that prints the area of any shape, and call it with one of each.
+Define a trait `Area` with one method, `area(self) -> int`. Implement it for `Circle { radius: int }` and `Rectangle { width: int, height: int }`. Then write a generic function `print_area<T: Area>(shape: T)` that prints the area of any shape, and call it with one of each.
 
 A working answer:
 
@@ -185,12 +185,12 @@ trait Area {
     fn area(self) -> int;
 }
 
-struct Circle {
+type Circle {
     radius: int
 }
 
-struct Rectangle {
-    width: int;
+type Rectangle {
+    width: int,
     height: int
 }
 
@@ -206,12 +206,12 @@ impl Area for Rectangle {
     }
 }
 
-fn print_area<T: Area>(shape) {
+fn print_area<T: Area>(shape: T) {
     print(shape.area());
 }
 
-var c = Circle { radius: 5 };
-var r = Rectangle { width: 4, height: 6 };
+var c = new Circle { radius: 5 };
+var r = new Rectangle { width: 4, height: 6 };
 
 print_area(c);
 print_area(r);
@@ -222,7 +222,7 @@ print_area(r);
 24
 ```
 
-Try adding a `Triangle { base: int; height: int }` with its own `Area` impl. The `print_area` function picks it up without any change — that's the trait bound earning its keep.
+Try adding a `Triangle { base: int, height: int }` with its own `Area` impl. The `print_area` function picks it up without any change — that's the trait bound earning its keep.
 
 ## What's next
 

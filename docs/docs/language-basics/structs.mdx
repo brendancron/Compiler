@@ -10,11 +10,11 @@ By the end of this chapter you'll be able to declare structs, construct them, re
 
 ## Declaring a struct
 
-Use the `struct` keyword followed by a name and a block of fields:
+Use the `type` keyword followed by a name and a block of fields:
 
 ```cronyx
-struct Point {
-    x: int;
+type Point {
+    x: int,
     y: int
 }
 ```
@@ -23,51 +23,38 @@ A few things to notice:
 
 - The struct name is capitalized. This isn't enforced, but it's the convention — type names start uppercase, value names start lowercase.
 - Each field is a `name: type` pair, just like a function parameter.
-- Fields are separated by **semicolons** (`;`). The last field can omit its trailing semicolon.
+- Fields are separated by **commas** (`,`). The last field can omit its trailing comma.
 - There's no semicolon after the closing brace.
 
 This declaration introduces a new type called `Point`. You can now use `Point` anywhere a type is expected — `var p: Point`, function parameters, return types, and so on.
 
 ## Constructing a struct
 
-To create a value of a struct type, write the struct name followed by `{ field: value, ... }`:
+To create a value of a struct type, write `new`, the struct name, and `{ field: value, ... }`:
 
 ```cronyx
-struct Point {
-    x: int;
+type Point {
+    x: int,
     y: int
 }
 
-var origin = Point { x: 0, y: 0 };
-var p      = Point { x: 3, y: 4 };
+var origin = new Point { x: 0, y: 0 };
+var p      = new Point { x: 3, y: 4 };
 ```
 
-Watch the punctuation — when you *construct* a struct, fields are separated by **commas** (`,`), not semicolons:
-
-```cronyx
-//  declaration uses ;
-struct Point {
-    x: int;
-    y: int
-}
-
-//  construction uses ,
-var p = Point { x: 3, y: 4 };
-```
-
-This trips people up at first. Easy way to remember: the declaration is a list of *statements* (`x: int;` is a statement), but the construction is a list of *arguments* (like the comma-separated args of a function call).
+The `new` is what tells a construction apart from a block, so it is not optional.
 
 ## Reading fields
 
 Access a field with a dot:
 
 ```cronyx
-struct Point {
-    x: int;
+type Point {
+    x: int,
     y: int
 }
 
-var p = Point { x: 3, y: 4 };
+var p = new Point { x: 3, y: 4 };
 print(p.x);
 print(p.y);
 ```
@@ -84,16 +71,16 @@ The compiler knows `p` is a `Point` and that `Point` has fields `x` and `y`, so 
 Once `Point` is a type, it works in function parameters and return types like any other:
 
 ```cronyx
-struct Point {
-    x: int;
+type Point {
+    x: int,
     y: int
 }
 
 fn translate(p: Point, dx: int, dy: int): Point {
-    return Point { x: p.x + dx, y: p.y + dy };
+    return new Point { x: p.x + dx, y: p.y + dy };
 }
 
-var start = Point { x: 1, y: 1 };
+var start = new Point { x: 1, y: 1 };
 var moved = translate(start, 4, 6);
 
 print(moved.x);
@@ -114,8 +101,8 @@ Define a struct `Rectangle` with `width: int` and `height: int` fields. Write a 
 A working answer:
 
 ```cronyx
-struct Rectangle {
-    width: int;
+type Rectangle {
+    width: int,
     height: int
 }
 
@@ -130,8 +117,8 @@ fn bigger(a: Rectangle, b: Rectangle): Rectangle {
     return b;
 }
 
-var small = Rectangle { width: 2, height: 3 };
-var large = Rectangle { width: 4, height: 5 };
+var small = new Rectangle { width: 2, height: 3 };
+var large = new Rectangle { width: 4, height: 5 };
 
 var winner = bigger(small, large);
 print(winner.width);

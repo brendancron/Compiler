@@ -59,11 +59,11 @@ It's also the same machinery, ultimately, as the `meta { for ... gen fn ... }` p
 A function can have more than one type parameter. Comma-separate them:
 
 ```cronyx
-fn wrap<T>(x) {
+fn wrap<T>(x: T) -> Array<T> {
     return [x];
 }
 
-fn swap<A, B>(pair) {
+fn swap<A, B>(pair: (A, B)) -> (B, A) {
     return (pair.1, pair.0);
 }
 
@@ -92,21 +92,21 @@ Each unique combination of type arguments produces its own specialization. `swap
 
 ## Generic structs
 
-Type parameters work on structs the same way:
+Type parameters work on types the same way:
 
 ```cronyx
-struct Pair<A, B> {
-    first: A;
+type Pair<A, B> {
+    first: A,
     second: B
 }
 
-struct Box<T> {
+type Box<T> {
     value: T
 }
 
-var p1 = Pair { first: 1, second: "one" };
-var p2 = Pair { first: true, second: 99 };
-var b  = Box { value: [1, 2, 3] };
+var p1 = new Pair { first: 1, second: "one" };
+var p2 = new Pair { first: true, second: 99 };
+var b  = new Box { value: [1, 2, 3] };
 
 print(p1.first);
 print(p1.second);
@@ -123,7 +123,7 @@ true
 2
 ```
 
-The same monomorphization story applies. `Pair { first: 1, second: "one" }` produces a `Pair<int, string>`; `Pair { first: true, second: 99 }` produces a `Pair<bool, int>`. They're different concrete struct types in the runtime program, sharing nothing but the source-level declaration.
+The same monomorphization story applies. `new Pair { first: 1, second: "one" }` produces a `Pair<int, string>`; `new Pair { first: true, second: 99 }` produces a `Pair<bool, int>`. They're different concrete struct types in the runtime program, sharing nothing but the source-level declaration.
 
 That means you can't accidentally pass a `Pair<int, string>` where a `Pair<bool, int>` was expected — they're as distinct to the type system as `int` and `string` are, even though they came from the same generic declaration.
 

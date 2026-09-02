@@ -4,33 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-All commands run from repo root unless noted.
+`bootstrap2/` (OCaml) is the compiler. `bootstrap/` (Rust) is the one it
+replaced — it is kept for reference, is not in CI, and no longer compiles the
+current `stdlib/` or `tests/`.
+
+All commands run from `bootstrap2/` unless noted.
 
 ```bash
 # Build
-make rust                          # release build
-cd bootstrap && cargo build        # dev build
+dune build
 
-# Test
-make test                          # all tests
-cd bootstrap && cargo test         # all Rust tests
-cd bootstrap && cargo test <name>  # single test by name (substring match)
-cd bootstrap && cargo test --test script_integration    # one test file
-cd bootstrap && cargo test --test compile_integration   # compile tests
-cd bootstrap && cargo test -- --nocapture               # show stdout
+# Test — the whole fixture suite
+dune test
+dune test --force            # again, ignoring dune's cache
 
-# Run
-cargo run --manifest-path bootstrap/Cargo.toml -- path/to/file.cx
-cargo run --manifest-path bootstrap/Cargo.toml -- path/to/file.cx --compile --out /tmp/bin
-
-# Suppress warnings during test iteration
-cd bootstrap && RUSTFLAGS="-A warnings" cargo test
+# Run a program (paths are relative to the repo root)
+dune exec --root . bin/main.exe -- ../tests/core/print/hello.cx
 ```
 
-**Useful CLI flags** (passed to the compiler binary):
-- `--compile --out <path>` — emit native binary via LLVM instead of interpreting
-- `--dump-all --out-dir out` — write debug files for every pipeline stage
-- `--dump-runtime-ast`, `--dump-cps`, `--dump-staged`, etc. — individual stage dumps
+**CLI flags**, each printing one stage and then running:
+- `--dump-source` — the source as the scanner received it
+- `--dump-tokens` — the token stream
+- `--dump-ast` — the parsed tree
+- `--dump-types` — the tree after checking, every node annotated
+- `--dump-code` — the program as Cronyx after metaprocessing, which is how to
+  read what a `gen` or a deriver produced
 
 ## Code style
 
@@ -70,58 +68,48 @@ Rewriting a comment to be more insightful is usually the wrong fix. Deleting it 
 
 ## Architecture
 
-Cronyx is a statically-typed, metaprogramming-first language. The compiler lives entirely in `bootstrap/src/`.
-
-### Pipeline (in order)
+Cronyx is a statically-typed, metaprogramming-first language.
+[internal-docs/Architecture.md](internal-docs/Architecture.md) is the authority
+on the pipeline and carries a heading per pass; the order itself lives in
+`bootstrap2/lib/compile.ml` and nowhere else.
 
 ```
-Source files
-  → frontend::module_loader       load compilation unit (entry + imports)
-  → frontend::{lexer, parser}     tokenize + parse → MetaAst
-  → semantics::types::type_checker        Phase 1 HM type inference (permissive)
-  → semantics::meta::meta_stager          identify staged (compile-time) functions
-  → semantics::meta::meta_processor       execute staged code → RuntimeAst
-      uses: semantics::meta::interpreter_meta_evaluator
-            semantics::meta::monomorphize
-  → semantics::cps::effect_marker         mark which functions need CPS
-  → semantics::cps::cps_transform         rewrite those functions to pass continuations
-  → semantics::types::runtime_type_checker  Phase 2 strict type check → type_map
-  → [branch]
-      codegen::compile            LLVM IR → native binary (--compile flag)
-      runtime::interpreter        tree-walking interpreter (default)
+Scanner → Parser → Loader → Metaprocess → Desugar → Value monomorphize
+  → Typecheck → Type monomorphize → Resolve → Reflect → CPS → Verify → Interp
 ```
 
 ### Key distinctions
 
-**Two ASTs**: `MetaAst` is the parsed form (includes compile-time constructs). `RuntimeAst` is post-metaprocessing (all staging resolved, generics monomorphized). The CPS transform and type_map operate on `RuntimeAst`.
+**One AST, several stages of it.** `Ast` is parameterized by its annotation and
+by what a statement holds, so `desugared_stmt`, `typed_stmt`, `resolved_stmt`
+and `cps_stmt` are the same tree at different points. A construct that has been
+lowered is gone from the type, which is what stops a later pass from meeting it.
 
-**Two type-checking phases**: Phase 1 (`type_checker`) is permissive — unbound vars get fresh type vars because metaprogramming may introduce bindings. Phase 2 (`runtime_type_checker`) is strict and runs after all staging is resolved.
+**Two monomorphizers.** `Value_mono` substitutes comptime *value* parameters and
+runs before checking, because a value can decide a type. `Type_mono` copies
+generic bodies per concrete type and runs after, because inference is what says
+which types those are.
 
-**Metaprogramming via staging**: `staged_forest` builds a dependency graph of compile-time functions. The meta evaluator executes them to produce generated code that becomes part of `RuntimeAst`.
+**Metaprocessing is the pipeline calling itself.** A `meta` block is compiled by
+the passes above and run by the interpreter, which is why `Compile` holds
+everything from `Desugar` on and `Pipeline` holds the rest.
 
-**CPS is selective**: `effect_marker` identifies only functions that perform control effects; `cps_transform` rewrites only those. This is groundwork for the algebraic effects system.
+**Dispatch is static.** Operators are traits, `Resolve` turns every impl into
+plain functions, and there are no trait objects — see
+[internal-docs/Elaboration.md](internal-docs/Elaboration.md).
 
-### Module map
-
-| Path | Role |
-|------|------|
-| `src/main.rs` | CLI entry, orchestrates full pipeline |
-| `src/args.rs` | Argument parsing (no external lib) |
-| `src/frontend/` | Lexer, parser, module loader, MetaAst definition |
-| `src/semantics/types/` | Type definitions, HM inference, runtime type checker |
-| `src/semantics/meta/` | Staging, meta-evaluation, monomorphization, RuntimeAst definition |
-| `src/semantics/cps/` | Effect marking and CPS transform |
-| `src/runtime/` | Tree-walking interpreter, value representation, environment |
-| `src/codegen/` | LLVM codegen via inkwell (Milestone 0: arithmetic + print) |
-| `src/util/` | `IdProvider` (unique AST node IDs), formatters |
-| `src/error.rs` | `CompilerError` + `Diagnostic` (span-enriched errors) |
+**CPS is selective.** Only functions performing control effects are rewritten,
+and each effect gets evidence passing or full continuations depending on whether
+its handlers resume in tail position.
 
 ### Test fixtures
 
-`tests/` (repo root, not `bootstrap/tests/`) contains `.cx` source + `.txt` expected-stdout pairs organized by category: `core/`, `effects/`, `meta/`, `operators/`, `types/`, `compile/`.
+`tests/` (repo root, not `bootstrap2/test/`) holds `.cx` sources paired with
+what they must produce: a `.txt` of expected stdout, a `.err` of expected
+diagnostics, or a `.rt` for one that runs and then fails.
 
-Compile tests additionally have `.ll` expected IR files for regression (target triple line stripped before comparison).
-
-### LLVM setup
-
-`bootstrap/.cargo/config.toml` sets `LLVM_SYS_200_PREFIX=/usr/local/opt/llvm@20`. inkwell 0.9 with feature `llvm20-1`. Uses opaque pointers (`context.ptr_type(AddressSpace::default())`). Shells out to `clang -Wno-override-module` for linking.
+Every fixture must be named by a list in `bootstrap2/test/test_bootstrap2.ml`,
+and a fixture no list names is a test failure of its own. A feature that does
+not work yet goes in `expected_failing` with the work it waits on — the suite
+asserts it still fails, and says so the moment it starts passing. Write the
+fixture before the feature.

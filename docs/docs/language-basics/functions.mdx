@@ -134,12 +134,12 @@ foo();
 
 ## Functions as values
 
-Functions are values. You can store one in a variable, pass one as an argument, and return one from another function. The type of a function is written `fn(<param-types>): <return-type>` — so `fn(int): int` is the type of a function from `int` to `int`.
+Functions are values. You can store one in a variable, pass one as an argument, and return one from another function. The type of a function is written `(<param-types>) -> <return-type>` — so `(int) -> int` is the type of a function from `int` to `int`.
 
 Imagine a checkout function that needs to apply a discount, but the *kind* of discount depends on the customer — a percentage off, a flat amount off, a loyalty bonus, and so on. Instead of stuffing every option inside `checkout` with a pile of `if`s, we can let the caller pass in a discount *function*:
 
 ```cronyx
-fn checkout(price: int, discount: fn(int): int): int {
+fn checkout(price: int, discount: (int) -> int): int {
     return discount(price);
 }
 ```
@@ -149,12 +149,12 @@ fn checkout(price: int, discount: fn(int): int): int {
 Now we need to actually pass it a discount. One way is to construct one with a `fn` *expression* and bind it to a variable:
 
 ```cronyx
-fn checkout(price: int, discount: fn(int): int): int {
+fn checkout(price: int, discount: (int) -> int): int {
     return discount(price);
 }
 
-var ten_percent_off = fn(price: int): int { return price - (price / 10); };
-var flat_five_off   = fn(price: int): int { return price - 5; };
+var ten_percent_off = (price: int) => { return price - (price / 10); };
+var flat_five_off   = (price: int) => { return price - 5; };
 
 print(checkout(100, ten_percent_off));
 print(checkout(100, flat_five_off));
@@ -167,19 +167,19 @@ print(checkout(100, flat_five_off));
 
 Same `checkout`, same starting price, different result — because we passed in a different function.
 
-Look closely at `fn(price: int): int { return price - (price / 10); }`. It has the same shape as a regular function declaration — parameters, return type, body — but no name, and the whole thing ends with a semicolon because it's an expression being assigned to a variable. We bind it to `ten_percent_off`, then pass `ten_percent_off` to `checkout` like we'd pass any other value.
+Look closely at `(price: int) => { return price - (price / 10); }`. It has the same shape as a regular function declaration — parameters and body — but no name and no `fn`, and the whole thing ends with a semicolon because it's an expression being assigned to a variable. We bind it to `ten_percent_off`, then pass `ten_percent_off` to `checkout` like we'd pass any other value.
 
-Writing `fn(...) { ... }` every time is verbose, though, so Cronyx gives you a shorter form for the common case.
+Writing `(...) => { ... }` every time is verbose, though, so Cronyx gives you a shorter form for the common case.
 
 ## Trailing lambdas
 
 When a function's last parameter is a function, you can pass that function in a pair of braces *after* the call. This is a **trailing lambda**:
 
 ```cronyx
-fn apply(f: fn(int): int): int {
+fn apply(f: (int) -> int): int {
     return f(10);
 }
-print(apply { it * 2 });
+print(apply() { it * 2 });
 ```
 
 ```
@@ -188,27 +188,16 @@ print(apply { it * 2 });
 
 Inside the braces, `it` refers to the lambda's single parameter. So `{ it * 2 }` is shorthand for "a function that takes one argument and returns twice that argument." `apply` calls it with `10`, gets back `20`, and `print` prints it.
 
-If you want to name the parameter explicitly — for clarity, or because the lambda has more than one — use the `param -> body` form:
+The parentheses stay even when there is nothing else to pass — they are what makes it a call.
+
+A trailing lambda takes one parameter, always called `it`. When you need more than one, or want to name them, write the lambda out and pass it as an ordinary argument:
 
 ```cronyx
-fn apply(f: fn(int): int): int {
-    return f(10);
-}
-print(apply { x -> x + 5 });
-```
-
-```
-15
-```
-
-For multiple parameters, separate them with commas:
-
-```cronyx
-fn combine(a: int, b: int, f: fn(int, int): int): int {
+fn combine(a: int, b: int, f: (int, int) -> int): int {
     return f(a, b);
 }
-print(combine(3, 4) { x, y -> x + y });
-print(combine(10, 3) { x, y -> x - y });
+print(combine(3, 4, (x: int, y: int) => { return x + y; }));
+print(combine(10, 3, (x: int, y: int) => { return x - y; }));
 ```
 
 ```
@@ -222,12 +211,12 @@ This is one of the syntactic features that gives Cronyx its flavor. You'll see i
 
 ## Try it
 
-Write a function `twice` that takes a function `f: fn(int): int` and an `int`, and returns `f(f(x))` — `f` applied to `x`, then applied again to the result. Call it with a trailing lambda that adds 1, starting from 0. The output should be `2`.
+Write a function `twice` that takes a function `f: (int) -> int` and an `int`, and returns `f(f(x))` — `f` applied to `x`, then applied again to the result. Call it with a trailing lambda that adds 1, starting from 0. The output should be `2`.
 
 A working answer is hidden below — try it on your own first.
 
 ```cronyx
-fn twice(x: int, f: fn(int): int): int {
+fn twice(x: int, f: (int) -> int): int {
     return f(f(x));
 }
 print(twice(0) { it + 1 });
