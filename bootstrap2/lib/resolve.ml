@@ -13,12 +13,12 @@ let row_of (t : Types.ty) =
 
 let rec record (s : Ast.typed_stmt) =
   match s.Ast.it with
-  | `Impl_decl (_, type_name, _, impl) ->
+  | `Impl_decl (trait, type_name, _, impl) ->
     List.iter
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
         Hashtbl.replace
           declared_rows
-          (Ast.method_name type_name m.Ast.md_name)
+          (Ast.impl_method_name trait type_name m.Ast.md_name)
           (row_of m.Ast.md_ann);
         List.iter record m.Ast.md_body)
       impl.Ast.ib_methods
@@ -119,7 +119,7 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
         let all =
           if Registry.is_associated registry owner name then args else receiver :: args
         in
-        `Call (fn_ref span (Ast.method_name owner name) all ann, all))
+        `Call (fn_ref span (Registry.entry_for_method registry owner name) all ann, all))
     | `Collection_lit items ->
       let items = List.map (expr registry) items in
       if Types.is_array ann
@@ -230,12 +230,12 @@ and stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =
     [ node
         (`Fn (Ast.op_entry_name op params signature, params, signature, block registry body))
     ]
-  | `Impl_decl (_, type_name, _, impl) ->
+  | `Impl_decl (trait, type_name, _, impl) ->
     List.map
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
         { Ast.it =
             (`Fn
-            ( Ast.method_name type_name m.Ast.md_name
+            ( Ast.impl_method_name trait type_name m.Ast.md_name
             , m.Ast.md_params
             , m.Ast.md_signature
               , block registry m.Ast.md_body )

@@ -30,6 +30,9 @@ type t =
     indexed : (string * string, indexing) Hashtbl.t
   ; constructors : (string, string) Hashtbl.t
   ; associated : (string * string, unit) Hashtbl.t
+  ; (* The function a method call reaches. An impl mangles its methods with the
+       trait it implements, so the written name alone does not name one. *)
+    entries : (string * string, string) Hashtbl.t
   ; exact : (Ast.binop * Types.ty * Types.ty, entry) Hashtbl.t
   ; (* Any two operands of the same type, which cannot be enumerated. *)
     homogeneous : (Ast.binop, entry) Hashtbl.t
@@ -40,6 +43,7 @@ let create () =
   ; indexed = Hashtbl.create 8
   ; constructors = Hashtbl.create 8
   ; associated = Hashtbl.create 8
+  ; entries = Hashtbl.create 32
   ; exact = Hashtbl.create 64
   ; homogeneous = Hashtbl.create 8
   }
@@ -80,6 +84,17 @@ let indexed t name index =
      | _ -> None)
 
 let is_indexed t name = overloads t name <> []
+
+(* The first stands: a type implementing one trait at two arguments brings the
+   trait's method twice, and a call written by name cannot say which. *)
+let register_entry t owner method_ mangled =
+  if not (Hashtbl.mem t.entries (owner, method_))
+  then Hashtbl.replace t.entries (owner, method_) mangled
+
+let entry_for_method t owner method_ =
+  match Hashtbl.find_opt t.entries (owner, method_) with
+  | Some mangled -> mangled
+  | None -> Ast.method_name owner method_
 
 (* Reached through the type rather than through a value of it, so a call passes
    no receiver. The checker knows which these are; the passes that build the

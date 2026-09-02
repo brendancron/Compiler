@@ -61,6 +61,12 @@ trait IndexSet<Idx>: Index<Idx> {
     fn set(self, at: Idx, v: Output) -> Output;
 }
 
+// What `var xs: List<int> = [1, 2, 3]` reaches. A literal is an array, and the
+// type it was annotated with says what to build from it.
+trait FromArray<T> {
+    fn from_array(items: Array<T>) -> Self;
+}
+
 // What `a[i:j]` puts between the brackets. The four shapes are four variants
 // rather than one pair with sentinels, so a missing bound is missing rather
 // than encoded.
@@ -118,23 +124,31 @@ type List<T> {
     count: int
 }
 
-op []<T>(items: Array<T>) -> List<T> {
-    return new List { items: items, count: items.len() };
+impl FromArray<T> for List<T> {
+    fn from_array(items: Array<T>) -> List<T> {
+        return new List { items: items, count: items.len() };
+    }
 }
 
-op []<T>(self: List<T>, at: int) -> T {
-    if (at < 0 || at >= self.count) {
-        return self.items[__past_end(self.items)];
+impl Index<int> for List<T> {
+    type Output = T;
+
+    fn get(self, at: int) -> T {
+        if (at < 0 || at >= self.count) {
+            return self.items[__past_end(self.items)];
+        }
+        return self.items[at];
     }
-    return self.items[at];
 }
 
-op []=<T>(self: List<T>, at: int, v: T) -> T {
-    if (at < 0 || at >= self.count) {
-        return self.items[__past_end(self.items)];
+impl IndexSet<int> for List<T> {
+    fn set(self, at: int, v: T) -> T {
+        if (at < 0 || at >= self.count) {
+            return self.items[__past_end(self.items)];
+        }
+        self.items[at] = v;
+        return v;
     }
-    self.items[at] = v;
-    return v;
 }
 
 impl List<T> {
@@ -197,14 +211,16 @@ impl Set<T> {
     }
 }
 
-op []<T>(items: Array<T>) -> Set<T> {
-    var out = new Set { items: [] };
-    var i = 0;
-    while (i < items.len()) {
-        out.insert(items[i]);
-        i = i + 1;
+impl FromArray<T> for Set<T> {
+    fn from_array(items: Array<T>) -> Set<T> {
+        var out = new Set { items: [] };
+        var i = 0;
+        while (i < items.len()) {
+            out.insert(items[i]);
+            i = i + 1;
+        }
+        return out;
     }
-    return out;
 }
 
 type Map<K, V> {
@@ -251,14 +267,16 @@ impl Map<K, V> {
     }
 }
 
-op []<K, V>(pairs: Array<(K, V)>) -> Map<K, V> {
-    var out = new Map { entries: [] };
-    var i = 0;
-    while (i < pairs.len()) {
-        out.insert(pairs[i].0, pairs[i].1);
-        i = i + 1;
+impl FromArray<(K, V)> for Map<K, V> {
+    fn from_array(pairs: Array<(K, V)>) -> Map<K, V> {
+        var out = new Map { entries: [] };
+        var i = 0;
+        while (i < pairs.len()) {
+            out.insert(pairs[i].0, pairs[i].1);
+            i = i + 1;
+        }
+        return out;
     }
-    return out;
 }
 
 fn __is_space(c: char) -> bool {
@@ -374,33 +392,45 @@ impl string {
 }
 // Slicing is indexing by a range, so it is the same operator over a different
 // index — and it copies, because a view would need to say how long it lives.
-op []<T>(self: List<T>, r: Range) -> List<T> {
-    var bounds = __span(r, self.len());
-    var out: List<T> = [];
-    var at = bounds.0;
-    while (at < bounds.1) {
-        out.push(self[at]);
-        at = at + 1;
+impl Index<Range> for List<T> {
+    type Output = List<T>;
+
+    fn get(self, r: Range) -> List<T> {
+        var bounds = __span(r, self.len());
+        var out: List<T> = [];
+        var at = bounds.0;
+        while (at < bounds.1) {
+            out.push(self[at]);
+            at = at + 1;
+        }
+        return out;
     }
-    return out;
 }
 
-op []<T>(self: Array<T>, r: Range) -> Array<T> {
-    var bounds = __span(r, self.len());
-    var taken = bounds.1 - bounds.0;
-    if (taken <= 0) { return new Array<T>(0, self[0]); }
-    var out = new Array<T>(taken, self[bounds.0]);
-    var at = 0;
-    while (at < taken) {
-        out[at] = self[bounds.0 + at];
-        at = at + 1;
+impl Index<Range> for Array<T> {
+    type Output = Array<T>;
+
+    fn get(self, r: Range) -> Array<T> {
+        var bounds = __span(r, self.len());
+        var taken = bounds.1 - bounds.0;
+        if (taken <= 0) { return new Array<T>(0, self[0]); }
+        var out = new Array<T>(taken, self[bounds.0]);
+        var at = 0;
+        while (at < taken) {
+            out[at] = self[bounds.0 + at];
+            at = at + 1;
+        }
+        return out;
     }
-    return out;
 }
 
-op [](self: string, r: Range) -> string {
-    var bounds = __span(r, self.len());
-    return __slice(self, bounds.0, bounds.1);
+impl Index<Range> for string {
+    type Output = string;
+
+    fn get(self, r: Range) -> string {
+        var bounds = __span(r, self.len());
+        return __slice(self, bounds.0, bounds.1);
+    }
 }
 
 |}

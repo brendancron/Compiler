@@ -633,6 +633,20 @@ let op_entry_name op (params : param list) (signature : signature) =
 
 let method_name type_name method_ = generated [ type_name; method_ ]
 
+(* One type may implement a trait at more than one argument — `Index<int>` and
+   `Index<Range>` for the same list — and each brings its own body under the
+   trait's method name. The arguments are part of which body this is. *)
+let impl_method_name trait type_name method_ =
+  match trait with
+  | None -> method_name type_name method_
+  | Some (name, args) ->
+    let written (t : type_expr) =
+      match t.it with
+      | Ty_name n | Ty_app (n, _) -> n
+      | _ -> "_"
+    in
+    generated ([ type_name; name ] @ List.map written args @ [ method_ ])
+
 let map_comptime_arg (f : 'a -> 'b) (a : 'a comptime_arg) : 'b comptime_arg =
   match a with
   | Ct_type t -> Ct_type t

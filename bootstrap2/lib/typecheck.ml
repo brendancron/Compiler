@@ -128,6 +128,11 @@ let with_type_params assoc f =
         saved)
     f
 
+(* Every impl method under its mangled name, so two impls of one trait at
+   different arguments are told apart while `ctx_methods` still answers whether
+   the type has a method by that name at all. *)
+let ctx_entries : (string, unit) Hashtbl.t = Hashtbl.create 32
+
 (* Methods reached through the type rather than through a value of it. *)
 let ctx_associated : (string * string, unit) Hashtbl.t = Hashtbl.create 8
 
@@ -172,6 +177,7 @@ let scoped_declarations f =
   and methods = snapshot ctx_methods
   and impls = snapshot ctx_impls
   and associated = snapshot ctx_associated
+  and entries = snapshot ctx_entries
   and assoc = snapshot ctx_assoc
   and ops = snapshot ctx_effects.ops
   and declared = snapshot ctx_effects.declared
@@ -185,6 +191,7 @@ let scoped_declarations f =
       restore ctx_methods methods;
       restore ctx_impls impls;
       restore ctx_associated associated;
+      restore ctx_entries entries;
       restore ctx_assoc assoc;
       restore ctx_effects.ops ops;
       restore ctx_effects.declared declared;
@@ -201,6 +208,7 @@ let reset_effects () =
   Hashtbl.reset ctx_traits;
   Hashtbl.reset ctx_trait_spans;
   Hashtbl.reset ctx_associated;
+  Hashtbl.reset ctx_entries;
   Hashtbl.reset ctx_assoc;
   Hashtbl.reset ctx_impls;
   Hashtbl.reset ctx_variadic;
@@ -1098,7 +1106,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
          | None -> missing ())
        else (
          let fn =
-           match lookup env (Ast.method_name owner name) with
+           match lookup env (Registry.entry_for_method ctx.registry owner name) with
            | Some scheme -> Types.instantiate scheme
            | None -> missing ()
          in
@@ -1122,7 +1130,10 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
          let ret = Types.fresh () in
          let row = Types.fresh_row () in
          Types.unify fn (Types.IFn (passed, ret, row));
-         admits_row (lookup env (Ast.method_name owner name)) row ctx.row;
+         admits_row
+           (lookup env (Registry.entry_for_method ctx.registry owner name))
+           row
+           ctx.row;
          node ret (`Method_call (receiver, name, as_function, args)))))
   (* Checked the way a named function is, minus the binding and the
      generalization: it is a value here, not a declaration. *)
@@ -1478,7 +1489,11 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
         with_type_params type_params (fun () ->
           List.iter
             (fun (name, bound) ->
-              Hashtbl.replace ctx_assoc (type_name, name) (infer_ty_of_annotation bound))
+              (* One type may implement `Index` at more than one index, and the
+                 key does not say which. The first stands, so a container reads
+                 as holding its elements rather than its slices. *)
+              if not (Hashtbl.mem ctx_assoc (type_name, name))
+              then Hashtbl.replace ctx_assoc (type_name, name) (infer_ty_of_annotation bound))
             impl.Ast.ib_assoc);
         (match trait with
          | None -> ()
@@ -1517,29 +1532,32 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
              | _ ->
                Hashtbl.replace ctx_associated (type_name, m.Ast.md_name) ();
                Registry.mark_associated registry type_name m.Ast.md_name);
-            if Hashtbl.mem ctx_methods (type_name, m.Ast.md_name)
+            (* Keyed by the mangled name, so `Index<int>` and `Index<Range>`
+               each bring a `get` without colliding. *)
+            let mangled = Ast.impl_method_name trait type_name m.Ast.md_name in
+            if Hashtbl.mem ctx_entries mangled
             then
               fail
                 span
                 "Type '%s' already has a method '%s'."
                 type_name
                 m.Ast.md_name;
+            Hashtbl.replace ctx_entries mangled ();
+            Registry.register_entry registry type_name m.Ast.md_name mangled;
             Hashtbl.replace ctx_methods (type_name, m.Ast.md_name) ())
           methods;
         Option.iter
           (fun (t, args) ->
-            Hashtbl.add ctx_impls (type_name, t) (List.map infer_ty_of_annotation args))
+            (* `impl FromArray<T> for List<T>` names the impl's own parameter
+               among the trait's arguments, so they are read in its scope. *)
+            with_type_params type_params (fun () ->
+              Hashtbl.add ctx_impls (type_name, t) (List.map infer_ty_of_annotation args)))
           trait;
         (* An operator trait's impl is an entry in the same table an `op`
            declaration writes to, so the lowering in [Resolve] is unchanged. *)
         Option.iter
           (fun (t, args) ->
-            let entry_name method_ = Ast.method_name type_name method_ in
-            let named what ty =
-              match Types.type_name ty with
-              | Some name -> name
-              | None -> fail span "An operator impl's %s must be a named type." what
-            in
+            let entry_name method_ = Ast.impl_method_name (Some (t, args)) type_name method_ in
             let self_concrete () =
               match Types.concrete (self_ty span type_name params) with
               | Some ty -> ty
@@ -1549,6 +1567,11 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
               match args with
               | [ only ] -> infer_ty_of_annotation only
               | _ -> fail span "'%s' takes one type argument." t
+            in
+            let written_name () =
+              match args with
+              | [ { Ast.it = Ast.Ty_name n; _ } ] | [ { Ast.it = Ast.Ty_app (n, _); _ } ] -> n
+              | _ -> fail span "'%s' takes one named type argument." t
             in
             (match t with
              | "Eq" ->
@@ -1565,20 +1588,30 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
                        ; emit = Registry.Call (entry_name "eq")
                        })
                    [ Ast.Equal; Ast.Not_equal ])
+             (* Keyed by the names written, not by concrete types: `impl
+                Index<int> for List<T>` is an entry for every List. *)
              | "Index" ->
-               with_type_params type_params (fun () ->
-                 Registry.register_index_get
-                   registry
-                   (named "type" (self_concrete ()))
-                   (named "index" (Types.resolve (one_argument ())))
-                   (entry_name "get"))
+               Registry.register_index_get registry type_name (written_name ()) (entry_name "get")
              | "IndexSet" ->
+               Registry.register_index_set registry type_name (written_name ()) (entry_name "set")
+             (* The entry's own signature is what says which element a literal
+                of this type holds, so it is kept rather than the arity. *)
+             | "FromArray" ->
                with_type_params type_params (fun () ->
-                 Registry.register_index_set
+                 let element = one_argument () in
+                 let self = self_ty span type_name params in
+                 let body = Types.IFn ([ element ], self, Types.REmpty) in
+                 Registry.register_container
                    registry
-                   (named "type" (self_concrete ()))
-                   (named "index" (Types.resolve (one_argument ())))
-                   (entry_name "set"))
+                   type_name
+                   { Registry.entry = entry_name "from_array"
+                   ; scheme =
+                       { Types.quantified = List.map fst (Types.free_vars body)
+                       ; quantified_rows = []
+                       ; quantified_fields = []
+                       ; body
+                       }
+                   })
              | _ -> ());
             match List.assoc_opt t operator_traits with
             | None -> ()
@@ -1614,7 +1647,7 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
                   lhs
                   rhs
                   { Registry.result = Some result
-                  ; emit = Registry.Call (Ast.method_name type_name method_)
+                  ; emit = Registry.Call (Ast.impl_method_name (Some (t, args)) type_name method_)
                   }))
           trait
       | _ -> ())
@@ -1762,7 +1795,7 @@ and hoist env (body : Ast.desugared_stmt list) =
                   ( param_types
                   , annotated_or_fresh signature.Ast.ret
                   , Types.fresh_row () ))))
-      | `Impl_decl (_, type_name, params, impl) ->
+      | `Impl_decl (trait, type_name, params, impl) ->
         (* Declared, like a written `<T>`, so a kind constraint from the body
            must not default it. *)
         let impl_params =
@@ -1780,7 +1813,7 @@ and hoist env (body : Ast.desugared_stmt list) =
                receiver as a mismatch on a parameter the author did write. *)
             | [] -> ()
             | { Ast.name = "self"; _ } :: rest ->
-              let mangled = Ast.method_name type_name m.Ast.md_name in
+              let mangled = Ast.impl_method_name trait type_name m.Ast.md_name in
               let type_params =
                 impl_params
                 @ type_params_of s.Ast.span m.Ast.md_signature.Ast.comptime
@@ -1804,7 +1837,29 @@ and hoist env (body : Ast.desugared_stmt list) =
                         ( param_types
                         , annotated_or_fresh m.Ast.md_signature.Ast.ret
                         , row ))))
-            | _ -> ())
+            (* An associated function takes no receiver, but its signature is
+               still written in the impl's parameters — `fn from_array(items:
+               Array<T>) -> List<T>`. *)
+            | written ->
+              let mangled = Ast.impl_method_name trait type_name m.Ast.md_name in
+              let type_params =
+                impl_params @ type_params_of s.Ast.span m.Ast.md_signature.Ast.comptime
+              in
+              Hashtbl.replace ctx_fn_params mangled type_params;
+              with_type_params type_params (fun () ->
+                let row =
+                  match m.Ast.md_signature.Ast.row with
+                  | Some labels -> row_of_labels labels
+                  | None -> Types.fresh_row ()
+                in
+                bind
+                  env
+                  mangled
+                  (Types.mono
+                     (Types.IFn
+                        ( List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) written
+                        , annotated_or_fresh m.Ast.md_signature.Ast.ret
+                        , row )))))
           impl.Ast.ib_methods
       | `Fn (name, params, signature, _) ->
         let type_params = type_params_of s.Ast.span signature.Ast.comptime in
@@ -1960,7 +2015,7 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     let inferred =
       List.map
         (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
-          let mangled = Ast.method_name type_name m.Ast.md_name in
+          let mangled = Ast.impl_method_name trait type_name m.Ast.md_name in
           with_type_params
             (Option.value ~default:[] (Hashtbl.find_opt ctx_fn_params mangled))
             (fun () ->

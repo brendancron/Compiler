@@ -255,10 +255,10 @@ let rec collect state (s : Ast.typed_stmt) =
     List.iter (collect state) body
   (* A method is a function whose first parameter is the receiver, so its
      template is one — the copy is emitted as a plain [`Fn]. *)
-  | `Impl_decl (_, type_name, _, impl) ->
+  | `Impl_decl (trait, type_name, _, impl) ->
     List.iter
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
-        let mangled = Ast.method_name type_name m.Ast.md_name in
+        let mangled = Ast.impl_method_name trait type_name m.Ast.md_name in
         if Types.has_generic m.Ast.md_ann
            && List.exists (type_directed mangled) m.Ast.md_body
         then
