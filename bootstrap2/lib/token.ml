@@ -19,7 +19,7 @@ type token_type =
   | Colon
   | Colon_colon
   | Dot
-  (* One or two character tokens. *)
+    (* One or two character tokens. *)
   | Bang
   | Bang_equal
   | Equal

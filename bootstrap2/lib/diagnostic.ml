@@ -1,6 +1,5 @@
-(* One error type for every pass, so the sequence of passes can be written once
-   and each caller differs only in how it renders what stopped. Each pass keeps
-   its own error record; this is what they are widened to at the boundary. *)
+(* Each pass keeps its own error record; this is what they are widened to at
+   the boundary, so the sequence of passes can be written once. *)
 
 type stage =
   | Scan

@@ -1,8 +1,7 @@
 
 type fields = (string * ty) list
 
-(* An effect and what it was instantiated at. `Yield<int>` and `Yield<string>`
-   are different entries, which is what lets one program hold both. *)
+(* `Yield<int>` and `Yield<string>` are different entries. *)
 and row = (string * ty list) list
 
 and ty =
@@ -41,16 +40,10 @@ and kind =
   | Addable (* int, float, str — the operand type of `+` *)
   | Numeric (* int, float *)
   | Collection of infer_ty
-  (* A trait and what it was named at: `TryFrom<string>` rather than `TryFrom`.
-     A method call resolves through the trait's declared signature, so the
-     owner need not be known. *)
   | Bound of bound list
-  (* `T.Item` before `T` is known. The owner is carried rather than the answer,
-     so the binding is looked up once the owner unifies with something named. *)
+  (* `T.Item` before `T` is known: the owner is carried, not the answer. *)
   | Projection of infer_ty * string
 
-(* A trait, what it was named at, and what the impl it reaches must have bound
-   its associated names to — `Add<T, Output = T>`. *)
 and bound =
   { bd_trait : string
   ; bd_args : infer_ty list
@@ -61,8 +54,8 @@ and tv =
   | Unbound of int * kind
   | Link of infer_ty
 
-(* Labels ending in [REmpty] (closed) or a variable (open). Rewriting an open
-   tail is what lets a pure function pass where an effectful one is expected. *)
+(* Rewriting an open tail is what lets a pure function pass where an effectful
+   one is expected. *)
 and infer_row =
   | REmpty
   | RCons of string * infer_ty list * infer_row
@@ -108,19 +101,15 @@ let fresh_fields () =
   incr counter;
   FVar (ref (FUnbound !counter))
 
-(* Variables introduced by a written `<T>`. Never defaulted: the author said the
-   function is generic in T, so resolving it to int would contradict them. *)
+(* Never defaulted: the author said the function is generic in T. *)
 let declared_params : (int, unit) Hashtbl.t = Hashtbl.create 8
 
 let reset () =
   counter := 0;
   Hashtbl.reset declared_params
 
-(* Unification is by mutation, so an equation that holds only inside a match arm
-   has to be taken back when the arm ends — a GADT constructor refines the
-   scrutinee's parameters there and nowhere else. Recording is off unless
-   something asked for it, so every other unification stays permanent and pays
-   nothing. *)
+(* An equation holding only inside a match arm is taken back when the arm ends.
+   Recording is off unless asked for, so every other unification pays nothing. *)
 type undo = Undo : 'a ref * 'a -> undo
 
 let trail : undo list ref = ref []
@@ -130,10 +119,8 @@ let note (cell : 'a ref) = if !recording then trail := Undo (cell, !cell) :: !tr
 
 
 
-(* Runs [f] with every mutation recorded, then takes them all back. Nothing in
-   the checker needs this any more — refinement solves a substitution instead of
-   unifying and undoing — and it is kept because a speculative unification is
-   the obvious thing to want next and this is how it is done here. *)
+(* Unused: refinement solves a substitution instead. Kept because a speculative
+   unification is the obvious thing to want next. *)
 let retracting f =
   let outer_trail = !trail
   and outer_recording = !recording in
@@ -173,12 +160,10 @@ let rec repr_fields (f : infer_fields) : infer_fields =
     target
   | f -> f
 
-(* A primitive like [Int], written with an argument. Every other container is
-   built from one, so a literal that narrowed to nothing else is one. *)
+(* A literal that narrowed to nothing else is an array. *)
 let array_name = "Array"
 
-(* What `typeof` answers with. Not a runtime value, so nothing constructs one —
-   [Reflect] folds each projection to the data it names. *)
+(* Not a runtime value: [Reflect] folds each projection to the data it names. *)
 let reflection_name = "Type"
 let shape_name = "TypeShape"
 let field_name = "TypeField"
@@ -194,7 +179,6 @@ let ireflected =
 
 let reflected = Named (reflection_name, [], reflection_fields)
 
-(* Compile-time only, like [reflection_name]. *)
 let code_name = "Code"
 let icode = INamed (code_name, [], FEmpty)
 
@@ -360,8 +344,6 @@ and match_generic (general : ty) (concrete : ty) acc =
   | Tuple a, Tuple b when List.length a = List.length b ->
     List.fold_left2 (fun acc a b -> match_generic a b acc) acc a b
   | Record a, Record b -> match_generic_fields a b acc
-  (* Arguments as well as fields, for the same reason [has_generic] needs them:
-     an opaque container carries its parameter nowhere else. *)
   | Named (_, ga, a), Named (_, gb, b) when List.length ga = List.length gb ->
     match_generic_fields a b (List.fold_left2 (fun acc x y -> match_generic x y acc) acc ga gb)
   | Named (_, _, a), Named (_, _, b) -> match_generic_fields a b acc
@@ -413,24 +395,18 @@ let rec row_occurs id (r : infer_row) =
 (* A variable used by both `+` and `-` must end up Numeric, not Addable. *)
 let extra_admits : (kind -> infer_ty -> bool) ref = ref (fun _ _ -> false)
 
-(* What an impl bound an associated name to. The table belongs to the checker,
-   so a projection asks for it through here. *)
+(* The table belongs to the checker, so a projection asks through here. *)
 let assoc_binding : (string -> string -> infer_ty option) ref = ref (fun _ _ -> None)
 
-(* An owner already known needs no variable standing in for it. *)
 let project (owner : infer_ty) (member : string) : infer_ty =
   match Option.bind (infer_type_name owner) (fun name -> !assoc_binding name member) with
   | Some bound -> bound
   | None -> fresh_with (Projection (owner, member))
 
-(* A projection whose owner has become known stands for what the impl bound, so
-   it stops being a variable. Called wherever a type is inspected, since the
-   owner may be settled long after the projection was built.
-
-   [settling] guards the self-reference `T: Add<T, Output = T>` builds, where a
-   variable owns its own projection: asking what it stands for would ask for
-   itself. Nothing is known until the owner is concrete, and by then the answer
-   no longer runs through this cell. *)
+(* Called wherever a type is inspected, since the owner may be settled long
+   after the projection was built. [settling] guards the self-reference
+   `T: Add<T, Output = T>` builds, where asking what a variable stands for would
+   ask for itself. *)
 let settling : tv ref list ref = ref []
 
 let rec settle (t : infer_ty) : infer_ty =
@@ -472,11 +448,8 @@ let rec rewrite_row label args (r : infer_row) : infer_row =
   | RVar { contents = RLink _ } -> assert false
   | REmpty -> error "This code does not handle the effect '%s'." label
 
-(* A call may perform only effects its caller admits. Containment rather than
-   equality: forcing the caller's row onto the callee would give the callee's
-   annotation effects it does not perform, and the CPS pass reads that
-   annotation to decide how many evidence arguments to pass. An open caller row
-   grows to admit what it calls; a closed one rejects it. *)
+(* Containment, not equality: the CPS pass reads the callee's annotation to
+   decide how much evidence to pass. *)
 and row_within (inner : infer_row) (outer : infer_row) : unit =
   match repr_row inner with
   | REmpty | RVar _ -> ()
@@ -564,9 +537,8 @@ and strongest a b =
     Collection x
   | Collection _, Any -> a
   | Any, Collection _ -> b
-  (* Compared by name and arity rather than structurally: `T: Add<T>` puts the
-     variable inside its own kind, and walking the arguments to compare them
-     would not terminate. *)
+  (* `T: Add<T>` puts the variable inside its own kind, so comparing the
+     arguments structurally would not terminate. *)
   | Bound x, Bound y ->
     let same (a : bound) (b : bound) =
       String.equal a.bd_trait b.bd_trait
@@ -578,8 +550,7 @@ and strongest a b =
   | Collection _, other | other, Collection _ ->
     error "A collection is not %s." (string_of_kind other)
   (* Yielding to [Any] would drop the owner, and with it the only route back to
-     what the projection stands for. A real constraint still wins: by the time
-     one applies, what the projection resolves to has to satisfy it anyway. *)
+     what the projection stands for. *)
   | Projection _, Any -> a
   | Any, Projection _ -> b
   | Projection _, other | other, Projection _ -> other
@@ -604,19 +575,15 @@ and unify (a : infer_ty) (b : infer_ty) : unit =
   | IVar r1, IVar r2 when r1 == r2 -> ()
   | ( IVar ({ contents = Unbound (id1, k1) } as r1)
     , IVar ({ contents = Unbound (id2, k2) } as r2) ) ->
-    (* A declared parameter is the survivor, so the identity a written `<T>` was
-       given stays the representative. A scheme naming it — what a recursive
-       occurrence quantifies over — records an id, and an alias would leave that
-       id pointing at nothing and the variable unquantified. *)
+    (* A scheme records the survivor's id; an alias would leave it pointing at
+       nothing. *)
     let keep, dropped, kept =
       if Hashtbl.mem declared_params id1 && not (Hashtbl.mem declared_params id2)
       then r1, r2, id1
       else r2, r1, id2
     in
-    (* Only when the kind actually changes. Rewriting the survivor's cell to the
-       kind it already had is a write like any other, and against an older
-       variable that is the difference between an arm constraining something and
-       an arm merely mentioning it. *)
+    (* Rewriting the cell to the kind it already had is still a write, and that
+       is an arm constraining something rather than mentioning it. *)
     (match k1, k2 with
      | Any, Any -> ()
      | _ ->
@@ -755,9 +722,8 @@ let generalize ~env_vars ~env_rows ~env_fields body =
   ; body
   }
 
-(* Narrows a variable already in scope. A parameter's own bound may mention it —
-   `T: Add<T, Output = T>` — so the variable has to exist before its kind is
-   known. *)
+(* A parameter's own bound may mention it, so the variable has to exist before
+   its kind is known. *)
 let constrain (t : infer_ty) (kind : kind) : unit =
   match repr t with
   | IVar ({ contents = Unbound (id, existing) } as cell) ->
@@ -796,11 +762,8 @@ let instantiate ?(bound = []) (s : scheme) : infer_ty =
           match Hashtbl.find_opt types id with
           | Some copy -> copy
           | None ->
-            (* A kind may carry a type of its own, and sharing it across copies
-               would pin every instantiation to whatever the first one chose.
-               The copy is registered before its kind is walked: `T: Add<T>`
-               carries the variable being copied, and finding the copy already
-               there is what ends the recursion. *)
+            (* Registered before its kind is walked, since `T: Add<T>` carries
+               the variable being copied. *)
             let copy = fresh () in
             Hashtbl.add types id copy;
             (match copy with
@@ -859,10 +822,8 @@ let instantiate ?(bound = []) (s : scheme) : infer_ty =
     in
     walk s.body)
 
-(* What a type is right now, with every variable that is bound expanded and
-   every variable that is not left shared. A tree checked under an equation that
-   is about to be taken back keeps its annotations this way: the equation's
-   consequences are written into the copy before the equation goes. *)
+(* A tree checked under an equation about to be taken back keeps its
+   annotations this way. *)
 let rec snapshot (t : infer_ty) : infer_ty =
   match repr t with
   | ITuple items -> ITuple (List.map snapshot items)
@@ -877,10 +838,8 @@ and snapshot_fields (f : infer_fields) : infer_fields =
   | FCons (label, ty, rest) -> FCons (label, snapshot ty, snapshot_fields rest)
   | settled -> settled
 
-(* A solution to `these ≡ those` as an assoc list, with nothing written. What a
-   constructor says about the scrutinee holds inside one arm, so it is applied
-   to what that arm sees rather than to the store — which is the difference
-   between refining and unifying-then-taking-it-back. *)
+(* Written nowhere: what a constructor says holds inside one arm, so it applies
+   to what that arm sees rather than to the store. *)
 let solve (pairs : (infer_ty * infer_ty) list) : (int * infer_ty) list option =
   let bindings = ref [] in
   let rec through t =

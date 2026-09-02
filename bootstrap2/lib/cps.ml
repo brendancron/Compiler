@@ -20,10 +20,9 @@ type effects =
 
 let evidence_name op = Ast.generated [ "ev"; op ]
 
-(* Marks a `run` block in a function that was not itself converted. Returning
-   out of one would have to travel back through the handler that resumed into
-   it, which only a continuation can do — and the enclosing function has none,
-   because handling the effect discharged its row. *)
+(* Returning out of one travels back through the handler that resumed into it,
+   which only a continuation can do — and handling the effect discharged the
+   enclosing function's row. *)
 let no_return = Ast.generated [ "cps"; "no-return" ]
 let continuation = Ast.generated [ "cps"; "k" ]
 let counter = ref 0
@@ -32,7 +31,7 @@ let fresh prefix =
   incr counter;
   Ast.generated [ prefix; string_of_int !counter ]
 
-(* Sorted and deduplicated, so caller and callee agree without communicating. *)
+(* Sorted, so caller and callee agree without communicating. *)
 let evidence_of_row info (row : Types.row) =
   row
   |> List.map fst
@@ -55,9 +54,8 @@ let evidence_ty info op =
   | Some t -> t
   | None -> Types.Unit
 
-(* The type gains the evidence parameters too, or it describes the wrong arity.
-   A function passed to a function is widened where it stands, so the parameter
-   describing it is widened with it. *)
+(* The type gains the evidence parameters too, or it describes the wrong
+   arity. *)
 let rec widen info (t : Types.ty) =
   match t with
   | Types.Fn (params, ret, row) ->
@@ -115,9 +113,7 @@ let is_resume (s : Ast.reflected_stmt) =
   | `Resume _ -> true
   | _ -> false
 
-(* A `return` anywhere inside means the statement has to be converted, whether
-   or not anything in it suspends: left alone it stays an ordinary return, and
-   the value never reaches the continuation. *)
+(* Left alone, its value never reaches the continuation. *)
 let rec holds_return (s : Ast.reflected_stmt) =
   match s.Ast.it with
   | `Return _ -> true
@@ -142,9 +138,8 @@ let tail_resumptive (body : Ast.reflected_stmt list) =
     Some (List.rev ({ last with Ast.it = `Return value } :: earlier))
   | _ -> None
 
-(* Not "resumes in tail position" but "needs no continuation", which a `final
-   ctl` also does not: it never resumes at all, so what it needs is a way out,
-   and that is an unwind. *)
+(* "Needs no continuation" rather than "resumes in tail position": a `final ctl`
+   never resumes, and what it needs is an unwind. *)
 let arm_needs_no_continuation (a : Ast.reflected_stmt Ast.arm) =
   match a.Ast.arm_kind with
   | Ast.Op_fn | Ast.Op_final -> true
@@ -158,8 +153,6 @@ let handlers_are_tail_resumptive handlers =
 
 (* ---- expressions ---- *)
 
-(* [expr] needs the statement conversion defined below it, so the knot is tied
-   once, after both exist. *)
 let convert_body : (effects -> Ast.reflected_stmt list -> Ast.cps_stmt list) ref =
   ref (fun _ _ -> [])
 
@@ -168,8 +161,7 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
   let it : Ast.cps_expr_kind =
     match e.Ast.it with
     | #Ast.lit as l -> l
-    (* A function value takes evidence from its own row, the way a declaration
-       does, so a call site passes the same arguments whichever it reached. *)
+    (* A call site passes the same arguments whichever it reached. *)
     | `Lambda (params, signature, body) ->
       let row = row_of e.Ast.ann in
       if is_delimited info row
@@ -185,8 +177,7 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
         widened := widen info e.Ast.ann;
         `Lambda (params @ evidence, signature, !convert_body info body))
     | `Var name ->
-      (* Evidence is only known at call sites, so a bare reference would
-         escape with the wrong arity. *)
+      (* A bare reference would escape with the wrong arity. *)
       if is_effectful info e.Ast.ann
       then
         unsupported e.Ast.span "'%s' performs effects and cannot be used as a value yet." name
@@ -228,7 +219,6 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
 
 let rec suspends info (e : Ast.reflected_expr) =
   match e.Ast.it with
-  (* A value, whatever its body does when it is eventually called. *)
   | `Lambda _ | #Ast.lit | `Var _ -> false
   | `Call (callee, args) ->
     (match callee.Ast.it with
@@ -333,15 +323,11 @@ and extract_list info items rebuild =
 
 (* ---- continuation-passing form ---- *)
 
-(* [ret] is what a `return` calls — the continuation of the function being
-   converted — and [k] is what the statement after this one runs under. They
-   coincide at the top of a body and part company inside a branch, where the
-   join resumes the rest of the body but a `return` must leave the function
-   altogether. *)
+(* [ret] is what a `return` calls, [k] what the next statement runs under. They
+   part company inside a branch, where the join resumes the rest of the body. *)
 let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
   match stmts with
-  (* [at] is where the statements ran out, so the tail call to [k] is reported
-     against the construct that held them rather than nowhere. *)
+  (* Reported against the construct that held them rather than nowhere. *)
   | [] -> [ call at k [ ignored at ] ]
   | s :: rest ->
     let span = s.Ast.span in
@@ -363,8 +349,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
               "A 'return' out of a 'run' block is not supported yet when its \
                handler resumes."
           else [ call span ret [ expr info value ] ])
-     (* The arm keeps running afterwards, which is what makes multi-shot fall
-        out. *)
+     (* The arm keeps running afterwards: multi-shot falls out. *)
      | `Resume value ->
        let value =
          match value with
@@ -372,14 +357,11 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
          | None -> ignored span
        in
        call span continuation [ value ] :: cps info ret k ~at:span rest
-     (* Converted code leaves a scope three ways: by calling the continuation,
-        by returning, and by an unwind going past. The first two are calls, so
-        the deferred statement goes inside a wrapper around each — which is
-        what makes it run once per exit when a handler resumes more than once.
-        The third is an exception, so it goes in an `On_unwind`.
-
-        The flag is what keeps an unwind that reaches this frame after control
-        already left it from running the statement a second time. *)
+     (* Converted code leaves a scope by calling the continuation, by
+        returning, or by an unwind. The first two are calls, so the deferred
+        statement wraps each — which is what runs it once per exit when a
+        handler resumes twice. The flag keeps an unwind reaching this frame
+        afterwards from running it again. *)
      | `Defer inner ->
        let armed = fresh "armed" in
        let flag value : Ast.cps_expr =
@@ -418,8 +400,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
              span
              (`On_unwind
                ( cps info ret' k' ~at:span rest
-                 (* An unwind has no continuation to hand the statement, so one
-                    that performs an effect cannot run on this path. *)
+                 (* No continuation here, so one performing an effect cannot run. *)
                , (if suspends_stmt info inner
                   then []
                   else
@@ -473,8 +454,6 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
                        (* Without this the join is never reached. *)
                        | None -> call span join [ ignored span ]) ))
             ])
-     (* Every arm ends by calling the join, including an empty one: [cps] of no
-        statements is a call to the continuation it was given. *)
      | `Match (scrutinee, cases) when suspends_stmt info s || holds_return s ->
        let join = fresh "join" in
        fn_decl span join [ fresh "x" ] (cps info ret k ~at:span rest)
@@ -490,15 +469,14 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
        [ fn_decl span next [ fresh "x" ] (cps info ret k ~at:span rest)
        ; node span (`Block (cps info ret next ~at:span body))
        ]
-     (* A loop that suspends becomes a recursive continuation: the body's "what
-        runs next" is the loop itself, so resuming carries on with the next
-        iteration and resuming twice runs it twice. *)
+     (* The body's "what runs next" is the loop itself, so resuming carries
+        on with the next iteration and resuming twice runs it twice. *)
      | `While (cond, body) when suspends_stmt info s ->
        let again = fresh "loop"
        and after = fresh "after" in
        [ fn_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
-       ; (* The condition is evaluated once per iteration, so extracting it goes
-            inside the continuation the loop re-enters, not before it. *)
+       ; (* Once per iteration, so extracting it goes inside the continuation
+            the loop re-enters. *)
          fn_decl
            span
            again
@@ -515,11 +493,8 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
        ]
      | `Run (body, handlers) when not (handlers_are_tail_resumptive handlers) ->
        run info ret span k handlers body rest
-     (* Tail-resumptive, so the arms need no continuation — but the body still
-        stands in a converted function, and may return out of it or perform an
-        effect handled further out. What follows is the body's continuation
-        rather than a statement after the block, or a `return` would run it on
-        the way out. *)
+     (* The body may still return out of the converted function it stands in,
+        so what follows is its continuation rather than a later statement. *)
      | `Run (body, handlers)
        when List.exists (fun b -> suspends_stmt info b || holds_return b) body ->
        let after = fresh "after" in
@@ -531,17 +506,14 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
                  (`Scope
                    ( scope
                    , cps info ret after ~at:span body
-                   (* An abort skipped the body's own continuation, so what
-                      follows the block is reached from here instead. *)
+                   (* An abort skipped the body's own continuation. *)
                    , [ call span after [ ignored span ] ] )) ])
      | _ ->
        (match stmt info s with
         | Some s -> s :: cps info ret k ~at:span rest
         | None -> cps info ret k ~at:span rest))
 
-(* The expression a branch or a loop is steered by. It has to be evaluated
-   before the statement it controls rather than inside it, which for an
-   operation means sequencing it the way a statement's own expression is. *)
+(* Evaluated before the statement it controls rather than inside it. *)
 and controlled_by info span (cond : Ast.reflected_expr) build =
   if not (suspends info cond)
   then build (expr info cond)
@@ -572,8 +544,7 @@ and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
     [ call span target (args @ evidence @ [ var span Types.Unit next ]) ]
   | _ -> unsupported span "This effect cannot be sequenced yet."
 
-(* The body's continuation resumes after the block, so an arm that never calls
-   it abandons the rest of the body: abort. *)
+(* An arm that never calls it abandons the rest of the body: abort. *)
 and run info ret span k handlers body rest : Ast.cps_stmt list =
   let after = fresh "after" in
   let finished = fresh "finished" in
@@ -593,9 +564,8 @@ and run info ret span k handlers body rest : Ast.cps_stmt list =
           h.Ast.arms)
       handlers
   in
-  (* The body ends the delimited computation rather than continuing the
-     program, so what follows the block runs once after the handler is done —
-     not once per resumption. *)
+  (* What follows the block runs once after the handler is done, not once
+     per resumption. *)
   (fn_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
    :: fn_decl span finished [ fresh "x" ] []
    :: arms)
@@ -637,14 +607,12 @@ and stmt info (s : Ast.reflected_stmt) : Ast.cps_stmt option =
     keep
       (`Block
         (direct_arms info s.Ast.span ~scope handlers
-         (* Nothing on catching it: the statements after the block are still
-            statements, and the enclosing one carries on to them. *)
+         (* The statements after the block are still statements. *)
          @ [ node s.Ast.span (`Scope (scope, sequence_body info body, [])) ]))
   | #Ast.stmts as st ->
     keep (Ast.map_stmts (expr info) (block info) st :> Ast.cps_stmt_kind)
 
-(* The arms of a handler that needs no continuation: each is a function of the
-   operation's parameters alone, which is what a call site passes. *)
+(* Each arm is a function of the operation's parameters alone. *)
 and direct_arms info span ~scope handlers =
   List.concat_map
     (fun (h : Ast.reflected_stmt Ast.handler) ->
@@ -669,17 +637,15 @@ and block info (s : Ast.reflected_stmt) : Ast.cps_stmt =
 and sequence_body info (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
   match stmts with
   | [] -> []
-  (* What follows the block stays where it was written, so a `return` among
-     those statements returns from the function they are in. *)
+  (* A `return` among them returns from the function they are in. *)
   | { Ast.it = `Run (body, handlers); span; _ } :: rest
     when not (handlers_are_tail_resumptive handlers) ->
     let nothing = fresh "nothing" in
     (fn_decl span nothing [ fresh "x" ] []
      :: run info no_return span nothing handlers body [])
     @ sequence_body info rest
-  (* A statement holding such a `run` deeper down — in a branch, a loop or an
-     arm — needs a continuation just the same, and only the converted
-     translation can supply one. *)
+  (* A `run` deeper down — in a branch, a loop or an arm — needs a
+     continuation just the same. *)
   | s :: rest when suspends_stmt info s ->
     let nothing = fresh "nothing" in
     (fn_decl s.Ast.span nothing [ fresh "x" ] []
@@ -716,8 +682,7 @@ let collect (p : Ast.reflected_stmt list) =
       | _ -> ())
     p;
   (* A row says which effects a function performs, not which handler catches
-     them, so one aborting handler delimits that effect everywhere — and every
-     effect on the same `run`, so its arms share a convention. *)
+     them, so one aborting handler delimits that effect everywhere. *)
   let rec scan (s : Ast.reflected_stmt) =
     (match s.Ast.it with
      | `Run (_, handlers) when not (handlers_are_tail_resumptive handlers) ->

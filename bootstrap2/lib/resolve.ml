@@ -1,9 +1,7 @@
-(* Every construct whose meaning depends on a type becomes a primitive or a
-   call here. A statement may expand into several: an `impl` is a group of
-   functions written under one header. *)
+(* A statement may expand into several: an `impl` is a group of functions
+   written under one header. *)
 
-(* The CPS pass reads a callee's row to decide what evidence to pass, so a
-   synthesized call claiming purity would be given none. *)
+(* A synthesized call claiming purity would be given no evidence. *)
 let declared_rows : (string, Types.row) Hashtbl.t = Hashtbl.create 16
 
 let row_of (t : Types.ty) =
@@ -89,8 +87,7 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
          `Unop (Ast.Not, equal)
        | Some { Registry.emit = Registry.Call name; _ } ->
          `Call (fn_ref span name [ a; b ] ann, [ a; b ])
-       (* Spelled out rather than caught by a wildcard, so a third emission
-          form has to be decided here instead of quietly staying an operator. *)
+       (* Spelled out, so a third emission form has to be decided here. *)
        | Some { Registry.emit = Registry.Primitive; _ } | None -> `Binop (op, a, b))
     | `Method_call (receiver, name, _, args) ->
       let receiver = expr registry receiver in
@@ -104,16 +101,13 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
             "Cannot call '%s': the receiver's type is not known here."
             name
       in
-      (* A receiver the checker could not name is only known to be an array
-         here, so the length intrinsic is selected in both places. *)
+      (* A receiver the checker could not name is an array by here. *)
       if String.equal name Types.array_len && args = [] && Types.is_array receiver.Ast.ann
       then `Array_len receiver
       else if String.equal name Types.array_len && args = [] && receiver.Ast.ann = Types.Str
       then `Str_len receiver
       else (
-        (* An associated function takes no receiver, so what stood in for it is
-           not an argument. *)
-        let all =
+                let all =
           if Registry.is_associated registry owner name then args else receiver :: args
         in
         `Call (fn_ref span (Registry.entry_for_method registry owner name) all ann, all))
@@ -127,8 +121,7 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
         in
         match Types.type_name ann with
         | None -> unbuildable ()
-        (* Anything but an array is built from one holding its elements, and
-           what it holds comes from the entry rather than from its arity. *)
+        (* What it holds comes from the entry rather than from its arity. *)
         | Some name ->
           (match Registry.container registry name, Registry.container_element registry name (Types.of_ty ann) with
            | Some make, Some element ->
@@ -143,8 +136,7 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
     | `Index (target, index) ->
       let target = expr registry target
       and index = expr registry index in
-      (* The primitive reads take an int. Anything else is an entry the type
-         declared, including the range a slice is. *)
+      (* Anything but an int is an entry the type declared, a range included. *)
       if index.Ast.ann <> Types.Int
       then (
         let name = accessor registry target index (fun entry -> entry.Registry.get) in
@@ -173,8 +165,7 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
     | #Ast.ops as o -> (Ast.map_ops (expr registry) o :> Ast.resolved_expr_kind)
     | #Ast.logic as l -> (Ast.map_logic (expr registry) l :> Ast.resolved_expr_kind)
     | #Ast.tuple as t -> (Ast.map_tuple (expr registry) t :> Ast.resolved_expr_kind)
-    (* The checker turned every constructor call into an ordinary one. *)
-    | `New_call _ -> assert false
+        | `New_call _ -> assert false
     | `New (_, fields) ->
       `Record_lit (List.map (fun (l, v) -> l, expr registry v) fields)
     | `New_variant (_, variant, payload) ->
@@ -187,8 +178,7 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
     | #Ast.reflect as r ->
       (Ast.map_reflect (expr registry) r :> Ast.resolved_expr_kind)
   in
-  (* A deferred method call carries whatever type its caller pinned; the length
-     intrinsics above answer with an int whatever that was. *)
+  (* The length intrinsics answer with an int whatever the caller pinned. *)
   let ann =
     match it with
     | `Array_len _ | `Str_len _ -> Types.Int
@@ -211,8 +201,7 @@ and stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =
   and ann = s.Ast.ann in
   let node it : Ast.resolved_stmt = { Ast.it; span; ann } in
   match s.Ast.it with
-  (* [`Block] and [`Fn] hold statement lists, which is where an expansion has
-     room to land; the rest hold single statements. *)
+  (* [`Block] and [`Fn] hold statement lists, where an expansion can land. *)
   | `Block body -> [ node (`Block (block registry body)) ]
   | `Fn (name, params, signature, body) ->
     [ node (`Fn (name, params, signature, block registry body)) ]

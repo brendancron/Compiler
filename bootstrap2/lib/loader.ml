@@ -1,7 +1,5 @@
-(* Several files become one program. A unit contributes declarations; only the
-   entry contributes statements, so nothing is initialized in an order and a
-   cycle is harmless. Names are made unique per unit here, which is why nothing
-   after this point knows that modules exist. *)
+(* Only the entry contributes statements, so nothing is initialized in an order
+   and a cycle is harmless. Names are made unique per unit here. *)
 
 type error =
   { span : Ast.span
@@ -26,8 +24,7 @@ let resolve_path ~from path =
   let path = if Filename.check_suffix path ".cx" then path else path ^ ".cx" in
   if Filename.is_relative path then Filename.concat (Filename.dirname from) path else path
 
-(* Textual, so it needs no filesystem call: two spellings of one path must not
-   load it twice, and the visited set only has to agree with itself. *)
+(* Textual: the visited set only has to agree with itself. *)
 let normalize path =
   let absolute = String.length path > 0 && path.[0] = '/' in
   let parts =
@@ -62,8 +59,7 @@ let parse_unit span path =
      | Error [] -> fail span "'%s' does not parse." path
      | Ok program -> program)
 
-(* A directory import is one import per file in it, sorted so the expansion does
-   not depend on the order a filesystem hands them back. *)
+(* Sorted, so the expansion does not depend on readdir order. *)
 let expand_wildcards ~from (program : Ast.program) =
   List.concat_map
     (fun (s : Ast.stmt) ->
@@ -95,8 +91,7 @@ let path_of = function
   | Ast.Qualified path | Ast.Aliased (path, _) | Ast.Selective (_, path) | Ast.Wildcard path ->
     path
 
-(* Breadth-first, and a unit already seen is skipped rather than rejected: a
-   cycle is two units that import each other, which is legal. *)
+(* A unit already seen is skipped rather than rejected: a cycle is legal. *)
 let load entry =
   let visited = Hashtbl.create 8 in
   let units = ref [] in
@@ -121,9 +116,7 @@ let load entry =
 
 (* ---- resolution ---- *)
 
-(* What a unit exports and therefore what gets a unit-qualified name. An `impl`
-   exports nothing of its own: its methods are reached through the type it is
-   written for, which is renamed with everything else. *)
+(* An `impl` exports nothing: its methods are reached through its type. *)
 let declared_name (s : Ast.stmt) =
   match s.Ast.it with
   | `Fn (name, _, _, _) -> Some name
@@ -139,8 +132,7 @@ let is_declaration (s : Ast.stmt) =
 
 let exports unit_ = List.filter_map declared_name unit_.program
 
-(* Only the entry runs statements, so a statement anywhere else would silently
-   never happen. Saying so costs less than explaining where it went. *)
+(* A statement outside the entry would silently never happen. *)
 let check_declarations_only unit_ =
   List.iter
     (fun (s : Ast.stmt) ->
@@ -151,8 +143,7 @@ let check_declarations_only unit_ =
 let renamed unit_ ~entry name =
   if entry then name else Ast.generated [ unit_.namespace; name ]
 
-(* The names a unit binds locally, so a rename never touches something that only
-   happens to be spelled like a top-level function. *)
+(* So a rename never touches a local spelled like a top-level function. *)
 let rec bound_by (s : Ast.stmt) =
   match s.Ast.it with
   | `Var_decl (name, _, _) -> [ name ]
@@ -161,15 +152,12 @@ let rec bound_by (s : Ast.stmt) =
 
 let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
   let module S = Set.Make (String) in
-  (* Brought in by name, or this unit's own. *)
-  let resolve_local name =
+    let resolve_local name =
     match Hashtbl.find_opt direct name with
     | Some target -> target
     | None -> if Hashtbl.mem own name then rename name else name
   in
-  (* A written type name is resolved the same ways a value name is, plus one
-     reached through a namespace. *)
-  let resolve_type name =
+    let resolve_type name =
     match String.index_opt name '.' with
     | Some at ->
       let namespace = String.sub name 0 at
@@ -219,9 +207,7 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
           List.fold_left (fun acc (p : Ast.param) -> S.add p.Ast.name acc) locals params
         in
         `Lambda (params, signature, List.map (stmt inner) body)
-      (* Read here because this is what knows where the source it was written
-         in lives. What the program keeps is the text, so nothing reads
-         anything later. *)
+      (* Read here, where the source file it was written in is known. *)
       | `Call ({ Ast.it = `Var "embed"; _ }, [ { Ast.it = `Str path; _ } ]) ->
         let path = Utf8.encode path in
         let full =
@@ -234,16 +220,14 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
          | exception Sys_error _ -> fail e.Ast.span "Cannot embed '%s'." path)
       | `Code inner -> `Code (go inner)
       | `Var name when not (S.mem name locals) -> `Var (resolve_local name)
-      (* `math.add(…)` parses as a method call, and is one unless `math` names a
-         module and nothing in scope has taken the name. *)
+      (* A method call unless `math` names a module and nothing took the name. *)
       | `Method_call ({ Ast.it = `Var receiver; _ }, name, _, args)
         when (not (S.mem receiver locals)) && Hashtbl.mem aliases receiver ->
         `Call
           ( { e with Ast.it = `Var (Hashtbl.find aliases receiver name) }
           , List.map go args )
-      (* Whether this reaches a method or a function is not known here, so the
-         name it would have as a function is resolved the same way a reference
-         to it would be, and carried along for whoever can tell. *)
+      (* Not known here, so the name it would have as a function is carried
+         along for whoever can tell. *)
       | `Method_call (receiver, name, _, args) ->
         let as_function = if S.mem name locals then name else resolve_local name in
         `Method_call (go receiver, name, as_function, List.map go args)
@@ -345,8 +329,7 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
       | `Meta_fn (name, params, sg, body) ->
         `Meta_fn (name, List.map param params, signature sg, List.map (stmt locals) body)
       | #Ast.stmts as st -> (Ast.map_stmts (expr locals) (stmt locals) st :> Ast.stmt_kind)
-      (* A loop variable binds for the body alone, so it is added here rather
-         than through [bound_by], which answers for a statement's own list. *)
+      (* A loop variable binds for the body alone, so not via [bound_by]. *)
       | `For_in (name, over, body) ->
         `For_in (name, expr locals over, stmt (S.add name locals) body)
       | `For (init, cond, step, body) ->
@@ -368,8 +351,7 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
         in
         (Ast.map_effects (expr locals) (stmt locals) clause e :> Ast.stmt_kind)
       | `Handler_decl (name, h) -> `Handler_decl (name, Ast.map_handler (stmt locals) h)
-      (* A pattern names its sum type, so it is renamed like any other use. *)
-      | `Match (scrutinee, cases) ->
+            | `Match (scrutinee, cases) ->
         `Match
           ( expr locals scrutinee
           , List.map
@@ -398,7 +380,6 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
   in
   List.map (stmt S.empty) program
 
-(* Every unit's declarations, then the entry's statements. *)
 let program entry_path =
   let entry_unit, rest = load entry_path in
   let table = Hashtbl.create 8 in

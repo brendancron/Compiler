@@ -1,10 +1,6 @@
-(* Fixtures live in <repo>/tests. A run case pairs a .cx with a .txt of its
-   expected stdout; an error case pairs a .cx with a .err holding one
-   `[line:col] message` per diagnostic.
-
-   Cases are listed explicitly rather than globbed, so the lists double as a
-   record of what this bootstrap supports — most of <repo>/tests exercises
-   features that do not exist here yet. *)
+(* Fixtures live in <repo>/tests: a .cx with a .txt of its expected stdout, or
+   with a .err holding one `[line:col] message` per diagnostic. Listed
+   explicitly, so the lists record what this bootstrap supports. *)
 
 open Bootstrap2
 
@@ -306,9 +302,8 @@ let error_cases =
   ; "tests/types/inference/errors/unspecializable_names_the_caller"
   ]
 
-(* Programs that must be accepted and then fail while running, paired with a
-   .rt holding the diagnostic. Separate from error_cases because those never
-   reach the interpreter. *)
+(* Accepted, then failing while running. Separate from [error_cases], which
+   never reach the interpreter. *)
 let runtime_cases =
   [ "tests/core/collections/index_out_of_range"; "tests/core/slices/negative_index" ]
 
@@ -335,8 +330,6 @@ let read_file path =
 let normalize s =
   String.trim (String.concat "\n" (String.split_on_char '\r' s |> List.filter (( <> ) "")))
 
-(* How a diagnostic reads in a FAIL report, and — with the stage and the span
-   trimmed off — how a `.rt` fixture spells a runtime error. *)
 let described path (e : Diagnostic.error) =
   Printf.sprintf
     "%s error %s %s"
@@ -344,7 +337,6 @@ let described path (e : Diagnostic.error) =
     (Ast.locate ~entry:path e.Diagnostic.span)
     e.Diagnostic.message
 
-(* Run one program to completion, returning its stdout or the first error. *)
 let interpret path =
   let buf = Buffer.create 256 in
   let out = Buffer.add_string buf in
@@ -359,20 +351,16 @@ let interpret path =
 (* Why a fixture does not run yet. *)
 type blocker =
   | Waiting of string (* work that is planned and named *)
-  (* Not being worked on, rather than waiting on anything: these need the LLVM
-     path, and native compilation is out of scope for this bootstrap. *)
+  (* Native compilation, out of scope for this bootstrap. *)
   | Parked
   | Unplanned (* no design for it anywhere yet *)
 
-(* Every fixture under tests/ that neither [cases] nor [error_cases] claims.
-   The suite asserts each still fails, so one that starts working is reported
+(* The suite asserts each still fails, so one that starts working is reported
    rather than sitting unnoticed. *)
 let expected_failing : (string * blocker) list =
-    (* An unwind stops at its own handler now, but it is still an unwind, so it
-       destroys any handler frame it passes on the way — including a `ctl` arm
-       that had statements left after its `resume`. Delivering it as a value
-       through the continuation instead is the monadic-yield shape that
-       internal-docs/effects.md departs from on purpose. *)
+    (* An unwind destroys any handler frame it passes, including a `ctl` arm
+       with statements left after its `resume`. Delivering it through the
+       continuation is the monadic-yield shape we depart from. *)
   [ "tests/effects/abort_under_conversion", Waiting "an abort that spares an arm's sequel"
     (* Unplanned *)
   ; "tests/core/for_tuple/for_tuple", Unplanned
@@ -390,25 +378,19 @@ let expected_failing : (string * blocker) list =
   ; "tests/core/builtins/readfile", Unplanned
   ; "tests/core/builtins/writefile", Unplanned
   ; "tests/effects/async/async", Unplanned
-    (* An exit clears the flag guarding the unwind path, and a resumption
-       re-enters the scope without re-executing the `defer` that set it. Every
-       continuation standing inside the scope would have to set it again, which
-       is a re-entry point the pass does not currently mark. *)
+    (* A resumption re-enters the scope without re-executing the `defer`
+       that set the flag, and the pass marks no such re-entry point. *)
   ; ( "tests/core/defer/defer_multishot_abort"
     , Waiting "a re-entered scope re-arming its deferred statements" )
     (* Operators resolved through an impl instead of the operator registry. *)
-    (* A tuple has no declaration to derive from, so its impl is the checker's
-       to synthesize from the components' — the one case no deriver reaches. *)
+    (* A tuple has no declaration to derive from. *)
   ]
 
-(* Programs that ought to be rejected and are not. Paired with the `.err` they
-   should produce, so the fixture says what the right answer is rather than only
-   that the current one is wrong. The suite asserts each is still accepted, and
-   announces the moment one starts being caught. *)
+(* Ought to be rejected and are not, paired with the `.err` they should
+   produce. The suite announces the moment one starts being caught. *)
 let known_unsound : string list = []
 
-(* Formats diagnostics the way a .err file spells them: one `[line:col] message`
-   per line, and every one the checker found rather than only the first. *)
+(* Every diagnostic the checker found, not only the first. *)
 let rejections path =
   match Pipeline.compile ~out:(fun _ -> ()) path with
   | Ok _ -> Error "expected an error, but the program checked"
@@ -467,9 +449,8 @@ let run_runtime_case root name =
     Printf.printf "FAIL %s\n  expected a runtime error, but the program ran\n" name;
     false
   | Error actual ->
-    (* A .rt may hold the whole `[line:col] message` or just the message. The
-       second form is for a diagnostic raised inside the prelude, whose line
-       number is not the user's and should not be pinned by a fixture. *)
+    (* Just the message: a diagnostic raised inside the prelude has a line
+       number that is not the user's. *)
     let from mark =
       match String.index_opt actual mark with
       | Some at -> String.sub actual at (String.length actual - at)
@@ -496,9 +477,7 @@ let run_runtime_case root name =
       false)
 
 (* Printing a parsed program gives back a program that parses the same way.
-   Catches a printer that drops or reshapes something, and — since a mechanical
-   rewrite of source is a heuristic — one that corrupted a construct it did not
-   understand. *)
+   Catches a printer that drops or reshapes something. *)
 let run_round_trip root name =
   let path = Filename.concat root (name ^ ".cx") in
   let parse where text =
@@ -551,9 +530,8 @@ let run_case root name =
         (normalize actual);
       false)
 
-(* A fixture is expected to fail, so passing is the failure. An `.err` one has
-   arrived when it is rejected with the diagnostic it names — being rejected
-   with some other message is still the failure it is waiting on. *)
+(* Passing is the failure. An `.err` one has arrived when it is rejected with
+   the diagnostic it names, not merely rejected. *)
 let run_expected_failing root (name, blocker) =
   let path ext = Filename.concat root (name ^ ext) in
   let matches ext produce =
@@ -576,9 +554,8 @@ let run_expected_failing root (name, blocker) =
     false)
   else true
 
-(* The four lists above have to name every fixture that carries an expectation
-   file, or one nobody adds to a list is never run and never reported — the
-   exact failure [expected_failing] exists to prevent. *)
+(* A fixture no list names is never run and never reported — the exact failure
+   [expected_failing] exists to prevent. *)
 let unclaimed root =
   let claimed = Hashtbl.create 512 in
   List.iter (fun name -> Hashtbl.replace claimed name ()) cases;

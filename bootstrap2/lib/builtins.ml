@@ -1,26 +1,18 @@
-(* What a program can use without declaring it. The checker registers these the
-   same way it registers a declaration, and the interpreter is handed the values
-   without being told which are builtin. *)
 
 let types : (string * int) list = []
 
 let methods : (string * string * (unit -> Types.infer_ty list * Types.infer_ty)) list =
   [ "string", "bytes", (fun () -> [ Types.IStr ], Types.iarray Types.IByte)
-    (* The one way a string becomes an identifier, and it checks that it can
-       be one. Without it a name could be any text a program assembled. *)
+    (* The one way a string becomes an identifier, checked. *)
   ; "string", "as_name", (fun () -> [ Types.IStr ], Types.iname)
   ]
 
-(* No HM type describes these: any number of arguments, of any type. A call is
-   checked structurally against the declared result; a bare reference is a
-   function of no arguments, which is what stops one being passed around as a
-   value that could be anything. *)
+(* No HM type describes these. A call is checked structurally; a bare reference
+   is a function of no arguments, which stops one being passed around. *)
 let variadic : (string * (unit -> Types.infer_ty)) list =
-  [ (* What a lowered `gen` calls, bound only while a meta block runs. *)
-    Ast.generated [ "meta"; "emit" ], (fun () -> Types.IUnit)
+  [     Ast.generated [ "meta"; "emit" ], (fun () -> Types.IUnit)
   ; Ast.generated [ "meta"; "value" ], (fun () -> Types.IUnit)
-    (* What a lowered `code` calls, taking the same bindings a `gen` does. *)
-  ; Ast.generated [ "meta"; "code" ], (fun () -> Types.icode)
+      ; Ast.generated [ "meta"; "code" ], (fun () -> Types.icode)
   ]
 
 let functions : (string * (unit -> Types.infer_ty list * Types.infer_ty)) list =
@@ -32,8 +24,7 @@ let functions : (string * (unit -> Types.infer_ty list * Types.infer_ty)) list =
     , fun () ->
         let t = Types.fresh () in
         [ t; t ], Types.IBool )
-  (* What a derived `Eq` is: the comparison the interpreter already performs on
-     any two values, reached through an impl so a type has to ask for it. *)
+  (* What a derived `Eq` reaches, through an impl so a type has to ask. *)
   ; ( "__structural_eq"
     , fun () ->
         let t = Types.fresh () in

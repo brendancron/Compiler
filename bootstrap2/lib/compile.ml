@@ -1,13 +1,11 @@
-(* Desugar through Verify: everything between surface syntax and a tree the
-   interpreter can run. Metaprocessing calls this on each block, and the driver
-   and the test harness call it on the whole program, so the order of the passes
-   lives here and nowhere else. *)
+(* Desugar through Verify. Metaprocessing calls this on each block and the
+   driver on the whole program, so the pass order lives here and nowhere
+   else. *)
 
 let ( let* ) = Result.bind
 
-(* The checker reports every statement it could not check, not just the first,
-   so a program with two unrelated mistakes says both. Every other pass stops at
-   one. *)
+(* The checker reports every statement it could not check. Every other pass
+   stops at one. *)
 let program ?(on_types = fun _ -> ()) (source : Ast.program)
   : (Ast.cps_stmt list, Diagnostic.error list) result
   =

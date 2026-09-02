@@ -1,6 +1,5 @@
-(* Declarations every program starts with, parsed and checked with it. Nothing
-   here is reachable from the compiler save for the three types `typeof`
-   answers with. It becomes a file the module loader reads once there is one. *)
+(* Parsed and checked with the program. Nothing here is reachable from the
+   compiler save the three types `typeof` answers with. *)
 
 let source =
   {|
@@ -439,10 +438,8 @@ impl Index<Range> for string {
    worse than one that says where it came from. *)
 let file = "<prelude>"
 
-(* Scanned and parsed once. Metaprocessing compiles the declarations around
-   every meta block and every meta call site, so this is asked for once per
-   such site rather than once per program. Sharing one tree is safe because
-   nothing after this point mutates it. *)
+(* Asked for once per meta block and call site rather than once per program.
+   Sharing one tree is safe because nothing after this mutates it. *)
 let parsed =
   lazy
     (match Scanner.scan_tokens ~file source with

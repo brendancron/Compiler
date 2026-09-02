@@ -11,11 +11,10 @@ type value =
   | Record of (string * value ref) list
   | Variant of string * (string * value) list
   | Fn of fn
-  (* Never outlives metaprocessing: what the program keeps is what the syntax
-     became. *)
+  (* Never outlives metaprocessing. *)
   | Code of Ast.expr
-  (* Kept apart from a string so that only what reflection handed out can be
-     spliced into a name position. *)
+  (* Apart from a string, so only what reflection handed out can be spliced
+     into a name position. *)
   | Name of string
 
 and fn =
@@ -89,9 +88,8 @@ let rec string_of_value = function
   | Code e -> Printf.sprintf "<code %s>" (Printer.string_of_expr e)
   | Name n -> n
 
-(* Written out because OCaml's own comparison raises on functional values. A
-   pair already under comparison counts as equal, which is what makes a cyclic
-   value terminate. *)
+(* OCaml's own comparison raises on functional values. A pair already under
+   comparison counts as equal, which is what makes a cyclic value terminate. *)
 let rec equal_with seen a b =
   if List.exists (fun (x, y) -> x == a && y == b) seen
   then true

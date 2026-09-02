@@ -1,14 +1,10 @@
-(* The whole compiler, from a path to a program the interpreter can run.
-
-   [Compile] holds everything from `Desugar` on, because metaprocessing needs
-   that much and cannot reach this module — it is what runs a meta block. What
-   is left here is the part that happens on surface syntax: reading the files
-   and running the meta blocks in them. *)
+(* [Compile] holds everything from `Desugar` on, because metaprocessing needs
+   that much and cannot reach this module. What is left here happens on surface
+   syntax: reading the files and running the meta blocks in them. *)
 
 let ( let* ) = Result.bind
 
-(* [on_code] sees the program once metaprocessing is done, which is what a `gen`
-   produced turned into and what `--dump-code` prints. *)
+(* [on_code] sees the program once metaprocessing is done. *)
 let front ?(on_code = fun _ -> ()) ~out path
   : (Ast.program, Diagnostic.error list) result
   =

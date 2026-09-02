@@ -8,13 +8,10 @@ type error =
 type state =
   { file : string
   ; source : string
-  ; mutable start : int (* offset of the first char of the token being scanned *)
-  ; mutable start_line : int
+  ; mutable start : int   ; mutable start_line : int
   ; mutable start_col : int
-  ; mutable current : int (* offset of the next char to consume *)
-  ; mutable line : int
-  ; mutable line_start : int (* offset just past the most recent newline *)
-  ; mutable tokens : Token.token list (* reversed *)
+  ; mutable current : int   ; mutable line : int
+  ; mutable line_start : int   ; mutable tokens : Token.token list (* reversed *)
   ; mutable errors : error list (* reversed *)
   }
 
@@ -94,8 +91,7 @@ let line_comment s =
     ignore (advance s)
   done
 
-(* Everything else after a backslash is a typo more often than an intent, so
-   there is no pass-through case. *)
+(* Anything else after a backslash is a typo more often than an intent. *)
 let escaped s =
   if is_at_end s
   then None
@@ -111,7 +107,7 @@ let escaped s =
     | _ -> None)
 
 (* Reads to the closing [quote] whatever went wrong, so one bad literal costs
-   one diagnostic rather than lexing its tail as code. *)
+   one diagnostic. *)
 let quoted s quote =
   let buf = Buffer.create 16 in
   let bad = ref None in

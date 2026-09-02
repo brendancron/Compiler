@@ -8,9 +8,8 @@ type indexing =
   ; set : string option
   }
 
-(* [scheme] is the entry's own signature, `(element) -> container`, so the
-   element a target holds is recovered by unifying against the result rather
-   than by assuming a container takes exactly one type argument. *)
+(* `(element) -> container`, so the element is recovered by unifying against the
+   result rather than by assuming one type argument. *)
 type container =
   { entry : string
   ; scheme : Types.scheme
@@ -23,15 +22,14 @@ type entry =
   }
 
 type t =
-  { (* The variadic constructor a literal of this type becomes. *)
-    containers : (string, container) Hashtbl.t
+  {     containers : (string, container) Hashtbl.t
   ; (* Keyed by what the index is, so one type may be read by an int and
        sliced by a range. *)
     indexed : (string * string, indexing) Hashtbl.t
   ; constructors : (string, string) Hashtbl.t
   ; associated : (string * string, unit) Hashtbl.t
-  ; (* The function a method call reaches. An impl mangles its methods with the
-       trait it implements, so the written name alone does not name one. *)
+  ; (* An impl mangles its methods with the trait, so the written name alone
+       does not name a function. *)
     entries : (string * string, string) Hashtbl.t
   ; exact : (Ast.binop * Types.ty * Types.ty, entry) Hashtbl.t
   ; (* Any two operands of the same type, which cannot be enumerated. *)
@@ -68,13 +66,11 @@ let overloads t name =
     t.indexed
     []
 
-(* Without [indexed]'s fallback, which is for reading an entry rather than for
-   deciding whether one is already there. *)
+(* Without [indexed]'s fallback, which is for reading rather than deciding. *)
 let exact_index t name index = Hashtbl.find_opt t.indexed (name, index)
 
-(* An index whose type is a parameter registers under that parameter's name and
-   matches nothing written, so a type with one entry answers for any index —
-   which is what keeps a container indexed by its own key type working. *)
+(* An index whose type is a parameter matches nothing written, so a type with
+   one entry answers for any index. *)
 let indexed t name index =
   match Hashtbl.find_opt t.indexed (name, index) with
   | Some entry -> Some entry
@@ -85,8 +81,7 @@ let indexed t name index =
 
 let is_indexed t name = overloads t name <> []
 
-(* The first stands: a type implementing one trait at two arguments brings the
-   trait's method twice, and a call written by name cannot say which. *)
+(* The first stands: a call written by name cannot say which impl. *)
 let register_entry t owner method_ mangled =
   if not (Hashtbl.mem t.entries (owner, method_))
   then Hashtbl.replace t.entries (owner, method_) mangled
@@ -96,9 +91,8 @@ let entry_for_method t owner method_ =
   | Some mangled -> mangled
   | None -> Ast.method_name owner method_
 
-(* Reached through the type rather than through a value of it, so a call passes
-   no receiver. The checker knows which these are; the passes that build the
-   call have to be told. *)
+(* No receiver is passed. The checker knows which these are; the passes that
+   build the call have to be told. *)
 let mark_associated t owner method_ = Hashtbl.replace t.associated (owner, method_) ()
 let is_associated t owner method_ = Hashtbl.mem t.associated (owner, method_)
 let register_constructor t name fn = Hashtbl.replace t.constructors name fn

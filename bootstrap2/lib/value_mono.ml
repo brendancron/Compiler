@@ -1,7 +1,5 @@
-(* Comptime value parameters, substituted before anything is checked: a value
-   can decide a type, so there is no one type to check the template against.
-   Type parameters are left alone — generalization already serves every use
-   from one copy. *)
+(* Before anything is checked: a value can decide a type, so there is no one
+   type to check the template against. Type parameters are left alone. *)
 
 open Ast
 
@@ -29,14 +27,12 @@ type state =
   ; mutable pending : (string * desugared_stmt) list
   }
 
-(* A trait name after the colon is a bound on a type parameter, not the type of
-   a value parameter. This pass runs before anything knows which names are
-   traits, so it collects them itself. *)
+(* A trait name after the colon is a bound, not a value's type, and nothing
+   knows the traits yet — so this pass collects them itself. *)
 let traits : (string, unit) Hashtbl.t = Hashtbl.create 8
 
-(* No wildcard: a statement that can hold another has to be listed, or a
-   declaration written inside it is silently not seen. A trait missed here is
-   read as a comptime value parameter by whoever tests the bound. *)
+(* No wildcard: a statement that can hold another has to be listed, or a trait
+   declared inside it is read as a comptime value parameter. *)
 let children (s : desugared_stmt) : desugared_stmt list =
   match s.it with
   | `Block body | `Fn (_, _, _, body) -> body
@@ -67,10 +63,7 @@ let is_value (p : comptime_param) =
 let split (signature : signature) =
   List.partition is_value signature.comptime
 
-(* Which copy an argument selects, and — being total — what decides whether the
-   argument may be one at all. Two functions drifted apart here: the test
-   admitted every `lit`, including the bytes an `embed` becomes, and this
-   answered for six of them. *)
+(* Total, so it also decides whether an argument may be one at all. *)
 let rec key_of (e : desugared_expr) : string option =
   match e.it with
   | `Int n -> Some (string_of_int n)
@@ -81,8 +74,7 @@ let rec key_of (e : desugared_expr) : string option =
   | `Unop (Neg, inner) -> Option.map (fun key -> "-" ^ key) (key_of inner)
   | _ -> None
 
-(* A substitution stops at a binder: a local of the same name is a different
-   variable, and replacing its uses would compute something else entirely. *)
+(* A local of the same name is a different variable. *)
 let shadow names env = List.filter (fun (name, _) -> not (List.mem name names)) env
 let param_names params = List.map (fun (p : param) -> p.name) params
 
@@ -102,9 +94,7 @@ let rec subst_expr env (e : desugared_expr) : desugared_expr =
     | #record as r -> (map_record (subst_expr env) r :> desugared_expr_kind)
     | #nominal as n -> (map_nominal (subst_expr env) n :> desugared_expr_kind)
     | #collection as c -> (map_collection (subst_expr env) c :> desugared_expr_kind)
-    (* A parameter passed straight on parsed as a type, so substitution reaches
-       into the comptime list too. *)
-    | `Comptime_call (callee, comptime_args, args) ->
+        | `Comptime_call (callee, comptime_args, args) ->
       let arg = function
         | Ct_type { it = Ty_name written; _ } when List.mem_assoc written env ->
           Ct_value (List.assoc written env)
@@ -119,8 +109,6 @@ let rec subst_expr env (e : desugared_expr) : desugared_expr =
   in
   { e with it }
 
-(* A `var` binds for the statements after it, so the tail is substituted under
-   an environment the name has been dropped from. *)
 and subst_body env (body : desugared_stmt list) : desugared_stmt list =
   match body with
   | [] -> []
@@ -166,7 +154,6 @@ and subst_stmt env (s : desugared_stmt) : desugared_stmt =
   in
   { s with it }
 
-(* The argument as written, paired with the key it selects a copy by. *)
 let literal_of name (arg : desugared_expr comptime_arg) =
   let written =
     match arg with
@@ -192,8 +179,8 @@ let literal_of name (arg : desugared_expr comptime_arg) =
          "This argument to '%s' is not known at compile time: a call is only \
           comptime-evaluable inside a meta block, which does not exist yet."
          name
-     (* An `embed` is already resolved to its contents by here, so it is known
-        at compile time and the message above would be a lie. *)
+     (* An `embed` is already its contents here, so the message above would
+        be a lie. *)
      | `Bytes _ ->
        fail
          written.span
@@ -290,9 +277,7 @@ and specialize state span name comptime_args args : desugared_expr_kind =
   let callee : desugared_expr = { it = `Var copy; span; ann = () } in
   if types = [] then `Call (callee, args) else `Comptime_call (callee, types, args)
 
-(* A template is replaced by its copies wherever it stands, so a statement list
-   holding one is filtered rather than mapped: left in place its comptime value
-   parameter reaches the checker, which has nothing to do with it. *)
+(* Filtered, not mapped: a template left in place reaches the checker. *)
 and body state (stmts : desugared_stmt list) : desugared_stmt list =
   List.filter_map
     (fun s ->
@@ -358,8 +343,7 @@ let program (p : desugared_stmt list) : (desugared_stmt list, error) result =
   else (
     try
       let rewritten = body state p in
-      (* A copy's own body may call another template, so this runs until no new
-         copy is asked for. *)
+      (* Runs until no new copy is asked for. *)
       let rec drain () =
         match state.pending with
         | [] -> ()

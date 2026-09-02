@@ -1,13 +1,10 @@
-(* The surface tree as Cronyx: parsing the output gives back the same tree.
-   Comments are not in the tree, so they are not in the output — this is a way
-   to read a program the compiler built, not a formatter for files someone
-   wrote. *)
+(* The surface tree as Cronyx: parsing the output gives back the same tree. Not
+   a formatter — comments are not in the tree, so not in the output. *)
 
 let pad depth = String.make (depth * 4) ' '
 let line depth text = Printf.sprintf "%s%s\n" (pad depth) text
 
-(* Whichever quote encloses it has to be escaped, and only that one: a `'`
-   inside a string needs nothing. *)
+(* Only the enclosing quote is escaped: a `'` inside a string needs nothing. *)
 let escape ?(quote = '"') text =
   let buf = Buffer.create (String.length text + 2) in
   String.iter
@@ -327,8 +324,7 @@ and stmt depth (s : Ast.stmt) : string =
     ^ String.concat "" (List.map (case (depth + 1)) cases)
     ^ line "}"
 
-(* A body is a block statement anywhere one may stand, so its braces are the
-   enclosing form's and only its contents are printed here. *)
+(* The braces are the enclosing form's; only the contents are printed. *)
 and nested depth (s : Ast.stmt) =
   match s.Ast.it with
   | `Block body -> block (depth + 1) body
@@ -407,8 +403,7 @@ and effect_decl depth name params ops =
          ops)
   ^ line "}"
 
-(* Each clause reopens the brace the one before it closed, so only the last
-   leaves it shut. *)
+(* Each clause reopens the brace the last one closed. *)
 and handlers_of depth handlers =
   let line = line depth in
   let clause (h : Ast.stmt Ast.handler_clause) =

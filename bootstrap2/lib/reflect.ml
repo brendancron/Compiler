@@ -1,14 +1,9 @@
-(* After checking, because that is when the annotation exists; before
-   evaluation, so the interpreter never sees the node.
+(* After checking, when the annotation exists; before evaluation, so the
+   interpreter never sees the node. Each answer is folded here into the data it
+   names, leaving ordinary Cronyx.
 
-   A `Type` is not a runtime value: it answers questions about a type while
-   compiling, and each answer is folded here into the data it names. What is
-   left is ordinary Cronyx — a string, a record, a variant.
-
-   Answers are one level deep. A field reports its name, not its type, so a
-   type that mentions itself describes itself in finite space; giving a field
-   the type it holds is what will force the answer to be built on demand
-   instead of here. *)
+   Answers are one level deep: a field reports its name, not its type, so a type
+   that mentions itself describes itself in finite space. *)
 
 type error =
   { span : Ast.span

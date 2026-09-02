@@ -1,6 +1,5 @@
-(* A meta block is compiled and run where it stands, then removed: this pass is
-   the rest of the pipeline applied to a fragment of the program it belongs
-   to. *)
+(* The rest of the pipeline, applied to a fragment of the program it belongs
+   to and then removed. *)
 
 type error =
   { span : Ast.span
@@ -12,18 +11,15 @@ exception Failed of error
 let fail span fmt =
   Printf.ksprintf (fun message -> raise (Failed { span; message })) fmt
 
-(* Everything a block can refer to: a meta block sees the program as it stood
-   when compilation reached it. Narrower than [Loader.is_declaration], which
-   counts imports and the meta forms too. *)
+(* Narrower than [Loader.is_declaration], which counts the meta forms too. *)
 let is_visible_to_meta (s : Ast.stmt) =
   match s.Ast.it with
   | `Fn _ | `Type_decl _ | `Trait_decl _ | `Impl_decl _ | `Effect_decl _
   | `Handler_decl _ -> true
   | _ -> false
 
-(* `derive Eq for X` in full. A deriver would walk the type's shape and compare
-   the fields; the interpreter already compares two values of any shape, so this
-   reaches that instead and the impl is the same three lines for every type. *)
+(* The interpreter already compares two values of any shape, so a derived `Eq`
+   reaches that rather than walking the type's fields. *)
 let derived_eq span target : Ast.stmt =
   let at it = Ast.at span it in
   let ty name = { Ast.it = Ast.Ty_name name; span; ann = () } in
@@ -60,11 +56,9 @@ let emitter = Ast.generated [ "meta"; "emit" ]
 let capturer = Ast.generated [ "meta"; "value" ]
 let quoter = Ast.generated [ "meta"; "code" ]
 
-(* Only a scalar has a literal form. Anything else keeps its name and is
-   resolved in the program the code lands in. *)
+(* Anything but a scalar keeps its name, resolved where the code lands. *)
 let literal_of span (v : Value.value) : Ast.expr option =
   match v with
-  (* Already substituted when it was captured, so it stands as it is. *)
   | Value.Code e -> Some e
   | Value.Int n -> Some (Ast.at span (`Int n))
   | Value.Float n -> Some (Ast.at span (`Float n))
@@ -78,8 +72,8 @@ let name_of (v : Value.value) =
   | Value.Name n -> Some n
   | _ -> None
 
-(* A substitution stops at a binder: a generated declaration that binds a name
-   the meta program also bound means its own local, not the meta value. *)
+(* A generated declaration binding a name the meta program also bound means its
+   own local. *)
 module Shadowed = Set.Make (String)
 
 let substitution (bound : (string, Value.value) Hashtbl.t) =
@@ -88,8 +82,6 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
     | Some v -> Option.value (name_of v) ~default:name
     | None -> name
   in
-  (* A generated declaration names types as well as values, so an annotation
-     takes a computed name too. *)
   let rec type_expr (t : Ast.type_expr) : Ast.type_expr =
     let it =
       match t.Ast.it with
@@ -138,12 +130,9 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
         | `New_variant (ty, variant, payload) ->
           `New_variant (named ty, variant, Ast.map_payload expr payload)
         | `New_call (name, args, values) -> `New_call (named name, args, List.map expr values)
-        (* A name position takes a name the meta program computed, which lets
-           generated code reach a field it was told about. *)
         | `Method_call (receiver, name, as_function, args) ->
           `Method_call (expr receiver, named name, named as_function, List.map expr args)
-        (* Captured syntax nested in captured syntax stands as it is; it is
-           lowered when the code holding it runs. *)
+        (* Lowered when the code holding it runs, not now. *)
         | `Code _ as c -> c
         | `Field (receiver, label) -> `Field (expr receiver, named label)
         | `Field_assign (receiver, label, v) ->
@@ -161,8 +150,6 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
         | #Ast.reflect as r -> (Ast.map_reflect expr r :> Ast.expr_kind)
       in
       { e with Ast.it }
-  (* A `var` binds for the statements after it, so the tail is walked under a
-     shadow set the name has been added to. *)
   and sequence shadowed (body : Ast.stmt list) : Ast.stmt list =
     match body with
     | [] -> []
@@ -211,8 +198,6 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
                 in
                 pattern, sequence (hidden shadowed bound_here) body)
               cases )
-      (* An impl names the type it is written for, so a generated one can be
-         written for a type the meta program named. *)
       | `Impl_decl (trait, type_name, params, impl) ->
         `Impl_decl
           ( Option.map (fun (t, args) -> named t, List.map type_expr args) trait
@@ -246,7 +231,6 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
         `Var_decl (name, Option.map type_expr ty, Option.map expr init)
       | #Ast.stmts as st ->
         (Ast.map_stmts expr (stmt shadowed) st :> Ast.stmt_kind)
-      (* An arm's parameters bind for its body the way a function's do. *)
       | #Ast.effects as e ->
         let arm (a : Ast.stmt Ast.arm) =
           { a with Ast.arm_body = sequence (hidden shadowed a.Ast.arm_params) a.Ast.arm_body }
@@ -283,22 +267,16 @@ let bindings_of args =
   pairs args;
   bound
 
-(* Threaded unchanged through every level: where output goes, where a hoisted
-   declaration lands, the tables a lowered `gen` and `code` index into, and the
-   collector whatever runs next emits into. *)
 type context =
   { out : string -> unit
   ; hoist : Ast.stmt list ref
-  ; (* Indexed by size at the time of insertion, so nothing may ever be removed
-       from [table] or [codes]: a later entry would take an index already
-       handed out and every call site carrying the old one would follow it. *)
+  ; (* Indexed by size at insertion, so nothing may be removed: a later entry
+       would take an index already handed out. *)
     table : (int, Ast.stmt) Hashtbl.t
   ; codes : (int, Ast.expr) Hashtbl.t
   ; current : Ast.stmt list ref ref
   }
 
-(* What a lowered `gen` calls: the table entry its index names, substituted with
-   the meta-bound values beside it, lands in whatever collector is current. *)
 let emit_into { table; current; _ } span args =
   match args with
   | Value.Int index :: rest ->
@@ -307,9 +285,8 @@ let emit_into { table; current; _ } span args =
      | None -> Value.fail span "Nothing was captured here.")
   | _ -> Value.fail span "Nothing was captured here."
 
-(* A meta block is compiled by the same passes as the program holding it — see
-   [Compile] — and then run against an environment with the three entries a
-   lowered `gen` or `code` calls. *)
+(* Run against an environment holding the three entries a lowered `gen` or
+   `code` calls. *)
 let run ~out ~codes ~emit ~capture (program : Ast.program) =
   match Compile.program program with
   | Error [] -> fail { Ast.file = ""; line = 1; col = 1 } "The meta block does not check."
@@ -336,10 +313,8 @@ let run ~out ~codes ~emit ~capture (program : Ast.program) =
      | Ok () -> ()
      | Error e -> fail e.Diagnostic.span "%s" e.Diagnostic.message)
 
-(* Lowering a `gen`: what follows it goes into a table, and the statement
-   becomes a call carrying that entry's index and the meta-bound names it
-   mentions. A captured statement is surface syntax, which every IR after this
-   point has dropped, so it cannot reach the interpreter any other way. *)
+(* Surface syntax, which every later IR has dropped, so it reaches the
+   interpreter as a table index. *)
 let lower { table; codes; _ } ~params (body : Ast.program) =
   let arguments sp scope =
     List.concat_map
@@ -379,9 +354,7 @@ let lower { table; codes; _ } ~params (body : Ast.program) =
         | #Ast.reflect as r -> (Ast.map_reflect expr r :> Ast.expr_kind)
       in
       { e with Ast.it }
-  (* What a captured chunk is handed is what stands in scope where it was
-     written, so lowering follows the scope rather than the block's full set:
-     a `code` in an initializer cannot be given the name it is initializing. *)
+  (* A `code` in an initializer cannot be given the name it initializes. *)
   and stmt scope (s : Ast.stmt) : Ast.stmt * string list =
     let sp = s.Ast.span in
     let same it = { s with Ast.it = it }, scope in
@@ -413,8 +386,6 @@ let lower { table; codes; _ } ~params (body : Ast.program) =
            , Option.map (expr inner) step
            , fst (stmt inner body) ))
     | #Ast.stmts as st -> same (Ast.map_stmts (expr scope) (fun b -> fst (stmt scope b)) st :> Ast.stmt_kind)
-    (* An arm binds its payload for its own body, the way a loop binds its
-       element, so what it binds is in scope for a `code` written there. *)
     | `Match (subject, arms) ->
       same
         (`Match
@@ -437,8 +408,6 @@ let lower { table; codes; _ } ~params (body : Ast.program) =
   in
   block params body
 
-(* Every call to a meta function runs where it stands and is replaced by what it
-   produced, so one whose argument names a runtime variable fails there. *)
 let expand context ~meta_fns ~named ~seen (root : Ast.stmt) : Ast.stmt =
   let evaluate span (call : Ast.expr) =
     let captured = ref None in
@@ -491,9 +460,7 @@ let expand context ~meta_fns ~named ~seen (root : Ast.stmt) : Ast.stmt =
   in
   stmt root
 
-(* A nested block is processed while its parent is compiled, so the innermost
-   runs first, and the parent's control flow has no bearing on whether it does:
-   what executes is decided later, what is processed is decided here. *)
+(* The innermost runs first, whatever the parent's control flow. *)
 let rec strip context ~inside (program : Ast.program) =
   let seen = ref [] in
   let meta_fns = ref [] in
@@ -501,9 +468,7 @@ let rec strip context ~inside (program : Ast.program) =
   List.concat_map
     (fun (s : Ast.stmt) ->
       (* `derive A, B for X` is `meta` running one deriver per trait. *)
-      (* `Eq` is the compiler's to derive: what a deriver would generate is the
-         comparison the interpreter already performs, so the impl is written
-         here rather than by walking the type's shape. *)
+      (* `Eq` is the compiler's to derive. *)
       let derived =
         match s.Ast.it with
         | `Derive (traits, target)
@@ -538,9 +503,7 @@ let rec strip context ~inside (program : Ast.program) =
           { s with Ast.it = `Meta (List.map call traits) }
         | _ -> s
       in
-      (* A call to a meta function may generate as well as return, wherever it
-         stands, so each statement gets a collector of its own and whatever it
-         produced is spliced beside it. *)
+      (* A meta call may generate as well as return. *)
       let produced = ref [] in
       let s =
         if Hashtbl.length named = 0
@@ -568,8 +531,7 @@ let rec strip context ~inside (program : Ast.program) =
       @ beside
       @
       match s.Ast.it with
-      (* Every call to it has happened by the time the program runs, so it is
-         recorded and dropped rather than emitted. *)
+      (* Every call has happened by the time the program runs. *)
       | `Meta_fn (name, params, signature, body) ->
         if Hashtbl.mem named name
         then (
@@ -593,9 +555,7 @@ let rec strip context ~inside (program : Ast.program) =
           ~capture:(fun _ -> ())
           (List.rev !seen @ List.rev !meta_fns @ lower context ~params:[] body);
         context.current := previous;
-        (* A generated declaration is hoisted, because what generated it may
-           stand below the code that uses it; a generated statement stays where
-           the block was. Both may hold blocks of their own. *)
+        (* Hoisted, since what generated it may stand below its use. *)
         let generated = strip context ~inside (List.rev !collected) in
         let declarations, statements = List.partition is_visible_to_meta generated in
         List.iter
@@ -604,8 +564,6 @@ let rec strip context ~inside (program : Ast.program) =
             context.hoist := d :: !(context.hoist))
           declarations;
         statements
-      (* A meta block inside a `gen` is still a nested block, so it is processed
-         now and its output takes its place inside the `gen`. *)
       | `Gen inner when inside ->
         (match strip context ~inside [ inner ] with
          | [] -> []

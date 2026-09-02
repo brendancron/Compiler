@@ -14,7 +14,7 @@ type state =
   ; mutable no_brace : bool
   }
 
-(* Unwinds to the enclosing declaration. The error is recorded before raising. *)
+(* The error is recorded before raising. *)
 exception Parse_error
 
 let peek s = s.tokens.(s.current)
@@ -75,22 +75,20 @@ let synchronize s =
   in
   loop ()
 
-(* One or more, comma-separated. A trailing comma is not accepted: [item] would
-   run again and fail on whatever closes the list. *)
+(* A trailing comma is not accepted: [item] would run again and fail on
+   whatever closes the list. *)
 let rec comma_separated s item =
   let first = item s in
   match matches s [ Token.Comma ] with
   | Some _ -> first :: comma_separated s item
   | None -> [ first ]
 
-(* The same, and empty when [closer] is what stands there. Neither consumes the
-   closer; every caller has its own message for it. *)
+(* Neither consumes the closer; every caller has its own message for it. *)
 let listed_until s closer item = if check s closer then [] else comma_separated s item
 
 (* ---- type annotations ---- *)
 
-(* `geom.Point` — a type belonging to another unit, spelled the way a value
-   from one is. The loader resolves the pair; nothing after it sees a dot. *)
+(* The loader resolves the pair; nothing after it sees a dot. *)
 let qualified s name =
   if not (check s Token.Dot)
   then name
@@ -107,8 +105,7 @@ let rec type_expr s : Ast.type_expr =
     let fields = listed_until s Token.Right_brace typed_field in
     ignore (consume s Token.Right_brace "Expected '}' after record fields.");
     Ast.at sp (Ast.Ty_record fields)
-  (* A dot here is a projection rather than a module qualification; the loader
-     folds it back when the name before it turns out to be an alias. *)
+  (* A projection; the loader folds it back if the name is an alias. *)
   | Token.Identifier name ->
     ignore (advance s);
     let head =
@@ -325,8 +322,7 @@ and call s : Ast.expr =
          let label =
            match (peek s).Token.token_type with
            | Token.Identifier name -> name
-           (* A keyword is an ordinary word after a dot, since nothing else may
-              stand there — which is what lets a module export `new`. *)
+           (* An ordinary word after a dot, which lets a module export `new`. *)
            | _ when Scanner.keyword (peek s).Token.lexeme <> None ->
              (peek s).Token.lexeme
            | _ -> raise (error s (peek s) "Expected a field after '.'.")
@@ -343,9 +339,8 @@ and call s : Ast.expr =
   in
   loop (primary s)
 
-(* `f<int>(x)` and `a < b > (c)` are the same shape and whitespace cannot
-   separate them, so this is accepted only when a call follows. Speculative:
-   position and recorded errors are put back when it is not one. *)
+(* `f<int>(x)` and `a < b > (c)` are the same shape, so this is accepted only
+   when a call follows; position and errors are put back when none does. *)
 and comptime_arguments s : Ast.expr Ast.comptime_arg list option =
   let start = s.current
   and errors = s.errors in
@@ -395,9 +390,8 @@ and trailing_lambda s args : Ast.expr list =
   else (
     let sp = Ast.span_of_token (peek s) in
     ignore (advance s);
-    (* `{ it * 2 }` is the value and `{ var t = it; return t; }` is a body.
-       Which one it is takes trying: an expression filling the braces exactly
-       is the first, anything else the second. *)
+    (* An expression filling the braces exactly is the value; anything else
+       is a body. Telling them apart takes trying. *)
     let mark = s.current
     and errors = s.errors in
     let restore () =
@@ -436,9 +430,8 @@ and record_fields s : (string * Ast.expr) list =
   ignore (consume s Token.Right_brace "Expected '}' after fields.");
   fields
 
-(* `a[i]` indexes and `a[i:j]` slices, which is the same operator over a
-   different index: what the brackets hold is an `int` or a `Range`, and which
-   entry that reaches is the type's business. Either bound may be left out. *)
+(* Slicing is indexing by a `Range` rather than an `int`, and which entry that
+   reaches is the type's business. Either bound may be left out. *)
 and index_or_range s : Ast.expr =
   let sp = Ast.span_of_token (peek s) in
   let range variant args =
@@ -543,8 +536,8 @@ and primary s : Ast.expr =
       let variant = consume_identifier s "Expected a variant name." in
       let payload =
         match (peek s).Token.token_type with
-        (* At least one: `new T::V()` is not how a variant with no payload is
-           written, and admitting it would make two spellings of one thing. *)
+        (* At least one, or `new T::V()` and `new T::V` would both write the
+           same thing. *)
         | Token.Left_paren ->
           ignore (advance s);
           let items = comma_separated s expression in
@@ -598,8 +591,6 @@ and primary s : Ast.expr =
 
 (* ---- statements ---- *)
 
-(* One group with the expressions, because a function value is an expression
-   whose body is statements. *)
 and declaration s : Ast.stmt option =
   try
     let tok = peek s in
@@ -650,9 +641,8 @@ and declaration s : Ast.stmt option =
       if check s Token.Fn
       then (
         ignore (advance s);
-        (* `for Trait` is what registers a deriver, so every one of them is
-           free to be called `derive` — which is a keyword, hence read here
-           rather than as an ordinary identifier. *)
+        (* Registration is by `for Trait`, so every deriver is free to be
+           called `derive` — a keyword, hence read here. *)
         let read_name s =
           match matches s [ Token.Derive ] with
           | Some _ -> "derive"
@@ -730,8 +720,8 @@ and parameters s : Ast.param list =
 and fn_decl
   ?(read_name =
     fun s ->
-      (* `new` is the constructor convention, and in declaration position it
-         cannot be read as the operator. No other keyword is allowed here. *)
+      (* In declaration position `new` cannot be read as the operator. No
+         other keyword is allowed here. *)
       match matches s [ Token.New ] with
       | Some _ -> "new"
       | None -> consume_identifier s "Expected function name.")
@@ -862,8 +852,7 @@ and for_stmt s sp : Ast.stmt =
   ignore (consume s Token.Right_paren "Expected ')' after for clauses.");
   Ast.at sp (`For (init, cond, step, statement s)))
 
-(* `as` and `from` are ordinary identifiers, matched by text, so neither
-   becomes a word a program cannot use for something else. *)
+(* Matched by text, so neither becomes a word a program cannot use. *)
 and import_decl s sp : Ast.stmt =
   let text tok =
     match tok.Token.token_type with
@@ -1121,8 +1110,7 @@ and handler s : Ast.stmt Ast.handler =
       let kind = op_kind s in
       let arm_name = consume_identifier s "Expected operation name." in
       ignore (consume s Token.Left_paren "Expected '(' after operation name.");
-      (* An arm binds the operation's parameters; their types come from the
-         declaration, so an annotation written here is read and dropped. *)
+      (* Types come from the declaration, so an annotation here is dropped. *)
       let params =
         listed_until s Token.Right_paren (fun s ->
           let name = consume_identifier s "Expected parameter name." in

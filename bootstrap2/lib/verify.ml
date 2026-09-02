@@ -1,6 +1,5 @@
-(* Annotations invented by a pass that constructs nodes are wrong silently, so
-   each node is checked against its children. Local: there is no environment,
-   and a `Var` is taken at its word. *)
+(* An invented annotation is wrong silently, so each node is checked against its
+   children. Local: no environment, and a `Var` is taken at its word. *)
 
 type error =
   { span : Ast.span
@@ -160,9 +159,7 @@ let rec expr (e : Ast.cps_expr) : unit =
     (match ann with
      | Types.Sum _ -> ()
      | other -> fail span "A variant is annotated %s." (Types.string_of_ty other))
-  (* Its own annotation is the function type it evaluates to; the body is
-     verified the way any other body is. *)
-  | `Lambda (params, _, body) ->
+    | `Lambda (params, _, body) ->
     (match ann with
      | Types.Fn (declared, _, _) when List.length declared = List.length params ->
        List.iter stmt body

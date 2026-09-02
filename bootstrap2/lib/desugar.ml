@@ -27,9 +27,7 @@ let rec expr (e : expr) : desugared_expr =
   let sp = e.span in
   let it : desugared_expr_kind =
     match e.it with
-    (* Everything past the fixed parameters becomes the array the callee
-       declared, so nothing after this pass knows a call was written any other
-       way. *)
+    (* Nothing after this pass knows a call was written any other way. *)
     | `Call (({ it = `Var name; _ } as callee), args)
       when Hashtbl.mem variadic name && List.length args >= Hashtbl.find variadic name ->
       let fixed = Hashtbl.find variadic name in
@@ -58,8 +56,7 @@ let rec expr (e : expr) : desugared_expr =
     | #method_call as m -> (map_method_call expr m :> desugared_expr_kind)
     | `Lambda (params, signature, body) -> `Lambda (params, signature, List.map stmt body)
     | #reflect as r -> (map_reflect expr r :> desugared_expr_kind)
-    (* Metaprocessing lowers every one it reaches, so one arriving here stood
-       where no meta program would ever have run it. *)
+    (* One arriving here stood where no meta program would have run it. *)
     | `Code _ ->
       raise
         (Error
@@ -71,15 +68,13 @@ and stmt (s : stmt) : desugared_stmt =
   let sp = s.span in
   let it : desugared_stmt_kind =
     match s.it with
-    (* The loader strips imports and metaprocessing strips meta blocks, both
-       before anything else runs. *)
-    | `Import _ | `Meta _ | `Gen _ | `Meta_fn _ | `Derive _ -> assert false
+        | `Import _ | `Meta _ | `Gen _ | `Meta_fn _ | `Derive _ -> assert false
     (* for (x in xs) body  ⇒  { var seq = xs; var i = 0;
                                  while (i < seq.len()) { var x = seq[i]; body; i = i + 1; } }
 
-       The sequence is bound once so an iterable that is an expression is
-       evaluated once, and `len` and `[]` are written as ordinary source so the
-       checker resolves them for whatever type the sequence turns out to be. *)
+       The sequence is bound once so an expression is evaluated once, and `len`
+       and `[]` are ordinary source so the checker resolves them for whatever
+       the sequence turns out to be. *)
     | `For_in (name, iterable, body) ->
       let sp = iterable.span in
       let seq = fresh "seq"

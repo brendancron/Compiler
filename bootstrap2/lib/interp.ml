@@ -2,8 +2,7 @@ open Value
 
 exception Return_value of value * Ast.span
 
-(* A handler that never resumes; caught by the `Scope` its own `run` became, and
-   passed through any in between. *)
+(* Caught by the `Scope` its own `run` became, passed through any between. *)
 exception Aborted of string
 
 let compare_ordered op x y =
@@ -161,8 +160,7 @@ let rec eval env (e : Ast.cps_expr) : value =
     (match eval env target with
      | Tuple items -> List.nth items index
      | v -> fail span "Cannot take a field of %s." (type_name v))
-(* OCaml leaves the order of an application's arguments and of [List.map]
-   unspecified, and evaluates both right to left in practice. *)
+(* OCaml's argument order is unspecified, and right to left in practice. *)
 and closure env name params body =
   let names = List.map (fun (p : Ast.param) -> p.Ast.name) params in
   Fn
@@ -204,9 +202,7 @@ and call span f args =
 (* Deferred statements run when the block is left, however it is left, and in
    reverse. *)
 and run_block env body =
-  (* Declared, not executed: a function is in scope for the whole block it was
-     written in, which is what the checker assumes when it accepts a call above
-     the declaration. *)
+  (* In scope for its whole block, as the checker assumed. *)
   List.iter
     (fun (s : Ast.cps_stmt) ->
       match s.Ast.it with
@@ -258,9 +254,7 @@ and exec env (s : Ast.cps_stmt) : unit =
   | `Block body ->
     let scope = new_env (Some env) in
     run_block scope body
-  (* Collected by the block that holds it, so reaching one on its own is
-     reaching it twice. *)
-  | `Defer _ -> ()
+    | `Defer _ -> ()
   | `If (cond, then_branch, else_branch) ->
     if as_bool span (eval env cond)
     then exec env then_branch
@@ -272,8 +266,8 @@ and exec env (s : Ast.cps_stmt) : unit =
     while as_bool span (eval env cond) do
       exec env body
     done
-  (* The closure captures the env it is declared in, which is the same table the
-     name lands in — so recursion works without a separate binding step. *)
+  (* The closure captures the table the name lands in, so recursion works
+     without a separate binding step. *)
   | `Fn (name, params, _, body) -> define env name (closure env name params body)
   | `Return e ->
     let v =

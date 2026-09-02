@@ -1,11 +1,10 @@
-(* An operator or method inside a generic body cannot be selected while the body
-   is generic, so it is copied per concrete type its call sites use. *)
+(* An operator inside a generic body cannot be selected while the body is
+   generic, so it is copied per concrete type its call sites use. *)
 type state =
   { registry : Registry.t
   ; generic : (string, Ast.typed_stmt) Hashtbl.t
   ; copies : (string * Types.ty, string) Hashtbl.t
-  ; (* Which template a copy came from, so a copy that asks for another copy of
-       its own template can be recognised as the diverging one. *)
+  ; (* So a copy asking for another copy of its own template is recognised. *)
     origin : (string, string) Hashtbl.t
   ; mutable emitted : Ast.typed_stmt list
   ; mutable changed : bool
@@ -13,11 +12,8 @@ type state =
   ; mutable recursive : string option
   }
 
-(* [self] is the function whose body this is. A call it makes to itself at
-   another type is deliberately not counted: copying the body cannot resolve
-   that call, because every copy asks for one more at a further type. Such a
-   function stays generic and its type-directed parts stay unresolved — which
-   the interpreter tolerates and codegen will not. *)
+(* A call the body makes to itself at another type is deliberately not counted:
+   every copy would ask for one more. Such a function stays generic. *)
 let rec type_directed_expr self (e : Ast.typed_expr) =
   let operand (child : Ast.typed_expr) = Types.has_generic child.Ast.ann in
   let type_directed_expr = type_directed_expr self in
@@ -41,11 +37,8 @@ let rec type_directed_expr self (e : Ast.typed_expr) =
     type_directed_expr a || type_directed_expr b
   | `Index_assign (a, b, c) ->
     type_directed_expr a || type_directed_expr b || type_directed_expr c
-  (* A body is copied for what its own call sites need; a lambda inside it is
-     copied along with whatever holds it. *)
-  | `Lambda _ -> false
-  (* A generic argument selects the callee's copy the way a generic receiver
-     selects a method's, so the body holding the call has to be copied too. *)
+    | `Lambda _ -> false
+  (* A generic argument selects the callee's copy, so its holder is copied. *)
   | `Call ({ Ast.it = `Var called; _ }, args) when String.equal called self ->
     List.exists type_directed_expr args
   | `Call (callee, args) ->
@@ -135,8 +128,7 @@ and subst_stmt mapping (s : Ast.typed_stmt) : Ast.typed_stmt =
   in
   { s with Ast.it; ann = Types.subst_generic mapping s.Ast.ann }
 
-(* Keyed by the type itself: printing is not injective, so two distinct types
-   that render alike would otherwise share one copy. *)
+(* Keyed by the type, not its printing: two types can render alike. *)
 let copy_for state name (at : Types.ty) =
   match Hashtbl.find_opt state.copies (name, at) with
   | Some existing -> existing
@@ -157,8 +149,7 @@ let copy_for state name (at : Types.ty) =
      | _ -> ());
     copy
 
-(* The row comes from the template rather than the call site: the CPS pass reads
-   it off the callee to decide what evidence to pass. *)
+(* From the template, not the call site: CPS reads it off the callee. *)
 let method_call_type state name (receiver : Ast.typed_expr) args result =
   let row =
     match Hashtbl.find_opt state.generic name with
@@ -175,9 +166,7 @@ let rec rewrite state (e : Ast.typed_expr) : Ast.typed_expr =
     match e.Ast.it with
     | `Lambda (params, signature, body) ->
       `Lambda (params, signature, List.map (rewrite_stmt state) body)
-    (* A method on a generic type is copied like a function, and its call
-       becomes an ordinary one so [Resolve] has nothing left to select. *)
-    | `Method_call (receiver, name, as_function, args) ->
+        | `Method_call (receiver, name, as_function, args) ->
       let receiver = rewrite state receiver in
       let args = List.map (rewrite state) args in
       let owned =
@@ -250,9 +239,7 @@ let rec collect state (s : Ast.typed_stmt) =
     if Types.has_generic s.Ast.ann && type_directed name s
     then Hashtbl.replace state.generic name s;
     List.iter (collect state) body
-  (* A method is a function whose first parameter is the receiver, so its
-     template is one — the copy is emitted as a plain [`Fn]. *)
-  | `Impl_decl (trait, type_name, _, impl) ->
+    | `Impl_decl (trait, type_name, _, impl) ->
     List.iter
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
         let mangled = Ast.impl_method_name trait type_name m.Ast.md_name in
@@ -278,8 +265,7 @@ let rec collect state (s : Ast.typed_stmt) =
     List.iter (fun (_, body) -> List.iter (collect state) body) cases
   | _ -> ()
 
-(* A template is dropped once its copies exist: its own body still names types
-   nothing can select on, and every call has been pointed elsewhere. *)
+(* A template's own body still names types nothing can select on. *)
 let is_template state (s : Ast.typed_stmt) =
   match s.Ast.it with
   | `Fn (name, _, _, _) -> Hashtbl.mem state.generic name
