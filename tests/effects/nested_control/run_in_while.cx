@@ -1,0 +1,14 @@
+effect Ask { ctl get(): int; }
+
+fn use() -> <Ask> int { return get(); }
+
+fn main() -> unit {
+    var n = 0;
+    while (n < 2) {
+        run { print(use()); }
+        handle Ask { ctl get() { resume 5; print("after"); } }
+        n = n + 1;
+    }
+}
+
+main();

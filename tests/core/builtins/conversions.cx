@@ -1,9 +1,35 @@
-print(to_string(42));
-print(to_string(true));
-print(to_string(false));
+// Rendering a value is `str`, or the `ToString` trait for a type that wants a
+// say in it. Parsing one is fallible, so it is an `impl TryFrom<string>` and
+// the failure is an effect rather than a sentinel.
+effect Fallible { final ctl invalid(text: string); }
 
-var n = to_int("7");
-print(n + 1);
+trait TryFrom<S> { fn from(source: S) -> <Fallible> Self; }
 
-var m = to_int("100");
-print(m);
+impl TryFrom<string> for int {
+    fn from(source: string) -> <Fallible> int {
+        if (source.len() == 0) { return invalid(source); }
+        var total = 0;
+        for (c in source.chars()) {
+            if (c < '0' || c > '9') { return invalid(source); }
+            total = total * 10 + (ord(c) - ord('0'));
+        }
+        return total;
+    }
+}
+
+print(str(42));
+print(str(true));
+print(str(false));
+
+run {
+    var n = int.from("7");
+    print(n + 1);
+
+    var m = int.from("100");
+    print(m);
+
+    var bad = int.from("seven");
+    print(bad);
+} handle Fallible {
+    final ctl invalid(text) { print("not a number: " + text); }
+}

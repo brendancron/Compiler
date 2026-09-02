@@ -47,6 +47,7 @@ let cases =
   ; "tests/types/inference/polymorphism"
   ; "tests/types/inference/float_math"
   ; "tests/types/inference/higher_order"
+  ; "tests/types/inference/polymorphic_recursion"
   ; "tests/reflection/typeof_exprs"
   ; "tests/reflection/typeof_primitives"
   ; "tests/reflection/typeof_fn"
@@ -138,7 +139,16 @@ let cases =
   ; "tests/core/functions/trailing_after_args"
   ; "tests/core/functions/trailing_it"
   ; "tests/core/builtins/ord"
+  ; "tests/core/builtins/conversions"
   ; "tests/effects/nested_return"
+  ; "tests/effects/match/return_in_match"
+  ; "tests/effects/match/resume_in_match"
+  ; "tests/effects/match/suspend_in_scrutinee"
+  ; "tests/effects/suspend_in_condition"
+  ; "tests/effects/suspend_in_while_condition"
+  ; "tests/effects/return_in_inner_run"
+  ; "tests/effects/inner_run_suspends_outward"
+  ; "tests/effects/nested_aborts"
   ; "tests/stdlib/iterable/iterable"
   ; "tests/stdlib/hashmap/hashmap"
   ; "tests/stdlib/hashset/hashset"
@@ -155,6 +165,10 @@ let cases =
   ; "tests/core/records/nominal"
   ; "tests/core/enums/tuple_variants"
   ; "tests/core/enums/struct_variants"
+  ; "tests/types/gadt/query"
+  ; "tests/types/gadt/main"
+  ; "tests/types/gadt/accumulator"
+  ; "tests/types/gadt/pair"
   ; "tests/operators/vec2_add"
   ; "tests/operators/operator_mul"
   ; "tests/operators/operator_eq"
@@ -167,6 +181,7 @@ let cases =
   ; "tests/core/traits/generic_impl_operator/main"
   ; "tests/core/traits/try_from/main"
   ; "tests/core/traits/associated"
+  ; "tests/core/traits/associated_builtin"
   ; "tests/core/traits/builtin_receiver/main"
   ; "tests/effects/methods/methods"
   ; "tests/core/comptime/type_params/main"
@@ -190,6 +205,23 @@ let cases =
   ; "tests/meta/codegen/gen_meta"
   ; "tests/meta/functions/fib"
   ; "tests/meta/functions/meta_fn"
+  ; "tests/effects/nested_control/run_in_if"
+  ; "tests/effects/nested_control/run_in_while"
+  ; "tests/effects/nested_control/run_in_match"
+  ; "tests/effects/nested_control/op_only_in_match"
+  ; "tests/effects/nested_decls/handler_in_block"
+  ; "tests/effects/nested_decls/variadic_in_block"
+  ; "tests/core/defer/defer_in_match_arm"
+  ; "tests/core/resolution/hoisting_in_match_arm"
+  ; "tests/core/types/local_type_per_function"
+  ; "tests/core/modules/local_binders/main"
+  ; "tests/core/comptime/shadowed_value_param"
+  ; "tests/core/comptime/nested/template_in_function"
+  ; "tests/core/comptime/nested/template_in_method"
+  ; "tests/meta/codegen/shadowed_local"
+  ; "tests/core/defer/defer_in_converted_fn"
+  ; "tests/core/defer/defer_multishot"
+  ; "tests/core/defer/defer_performs_effect"
   ]
 
 (* Programs that must be rejected, and the diagnostics they must produce. *)
@@ -207,6 +239,7 @@ let error_cases =
   ; "tests/meta/code/errors/not_a_name"
   ; "tests/reflection/errors/not_a_value"
   ; "tests/types/errors/mixed_numeric"
+  ; "tests/types/inference/errors/unspecializable_recursion"
   ; "tests/types/errors/non_bool_condition"
   ; "tests/types/errors/undefined_variable"
   ; "tests/types/errors/arity"
@@ -220,6 +253,7 @@ let error_cases =
   ; "tests/effects/errors/unknown_effect"
   ; "tests/effects/errors/purity_violated"
   ; "tests/effects/errors/unknown_handler"
+  ; "tests/effects/errors/leaked_effect"
   ; "tests/core/arrays/errors/mixed_elements"
   ; "tests/core/arrays/errors/not_indexable"
   ; "tests/core/arrays/errors/element_mismatch"
@@ -254,6 +288,13 @@ let error_cases =
   ; "tests/core/comptime/errors/comptime_arity"
   ; "tests/core/comptime/errors/not_comptime"
   ; "tests/core/comptime/errors/comptime_call"
+  ; "tests/core/comptime/errors/embedded_bytes"
+  ; "tests/types/gadt/errors/ill_typed_tree"
+  ; "tests/types/gadt/errors/impossible_arm"
+  ; "tests/types/gadt/errors/leaked_constraint"
+  ; "tests/effects/errors/duplicate_operation"
+  ; "tests/types/errors/local_type_escapes"
+  ; "tests/types/inference/errors/unspecializable_names_the_caller"
   ]
 
 (* Programs that must be accepted and then fail while running, paired with a
@@ -285,65 +326,30 @@ let read_file path =
 let normalize s =
   String.trim (String.concat "\n" (String.split_on_char '\r' s |> List.filter (( <> ) "")))
 
+(* How a diagnostic reads in a FAIL report, and — with the stage and the span
+   trimmed off — how a `.rt` fixture spells a runtime error. *)
+let described path (e : Diagnostic.error) =
+  Printf.sprintf
+    "%s error %s %s"
+    (String.lowercase_ascii (Diagnostic.stage_name e.Diagnostic.stage))
+    (Ast.locate ~entry:path e.Diagnostic.span)
+    e.Diagnostic.message
+
 (* Run one program to completion, returning its stdout or the first error. *)
 let interpret path =
   let buf = Buffer.create 256 in
   let out = Buffer.add_string buf in
-  let at (span : Ast.span) = Ast.locate ~entry:path span in
-  match Loader.program path with
-  | exception Loader.Failed e ->
-    Error (Printf.sprintf "load error %s %s" (at e.span) e.message)
-  | program ->
-    (match Metaprocess.program ~out program with
-     | Error e -> Error (Printf.sprintf "meta error %s %s" (at e.span) e.message)
-     | Ok program ->
-       (match Desugar.program (Prelude.program () @ program) with
-        | Error e ->
-          Error
-            (Printf.sprintf "desugar error %s %s" (at e.span) e.message)
-        | Ok desugared ->
-        match Monomorphize.program desugared with
-        | Error e ->
-          Error
-            (Printf.sprintf "comptime error %s %s" (at e.span) e.message)
-        | Ok desugared ->
-        let registry = Registry.builtins () in
-        match Typecheck.check ~registry desugared with
-        | Error (e :: _) ->
-          Error
-            (Printf.sprintf "type error %s %s" (at e.span) e.message)
-        | Error [] -> Error "type check failed"
-        | Ok typed ->
-          match Resolve.program ~registry (Specialize.program ~registry typed) with
-          | Error e ->
-            Error
-              (Printf.sprintf "resolve error %s %s" (at e.span) e.message)
-          | Ok resolved ->
-          match Reflect.program resolved with
-          | Error e -> Error (Printf.sprintf "reflect error %s %s" (at e.span) e.message)
-          | Ok reflected ->
-          (match Cps.program reflected with
-           | Error e ->
-             Error
-               (Printf.sprintf "cps error %s %s" (at e.span) e.message)
-           | Ok converted ->
-             (match Verify.program converted with
-              | Error e ->
-                Error
-                  (Printf.sprintf "verify error %s %s" (at e.span) e.message)
-              | Ok () ->
-             match Interp.run (Builtins.env ~out) converted with
-              | Ok () -> Ok (Buffer.contents buf)
-              | Error e ->
-                Error
-                  (Printf.sprintf "runtime error %s %s" (at e.span) e.message)))))
+  match Pipeline.compile ~out path with
+  | Error [] -> Error "the program does not compile"
+  | Error (e :: _) -> Error (described path e)
+  | Ok converted ->
+    (match Pipeline.run (Builtins.env ~out) converted with
+     | Ok () -> Ok (Buffer.contents buf)
+     | Error e -> Error (described path e))
 
-(* Why a fixture does not run yet. A step is one from the implementation plan;
-   the rest will not be fixed by finishing it. *)
+(* Why a fixture does not run yet. *)
 type blocker =
-  | Step of string
-  | Rewrite (* predates a syntax decision, so the fixture is what is wrong *)
-  | Deferred (* a decision taken later on purpose; see internal-docs/TODO.md *)
+  | Waiting of string (* work that is planned and named *)
   (* Not being worked on, rather than waiting on anything: these need the LLVM
      path, and native compilation is out of scope for this bootstrap. *)
   | Parked
@@ -351,12 +357,16 @@ type blocker =
 
 (* Every fixture under tests/ that neither [cases] nor [error_cases] claims.
    The suite asserts each still fails, so one that starts working is reported
-   rather than sitting unnoticed — which is how four of them came to be passing
-   with nothing recording it. *)
+   rather than sitting unnoticed. *)
 let expected_failing : (string * blocker) list =
+    (* An unwind stops at its own handler now, but it is still an unwind, so it
+       destroys any handler frame it passes on the way — including a `ctl` arm
+       that had statements left after its `resume`. Delivering it as a value
+       through the continuation instead is the monadic-yield shape that
+       internal-docs/effects.md departs from on purpose. *)
+  [ "tests/effects/abort_under_conversion", Waiting "an abort that spares an arm's sequel"
     (* Unplanned *)
-  [ "tests/core/for_tuple/for_tuple", Unplanned
-  ; "tests/types/gadt/main", Unplanned
+  ; "tests/core/for_tuple/for_tuple", Unplanned
     (* Parked — native compilation, deliberately out of scope *)
   ; "tests/compile/m0/m0", Parked
   ; "tests/compile/m1/fib", Parked
@@ -368,50 +378,71 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m7/safe_div", Parked
   ; "tests/compile/m8/gadt", Parked
     (* Unplanned *)
-  ; "tests/core/builtins/conversions", Unplanned
   ; "tests/core/builtins/readfile", Unplanned
   ; "tests/core/builtins/writefile", Unplanned
   ; "tests/effects/async/async", Unplanned
+    (* An exit clears the flag guarding the unwind path, and a resumption
+       re-enters the scope without re-executing the `defer` that set it. Every
+       continuation standing inside the scope would have to set it again, which
+       is a re-entry point the pass does not currently mark. *)
+  ; ( "tests/core/defer/defer_multishot_abort"
+    , Waiting "a re-entered scope re-arming its deferred statements" )
+  ; "tests/core/traits/associated_type", Waiting "associated types on a trait"
+  ; "tests/core/traits/supertrait", Waiting "a trait requiring another"
+  ; "tests/core/traits/errors/missing_supertrait", Waiting "a trait requiring another"
+    (* Operators resolved through an impl instead of the operator registry.
+       Every one of these needs associated types first: the result of `+` has
+       to come from the impl rather than from the operand. *)
+  ; "tests/operators/traits/vec2_add", Waiting "operators dispatched through traits"
+  ; "tests/operators/traits/derive_eq", Waiting "an Eq the prelude declares and a deriver fills in"
+    (* A tuple has no declaration to derive from, so its impl is the checker's
+       to synthesize from the components' — the one case no deriver reaches. *)
+  ; "tests/operators/traits/tuple_eq", Waiting "Eq for a tuple of Eq components"
+  ; "tests/operators/traits/generic_bound", Waiting "operators dispatched through traits"
+  ; "tests/operators/traits/asymmetric", Waiting "operators dispatched through traits"
+  ; "tests/operators/traits/equality", Waiting "operators dispatched through traits"
+  ; "tests/operators/traits/indexing", Waiting "operators dispatched through traits"
+  ; ( "tests/operators/traits/errors/missing_impl"
+    , Waiting "operators dispatched through traits" )
   ]
 
-(* Formats diagnostics the way a .err file spells them. *)
+(* Programs that ought to be rejected and are not. Paired with the `.err` they
+   should produce, so the fixture says what the right answer is rather than only
+   that the current one is wrong. The suite asserts each is still accepted, and
+   announces the moment one starts being caught. *)
+let known_unsound : string list = []
+
+(* Formats diagnostics the way a .err file spells them: one `[line:col] message`
+   per line, and every one the checker found rather than only the first. *)
 let rejections path =
-  let at (span : Ast.span) = Ast.locate ~entry:path span in
-  match Loader.program path with
-  | exception Loader.Failed e -> Ok (Printf.sprintf "%s %s" (at e.span) e.message)
-  | program ->
-    (match Metaprocess.program ~out:(fun _ -> ()) program with
-     | Error e -> Ok (Printf.sprintf "%s %s" (at e.span) e.message)
-     | Ok program ->
-       (match Desugar.program (Prelude.program () @ program) with
-        | Error e ->
-          Ok (Printf.sprintf "%s %s" (at e.span) e.message)
-        | Ok desugared ->
-        match Monomorphize.program desugared with
-        | Error e ->
-          Ok (Printf.sprintf "%s %s" (at e.span) e.message)
-        | Ok desugared ->
-        let registry = Registry.builtins () in
-        match Typecheck.check ~registry desugared with
-        | Ok typed ->
-          (match Resolve.program ~registry (Specialize.program ~registry typed) with
-           | Ok resolved ->
-             (match Reflect.program resolved with
-              | Error e -> Ok (Printf.sprintf "%s %s" (at e.span) e.message)
-              | Ok reflected ->
-                (match Cps.program reflected with
-                 | Ok _ -> Error "expected an error, but the program checked"
-                 | Error e -> Ok (Printf.sprintf "%s %s" (at e.span) e.message)))
-           | Error e ->
-             Ok (Printf.sprintf "%s %s" (at e.span) e.message))
-        | Error errors ->
-          Ok
-            (String.concat
-               "\n"
-               (List.map
-                  (fun (e : Typecheck.error) ->
-                    Printf.sprintf "%s %s" (at e.span) e.message)
-                  errors))))
+  match Pipeline.compile ~out:(fun _ -> ()) path with
+  | Ok _ -> Error "expected an error, but the program checked"
+  | Error errors ->
+    Ok
+      (String.concat
+         "\n"
+         (List.map
+            (fun (e : Diagnostic.error) ->
+              Printf.sprintf
+                "%s %s"
+                (Ast.locate ~entry:path e.Diagnostic.span)
+                e.Diagnostic.message)
+            errors))
+
+(* Passing here is the failure, as with [expected_failing]: being rejected is
+   what this fixture is waiting for. *)
+let run_known_unsound root name =
+  let path ext = Filename.concat root (name ^ ext) in
+  match rejections (path ".cx") with
+  | Error _ ->
+    Printf.printf "ok   %s (still unsound)\n" name;
+    true
+  | Ok actual ->
+    Printf.printf
+      "PASSES %s\n  now rejected; move it into `error_cases`\n  --- got ---\n%s\n"
+      name
+      (normalize actual);
+    false
 
 let run_error_case root name =
   let path ext = Filename.concat root (name ^ ext) in
@@ -470,9 +501,9 @@ let run_runtime_case root name =
       false)
 
 (* Printing a parsed program gives back a program that parses the same way.
-   What it catches is a printer that drops or reshapes something — and, since a
-   mechanical rewrite of source is a heuristic, a rewrite that corrupted a
-   construct it did not understand. *)
+   Catches a printer that drops or reshapes something, and — since a mechanical
+   rewrite of source is a heuristic — one that corrupted a construct it did not
+   understand. *)
 let run_round_trip root name =
   let path = Filename.concat root (name ^ ".cx") in
   let parse where text =
@@ -525,23 +556,72 @@ let run_case root name =
         (normalize actual);
       false)
 
-(* A fixture is expected to fail, so passing is the failure. *)
+(* A fixture is expected to fail, so passing is the failure. An `.err` one has
+   arrived when it is rejected with the diagnostic it names — being rejected
+   with some other message is still the failure it is waiting on. *)
 let run_expected_failing root (name, blocker) =
   let path ext = Filename.concat root (name ^ ext) in
-  let expected = if Sys.file_exists (path ".txt") then Some (read_file (path ".txt")) else None in
-  match interpret (path ".cx"), expected with
-  | Ok actual, Some expected when String.equal (normalize actual) (normalize expected) ->
+  let matches ext produce =
+    Sys.file_exists (path ext)
+    &&
+    match produce (path ".cx") with
+    | Ok actual -> String.equal (normalize actual) (normalize (read_file (path ext)))
+    | Error _ -> false
+  in
+  if matches ".txt" interpret || matches ".err" rejections
+  then (
     Printf.printf
-      "PASSES %s\n  now works; move it into `cases` (was waiting on %s)\n"
+      "PASSES %s\n  now works; move it into `%s` (was waiting on %s)\n"
       name
+      (if Sys.file_exists (path ".err") then "error_cases" else "cases")
       (match blocker with
-       | Step step -> step
-       | Rewrite -> "a rewrite"
-       | Deferred -> "a deferred decision"
+       | Waiting work -> work
        | Parked -> "the LLVM path, which is out of scope"
        | Unplanned -> "a design");
+    false)
+  else true
+
+(* The four lists above have to name every fixture that carries an expectation
+   file, or one nobody adds to a list is never run and never reported — the
+   exact failure [expected_failing] exists to prevent. *)
+let unclaimed root =
+  let claimed = Hashtbl.create 512 in
+  List.iter (fun name -> Hashtbl.replace claimed name ()) cases;
+  List.iter (fun name -> Hashtbl.replace claimed name ()) error_cases;
+  List.iter (fun name -> Hashtbl.replace claimed name ()) runtime_cases;
+  List.iter (fun (name, _) -> Hashtbl.replace claimed name ()) expected_failing;
+  List.iter (fun name -> Hashtbl.replace claimed name ()) known_unsound;
+  let missing = ref [] in
+  let rec walk dir =
+    Array.iter
+      (fun entry ->
+        let path = Filename.concat dir entry in
+        if Sys.is_directory path
+        then walk path
+        else if Filename.check_suffix entry ".cx"
+        then (
+          let stem = Filename.remove_extension path in
+          let expected = List.exists (fun ext -> Sys.file_exists (stem ^ ext)) [ ".txt"; ".err"; ".rt" ] in
+          let name =
+            let cut = String.length root + 1 in
+            String.sub stem cut (String.length stem - cut)
+          in
+          if expected && not (Hashtbl.mem claimed name) then missing := name :: !missing))
+      (Sys.readdir dir)
+  in
+  walk (Filename.concat root "tests");
+  List.sort String.compare !missing
+
+let run_partition root =
+  match unclaimed root with
+  | [] ->
+    Printf.printf "ok   every fixture is claimed by a list\n";
+    true
+  | missing ->
+    Printf.printf
+      "FAIL fixtures no list names, so nothing runs them:\n%s\n"
+      (String.concat "\n" (List.map (fun name -> "  " ^ name) missing));
     false
-  | _ -> true
 
 let () =
   match repo_root () with
@@ -555,6 +635,8 @@ let () =
       @ List.map (run_runtime_case root) runtime_cases
       @ List.map (run_round_trip root) cases
       @ List.map (run_expected_failing root) expected_failing
+      @ List.map (run_known_unsound root) known_unsound
+      @ [ run_partition root ]
     in
     let failed = List.length (List.filter not results) in
     Printf.printf "\n%d/%d passed\n" (List.length results - failed) (List.length results);

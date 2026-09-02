@@ -1,0 +1,6 @@
+fn scaled<n: int>(x: int) -> int {
+    var n = 100;
+    return x * n;
+}
+
+print(scaled<3>(2));

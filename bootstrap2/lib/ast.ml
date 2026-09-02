@@ -4,15 +4,13 @@ type span =
   ; col : int
   }
 
-(* A location is printed bare while it is in the unit being compiled, and
-   qualified once it is not — so a single-file program reads as it always has
-   and an error inside an import says where it came from. *)
+(* Bare while it is in the unit being compiled, qualified once it is not. *)
 let locate ~entry (s : span) =
   if String.equal s.file entry || String.equal s.file ""
   then Printf.sprintf "[%d:%d]" s.line s.col
   else (
     (* Relative to whatever is being compiled: the absolute path is correct and
-       unreadable, and every unit of one program shares most of it. *)
+       unreadable. *)
     let root = Filename.dirname entry ^ "/" in
     let shown =
       if String.length s.file > String.length root
@@ -22,8 +20,6 @@ let locate ~entry (s : span) =
     in
     Printf.sprintf "[%s %d:%d]" shown s.line s.col)
 
-(* Each fragment below is parameterized over its child node type, so a tree
-   costs a few lines rather than a re-declaration of every constructor. *)
 type ('a, 'ann) node =
   { it : 'a
   ; span : span
@@ -61,6 +57,9 @@ and type_expr_kind =
   (* `...T` on the last parameter: the callee takes an `Array<T>`, and the
      call site is what puts the extra arguments in it. *)
   | Ty_variadic of type_expr
+  (* `T.Item`: the type an impl bound to the trait's associated name. Which
+     impl is not known until the owner is, so this resolves late. *)
+  | Ty_assoc of type_expr * string
 
 type param =
   { name : string
@@ -166,9 +165,15 @@ type 'e nominal =
   | `New_variant of string * string * 'e payload
   ]
 
+(* [v_params] are the variant's own, on top of the type's — `If<A>` holds an `A`
+   that the head does not mention. [v_result] is the head it builds, which is
+   what makes the declaration a GADT: [None] is the type applied to its own
+   parameters, which is what every ordinary variant builds. *)
 type variant =
   { v_name : string
+  ; v_params : string list
   ; v_payload : type_expr payload
+  ; v_result : type_expr option
   }
 
 type type_body =
@@ -193,6 +198,12 @@ type method_sig =
   ; ms_signature : signature
   }
 
+(* A trait declares the names; an impl binds each to a type. *)
+type trait_body =
+  { tb_assoc : string list
+  ; tb_methods : method_sig list
+  }
+
 (* [md_ann] cannot be left to the enclosing node: the CPS pass reads a
    function's effect row off its annotation, and one impl holds several. *)
 type ('s, 'ann) method_def =
@@ -203,19 +214,21 @@ type ('s, 'ann) method_def =
   ; md_ann : 'ann
   }
 
-(* A trait may take type parameters, and an impl says what it implements them
-   at — `impl TryFrom<string> for int`. Which impl a bound reaches then follows
-   from those arguments as well as from the trait's name. *)
+(* Which impl a bound reaches follows from the trait's arguments —
+   `impl TryFrom<string> for int` — as well as from its name. *)
+type ('s, 'ann) impl_body =
+  { ib_assoc : (string * type_expr) list
+  ; ib_methods : ('s, 'ann) method_def list
+  }
+
 type ('s, 'ann) method_defs =
-  [ `Trait_decl of string * string list * method_sig list
-  | `Impl_decl of (string * type_expr list) option * string * string list * ('s, 'ann) method_def list
+  [ `Trait_decl of string * string list * trait_body
+  | `Impl_decl of (string * type_expr list) option * string * string list * ('s, 'ann) impl_body
   ]
 
-(* Written, then what the name resolves to as an ordinary function. The two
-   differ once a unit is renamed: whether `xs.map()` reaches a method or a
-   function is a typing question, and what `map` names in the file it was
-   written in is a loading one, so the node carries both answers and each pass
-   uses the one it can give. *)
+(* Written, then what the name resolves to as an ordinary function. Whether
+   `xs.map()` reaches a method or a function is a typing question and what
+   `map` names is a loading one, so the node carries both answers. *)
 type 'e method_call = [ `Method_call of 'e * string * string * 'e list ]
 
 (* A bare name parses as [Ct_type] whichever it is; whoever knows the
@@ -232,12 +245,11 @@ type pattern =
 
 type ('e, 's) matching = [ `Match of 'e * (pattern * 's list) list ]
 
-
 type 'e collection = [ `Collection_lit of 'e list ]
 
 (* The contiguous block every other container is built from. A literal and an
-   index are written for any container and stay that way until [Resolve] knows
-   which one they meant; these are what the array ones become. *)
+   index stay generic until [Resolve] knows which container they meant; these
+   are what the array ones become. *)
 type 'e arrays =
   [ `Array_lit of 'e list
   | `Array_new of 'e * 'e
@@ -263,18 +275,16 @@ type import =
 
 type imports = [ `Import of import ]
 
-(* Compiled and run where it stands, then removed. Its statements are a program
-   of their own, which is why metaprocessing is compilation calling itself. *)
 type 's meta_blocks =
+  (* Compiled and run where it stands, then removed. *)
   [ `Meta of 's list
-  (* Captured as syntax, not run: what follows `gen` is emitted where the
-     enclosing block stood. *)
+  (* Captured as syntax, not run: emitted where the enclosing block stood. *)
   | `Gen of 's
-  (* Every call to one runs while compiling and is replaced by what it
-     produced, so it has no runtime form. *)
+  (* Every call runs while compiling and is replaced by what it produced, so it
+     has no runtime form. *)
   | `Meta_fn of string * param list * signature * 's list
-  (* `derive A, B for X` — one call per trait to whatever registered a deriver
-     for it, which is what a `meta fn … for A` did. *)
+  (* `derive A, B for X` — one call per trait to whatever `meta fn … for A`
+     registered. *)
   | `Derive of string list * string
   ]
 
@@ -295,8 +305,8 @@ type ('e, 's, 'h) effects =
 
 type 'e reflect = [ `Typeof of 'e ]
 
-(* Syntax that is captured rather than run. It reaches the metaprocessor and no
-   further: what a program keeps is whatever the captured syntax became. *)
+(* Reaches the metaprocessor and no further: what a program keeps is whatever
+   the captured syntax became. *)
 type 'e quote = [ `Code of 'e ]
 
 type ('e, 's) stmts =
@@ -308,23 +318,30 @@ type ('e, 's) stmts =
   | `Fn of string * param list * signature * 's list
   | `Return of 'e option
   (* Runs when the block holding it is left, however it is left, and after
-     anything deferred later — so a pair of statements that belong together
-     can be written together. *)
+     anything deferred later. *)
   | `Defer of 's
   ]
 
-(* A function with no name. Its body is statements, so this is the one
-   expression that holds them — which is why every stage's expression and
-   statement are one recursive group. *)
+(* The one expression that holds statements, which is why every stage's
+   expression and statement are one recursive group. *)
 type ('e, 's) lambdas = [ `Lambda of param list * signature * 's list ]
 
 (* How a handler that never resumes leaves: `Abort` unwinds to the `Scope` the
-   `run` block became. A continuation would be the general answer and is what
-   the rest of this costs, so an effect that only ever aborts does not pay
-   for one. *)
+   `run` block became, so an effect that only ever aborts needs no
+   continuation.
+
+   Both carry the name of that scope. An unwind that stopped at the nearest
+   `Scope` would be caught by whatever block happened to be between the
+   operation and its own handler. The second list is what runs when the scope
+   does catch its own: nothing in a direct body, where the statements after the
+   block simply follow it, and the continuation where one has replaced them. *)
 type 's aborts =
-  [ `Scope of 's list
-  | `Abort
+  [ `Scope of string * 's list * 's list
+  | `Abort of string
+  (* What a deferred statement leaves behind for the way out that is not a
+     continuation call. The second list runs while an unwind passes through,
+     and the unwind carries on afterwards rather than stopping here. *)
+  | `On_unwind of 's list * 's list
   ]
 
 type ('e, 's) loops =
@@ -557,10 +574,9 @@ let map_op_defs (fs : 's1 -> 's2) (o : 's1 op_defs) : 's2 op_defs =
   | `Op_decl (op, params, signature, body) ->
     `Op_decl (op, params, signature, List.map fs body)
 
-(* A name the compiler makes up. `#` is not in any identifier the scanner can
-   produce, so a generated name is unforgeable and a user's `fn List__len`
-   cannot collide with a method's. Always two parts or more, or the separator
-   would not appear and the name would be one a program could write. *)
+(* `#` is not in any identifier the scanner can produce, so a generated name is
+   unforgeable. Always two parts or more, or the separator would not appear and
+   the name would be one a program could write. *)
 let generated parts =
   match parts with
   | [] | [ _ ] -> invalid_arg "Ast.generated: a generated name needs two parts"
@@ -601,8 +617,8 @@ let type_head (t : type_expr option) =
   | Some { it = Ty_name n; _ } | Some { it = Ty_app (n, _); _ } -> n
   | _ -> "_"
 
-(* A literal entry is identified by what it builds; every other operator by its
-   operands. Two containers built from the same array type would otherwise
+(* A literal entry is identified by what it builds, every other operator by its
+   operands: two containers built from the same array type would otherwise
    mangle to one name and the later declaration would answer for both. *)
 let op_entry_name op (params : param list) (signature : signature) =
   match op, params with
@@ -641,9 +657,13 @@ let map_method_defs (fs : 's1 -> 's2) (fa : 'a1 -> 'a2) (m : ('s1, 'a1) method_d
   : ('s2, 'a2) method_defs
   =
   match m with
-  | `Trait_decl (name, params, methods) -> `Trait_decl (name, params, methods)
-  | `Impl_decl (trait, type_name, params, methods) ->
-    `Impl_decl (trait, type_name, params, List.map (map_method_def fs fa) methods)
+  | `Trait_decl (name, params, body) -> `Trait_decl (name, params, body)
+  | `Impl_decl (trait, type_name, params, body) ->
+    `Impl_decl
+      ( trait
+      , type_name
+      , params
+      , { body with ib_methods = List.map (map_method_def fs fa) body.ib_methods } )
 
 let map_matching (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (m : ('e1, 's1) matching)
   : ('e2, 's2) matching
@@ -684,14 +704,6 @@ let payload_fields (p : 'a payload) : (string * 'a) list =
 let map_reflect (f : 'a -> 'b) (e : 'a reflect) : 'b reflect =
   match e with
   | `Typeof v -> `Typeof (f v)
-
-let map_lambdas (fs : 'a -> 'b) (e : ('e, 'a) lambdas) : ('e, 'b) lambdas =
-  match e with
-  | `Lambda (params, signature, body) -> `Lambda (params, signature, List.map fs body)
-
-let map_quote (f : 'a -> 'b) (e : 'a quote) : 'b quote =
-  match e with
-  | `Code v -> `Code (f v)
 
 let map_stmts (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) stmts)
   : ('e2, 's2) stmts

@@ -1,0 +1,13 @@
+type Box { Hold(int) }
+
+fn item() -> int { return 99; }
+
+fn use_loop() -> int {
+    var sum = 0;
+    for (item in [1, 2, 3]) { sum = sum + item; }
+    return sum;
+}
+
+fn use_match(b: Box) -> int {
+    match b { Box::Hold(item) => { return item; } }
+}

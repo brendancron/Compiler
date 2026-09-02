@@ -7,20 +7,15 @@ type value =
   | Bool of bool
   | Unit
   | Tuple of value list
-  (* A contiguous mutable block. Shared rather than copied, so it has
-     identity. *)
   | Array of value array
-  (* Fields are mutable, so a record has identity. *)
   | Record of (string * value ref) list
   | Variant of string * (string * value) list
-  (* One callable form. Whether the body is Cronyx or OCaml is the business of
-     whoever built it. *)
   | Fn of fn
-  (* Syntax a meta program built. It never outlives metaprocessing: what the
-     program keeps is what the syntax became. *)
+  (* Never outlives metaprocessing: what the program keeps is what the syntax
+     became. *)
   | Code of Ast.expr
-  (* An identifier, kept apart from a string so that only what reflection
-     handed out can be spliced into a name position. *)
+  (* Kept apart from a string so that only what reflection handed out can be
+     spliced into a name position. *)
   | Name of string
 
 and fn =
@@ -94,10 +89,9 @@ let rec string_of_value = function
   | Code e -> Printf.sprintf "<code %s>" (Printer.string_of_expr e)
   | Name n -> n
 
-(* Structural, and written out because OCaml's own comparison raises on
-   functional values. A pair already under comparison counts as equal: that is
-   what makes a cyclic value terminate, and it is the coinductive reading of
-   "equal" rather than a shortcut. *)
+(* Written out because OCaml's own comparison raises on functional values. A
+   pair already under comparison counts as equal, which is what makes a cyclic
+   value terminate. *)
 let rec equal_with seen a b =
   if List.exists (fun (x, y) -> x == a && y == b) seen
   then true
@@ -136,8 +130,8 @@ let rec equal_with seen a b =
 
 let values_equal a b = equal_with [] a b
 
-(* Identity, for the values that have one. A scalar cannot be mutated, so
-   nothing can tell two equal ones apart and there is no identity to ask about. *)
+(* A scalar cannot be mutated, so nothing can tell two equal ones apart and it
+   falls back to equality. *)
 let rec same a b =
   match a, b with
   | Array x, Array y -> x == y

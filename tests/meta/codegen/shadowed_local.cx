@@ -1,0 +1,9 @@
+meta {
+    var v = 7;
+    gen fn get() -> int {
+        var v = 100;
+        return v;
+    }
+}
+
+print(get());

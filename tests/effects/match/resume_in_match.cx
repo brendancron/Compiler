@@ -1,0 +1,21 @@
+// `resume` inside a match arm. Two arms resume with different values, so
+// selecting the wrong one is wrong output rather than an error.
+type Choice { Yes, No }
+
+effect Ask { ctl get(): int; }
+
+fn use() -> <Ask> int {
+    return get();
+}
+
+run {
+    print(use());
+} handle Ask {
+    ctl get() {
+        var c = new Choice::No;
+        match c {
+            Choice::Yes => { resume 1; }
+            Choice::No => { resume 2; }
+        }
+    }
+}

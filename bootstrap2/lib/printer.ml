@@ -13,6 +13,7 @@ let string_of_row = function
 let rec string_of_type_expr (t : Ast.type_expr) : string =
   match t.Ast.it with
   | Ast.Ty_name name -> name
+  | Ast.Ty_assoc (owner, member) -> string_of_type_expr owner ^ "." ^ member
   | Ast.Ty_variadic t -> "..." ^ string_of_type_expr t
   | Ast.Ty_app (name, args) ->
     Printf.sprintf "%s<%s>" name (String.concat ", " (List.map string_of_type_expr args))
@@ -232,20 +233,23 @@ let rec write_stmt buf indent (s : Ast.stmt) =
     nested
       (Printf.sprintf "handler %s : %s" name h.Ast.handled)
       (List.concat_map (fun a -> a.Ast.arm_body) h.Ast.arms)
-  | `Trait_decl (name, _, methods) ->
+  | `Trait_decl (name, _, body) ->
     line
-      "%s(trait %s%s)\n"
+      "%s(trait %s%s%s)\n"
       pad
       name
+      (String.concat "" (List.map (fun a -> " type " ^ a) body.Ast.tb_assoc))
       (String.concat
          ""
-         (List.map (fun (m : Ast.method_sig) -> " " ^ m.Ast.ms_name) methods))
-  | `Impl_decl (trait, type_name, _, methods) ->
+         (List.map (fun (m : Ast.method_sig) -> " " ^ m.Ast.ms_name) body.Ast.tb_methods))
+  | `Impl_decl (trait, type_name, _, impl) ->
     nested
       (match trait with
        | Some (trait, _) -> Printf.sprintf "impl %s for %s" trait type_name
        | None -> Printf.sprintf "impl %s" type_name)
-      (List.concat_map (fun (m : (Ast.stmt, unit) Ast.method_def) -> m.Ast.md_body) methods)
+      (List.concat_map
+         (fun (m : (Ast.stmt, unit) Ast.method_def) -> m.Ast.md_body)
+         impl.Ast.ib_methods)
 
 let string_of_program (program : Ast.program) : string =
   let buf = Buffer.create 256 in
@@ -413,14 +417,14 @@ let rec write_typed_stmt buf indent (s : Ast.typed_stmt) =
   | `Op_decl (op, _, _, body) ->
     nested (Printf.sprintf "op %s" (Ast.string_of_op op)) body
   | `Trait_decl (name, _, _) -> line "%s(trait %s)\n" pad name
-  | `Impl_decl (trait, type_name, _, methods) ->
+  | `Impl_decl (trait, type_name, _, impl) ->
     nested
       (match trait with
        | Some (trait, _) -> Printf.sprintf "impl %s for %s" trait type_name
        | None -> Printf.sprintf "impl %s" type_name)
       (List.concat_map
          (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) -> m.Ast.md_body)
-         methods)
+         impl.Ast.ib_methods)
   | `Match (scrutinee, cases) ->
     nested
       (Printf.sprintf "match %s" (string_of_typed_expr scrutinee))

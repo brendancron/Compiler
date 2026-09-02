@@ -1,9 +1,6 @@
 (* Declarations every program starts with, parsed and checked with it. Nothing
-   here is reachable from the compiler, save for the three types `typeof`
-   answers with: it is Cronyx, and a type declared in it is a type like any
-   other.
-
-   It becomes a file the module loader reads once there is one. *)
+   here is reachable from the compiler save for the three types `typeof`
+   answers with. It becomes a file the module loader reads once there is one. *)
 
 let source =
   {|
@@ -364,20 +361,24 @@ op [](self: string, r: Range) -> string {
 
 |}
 
-(* The name a prelude span reports. Not a path: nothing reads it, and a
-   diagnostic that pointed at a file the user does not have would be worse than
-   one that says where it came from. *)
+(* Not a path: a diagnostic pointing at a file the user does not have would be
+   worse than one that says where it came from. *)
 let file = "<prelude>"
 
-(* Parsed once and prepended to the program, so its declarations are in scope
-   and go through every pass the program does. *)
-let program () =
-  match Scanner.scan_tokens ~file source with
+(* Scanned and parsed once. Metaprocessing compiles the declarations around
+   every meta block and every meta call site, so this is asked for once per
+   such site rather than once per program. Sharing one tree is safe because
+   nothing after this point mutates it. *)
+let parsed =
+  lazy
+    (match Scanner.scan_tokens ~file source with
   | Error _ -> failwith "the prelude does not scan"
   | Ok tokens ->
     (match Parser.parse tokens with
      | Error (e :: _) ->
        failwith (Printf.sprintf "the prelude does not parse [%d:%d] %s" e.Parser.line e.Parser.col e.Parser.message)
      | Error [] -> failwith "the prelude does not parse"
-     | Ok program -> program)
+     | Ok program -> program))
+
+let program () = Lazy.force parsed
 

@@ -1,0 +1,13 @@
+fn is_same<T: Eq>(got: (T, T), want: (T, T)) -> bool {
+    return got == want;
+}
+
+var a = (1, "x");
+var b = (1, "x");
+var c = (1, "y");
+
+print(a == b);
+print(a == c);
+
+print(is_same((1, 2), (1, 2)));
+print(is_same(("a", "b"), ("a", "c")));

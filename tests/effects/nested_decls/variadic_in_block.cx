@@ -1,0 +1,10 @@
+fn main() -> unit {
+    fn total(nums: ...int) -> int {
+        var sum = 0;
+        for (n in nums) { sum = sum + n; }
+        return sum;
+    }
+    print(total(1, 2, 3));
+}
+
+main();

@@ -1,16 +1,26 @@
-
 (* An operator or method inside a generic body cannot be selected while the body
    is generic, so it is copied per concrete type its call sites use. *)
 type state =
   { registry : Registry.t
   ; generic : (string, Ast.typed_stmt) Hashtbl.t
-  ; copies : (string * string, string) Hashtbl.t
+  ; copies : (string * Types.ty, string) Hashtbl.t
+  ; (* Which template a copy came from, so a copy that asks for another copy of
+       its own template can be recognised as the diverging one. *)
+    origin : (string, string) Hashtbl.t
   ; mutable emitted : Ast.typed_stmt list
   ; mutable changed : bool
+  ; mutable rewriting : string option
+  ; mutable recursive : string option
   }
 
-let rec type_directed_expr (e : Ast.typed_expr) =
+(* [self] is the function whose body this is. A call it makes to itself at
+   another type is deliberately not counted: copying the body cannot resolve
+   that call, because every copy asks for one more at a further type. Such a
+   function stays generic and its type-directed parts stay unresolved — which
+   the interpreter tolerates and codegen will not. *)
+let rec type_directed_expr self (e : Ast.typed_expr) =
   let operand (child : Ast.typed_expr) = Types.has_generic child.Ast.ann in
+  let type_directed_expr = type_directed_expr self in
   match e.Ast.it with
   | `Binop (_, a, b) -> operand a || operand b || type_directed_expr a || type_directed_expr b
   | `Compound (_, _, v) -> Types.has_generic e.Ast.ann || type_directed_expr v
@@ -31,11 +41,13 @@ let rec type_directed_expr (e : Ast.typed_expr) =
     type_directed_expr a || type_directed_expr b
   | `Index_assign (a, b, c) ->
     type_directed_expr a || type_directed_expr b || type_directed_expr c
-  (* A generic argument selects the callee's copy the way a generic receiver
-     selects a method's, so the body holding the call has to be copied too. *)
   (* A body is copied for what its own call sites need; a lambda inside it is
      copied along with whatever holds it. *)
   | `Lambda _ -> false
+  (* A generic argument selects the callee's copy the way a generic receiver
+     selects a method's, so the body holding the call has to be copied too. *)
+  | `Call ({ Ast.it = `Var called; _ }, args) when String.equal called self ->
+    List.exists type_directed_expr args
   | `Call (callee, args) ->
     List.exists operand args
     || type_directed_expr callee
@@ -48,8 +60,9 @@ let rec type_directed_expr (e : Ast.typed_expr) =
     List.exists (fun (_, v) -> type_directed_expr v) (Ast.payload_fields payload)
   | #Ast.lit | `Var _ -> false
 
-and type_directed (s : Ast.typed_stmt) =
-  let expr = type_directed_expr in
+and type_directed self (s : Ast.typed_stmt) =
+  let expr = type_directed_expr self in
+  let type_directed = type_directed self in
   match s.Ast.it with
   | `Expr e | `Return (Some e) | `Var_decl (_, _, Some e) | `Resume (Some e) -> expr e
   | `Block body | `Fn (_, _, _, body) -> List.exists type_directed body
@@ -68,11 +81,11 @@ and type_directed (s : Ast.typed_stmt) =
              (fun (a : Ast.typed_stmt Ast.arm) -> List.exists type_directed a.Ast.arm_body)
              h.Ast.arms)
          handlers
-  | `Impl_decl (_, _, _, methods) ->
+  | `Impl_decl (_, _, _, impl) ->
     List.exists
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
         List.exists type_directed m.Ast.md_body)
-      methods
+      impl.Ast.ib_methods
   | `Op_decl (_, _, _, body) -> List.exists type_directed body
   | _ -> false
 
@@ -124,13 +137,16 @@ and subst_stmt mapping (s : Ast.typed_stmt) : Ast.typed_stmt =
   in
   { s with Ast.it; ann = Types.subst_generic mapping s.Ast.ann }
 
+(* Keyed by the type itself: printing is not injective, so two distinct types
+   that render alike would otherwise share one copy. *)
 let copy_for state name (at : Types.ty) =
-  let key = Types.string_of_ty at in
-  match Hashtbl.find_opt state.copies (name, key) with
+  match Hashtbl.find_opt state.copies (name, at) with
   | Some existing -> existing
   | None ->
     let copy = Ast.generated [ name; string_of_int (Hashtbl.length state.copies) ] in
-    Hashtbl.replace state.copies (name, key) copy;
+    Hashtbl.replace state.copies (name, at) copy;
+    Hashtbl.replace state.origin copy name;
+    if state.rewriting = Some name then state.recursive <- Some name;
     let declaration = Hashtbl.find state.generic name in
     (match declaration.Ast.it with
      | `Fn (_, params, signature, body) ->
@@ -234,16 +250,17 @@ and rewrite_stmt state (s : Ast.typed_stmt) : Ast.typed_stmt =
 let rec collect state (s : Ast.typed_stmt) =
   match s.Ast.it with
   | `Fn (name, _, _, body) ->
-    if Types.has_generic s.Ast.ann && type_directed s
+    if Types.has_generic s.Ast.ann && type_directed name s
     then Hashtbl.replace state.generic name s;
     List.iter (collect state) body
   (* A method is a function whose first parameter is the receiver, so its
      template is one — the copy is emitted as a plain [`Fn]. *)
-  | `Impl_decl (_, type_name, _, methods) ->
+  | `Impl_decl (_, type_name, _, impl) ->
     List.iter
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
         let mangled = Ast.method_name type_name m.Ast.md_name in
-        if Types.has_generic m.Ast.md_ann && List.exists type_directed m.Ast.md_body
+        if Types.has_generic m.Ast.md_ann
+           && List.exists (type_directed mangled) m.Ast.md_body
         then
           Hashtbl.replace
             state.generic
@@ -253,7 +270,7 @@ let rec collect state (s : Ast.typed_stmt) =
             ; ann = m.Ast.md_ann
             };
         List.iter (collect state) m.Ast.md_body)
-      methods
+      impl.Ast.ib_methods
   | `Block body -> List.iter (collect state) body
   | `If (_, then_branch, else_branch) ->
     collect state then_branch;
@@ -271,13 +288,30 @@ let is_template state (s : Ast.typed_stmt) =
   | `Fn (name, _, _, _) -> Hashtbl.mem state.generic name
   | _ -> false
 
+type error =
+  { span : Ast.span
+  ; message : string
+  }
+
+exception Diverged of error
+
+(* Each round of draining specializes one level deeper, and real nesting is
+   shallow — a chain of generic calls each needing a copy of the next. A
+   function that calls itself at a new type never converges, and the type grows
+   with every round, so the cap has to bite before the types themselves get
+   expensive to print rather than merely numerous. *)
+let depth_limit = 16
+
 let program ~registry (p : Ast.typed_stmt list) : Ast.typed_stmt list =
   let state =
     { registry
     ; generic = Hashtbl.create 8
     ; copies = Hashtbl.create 8
+    ; origin = Hashtbl.create 8
     ; emitted = []
     ; changed = false
+    ; rewriting = None
+    ; recursive = None
     }
   in
   List.iter (collect state) p;
@@ -290,11 +324,37 @@ let program ~registry (p : Ast.typed_stmt list) : Ast.typed_stmt list =
         p
     in
     (* A copy may itself call a template at a type nothing has asked for yet. *)
-    let rec drain acc =
+    let rec drain depth acc =
+      if depth > depth_limit
+      then (
+        let deepest = state.recursive in
+        let span =
+          match Option.bind deepest (Hashtbl.find_opt state.generic) with
+          | Some (d : Ast.typed_stmt) -> d.Ast.span
+          | None -> { Ast.file = ""; line = 1; col = 1 }
+        in
+        raise
+          (Diverged
+             { span
+             ; message =
+                 Printf.sprintf
+                   "'%s' calls itself at a new type each time, so there is no finite set of copies of it."
+                   (Option.value deepest ~default:"this function")
+             }));
       let fresh = state.emitted in
       state.emitted <- [];
       state.changed <- false;
-      let done_ = List.rev_map (rewrite_stmt state) fresh in
-      if state.changed then drain (done_ @ acc) else done_ @ acc
+      let done_ =
+        List.rev_map
+          (fun (s : Ast.typed_stmt) ->
+            state.rewriting <-
+              (match s.Ast.it with
+               | `Fn (name, _, _, _) -> Hashtbl.find_opt state.origin name
+               | _ -> None);
+            rewrite_stmt state s)
+          fresh
+      in
+      state.rewriting <- None;
+      if state.changed then drain (depth + 1) (done_ @ acc) else done_ @ acc
     in
-    drain [] @ rewritten)
+    drain 0 [] @ rewritten)

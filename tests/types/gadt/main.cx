@@ -1,47 +1,43 @@
-// GADTs: each constructor pins the type parameter to a concrete type.
-// The type checker refines T in each match arm, making eval total and cast-free.
-
-enum Expr<T> {
-    Lit(int)                            : Expr<int>,
-    Add(Expr<int>, Expr<int>)           : Expr<int>,
-    BoolLit(bool)                       : Expr<bool>,
-    If<A>(Expr<bool>, Expr<A>, Expr<A>) : Expr<A>,
-    Pair<A, B>(Expr<A>, Expr<B>)        : Expr<(A, B)>,
-    Fst<A, B>(Expr<(A, B)>)             : Expr<A>,
+// Each constructor pins the type parameter, and a match arm refines it, which
+// is what makes `eval` total and cast-free. `Add` cannot be built from a
+// `BoolLit`, so the ill-typed tree is not representable.
+type Expr<T> {
+    Lit(int)                            -> Expr<int>,
+    Add(Expr<int>, Expr<int>)           -> Expr<int>,
+    BoolLit(bool)                       -> Expr<bool>,
+    If<A>(Expr<bool>, Expr<A>, Expr<A>) -> Expr<A>,
 }
 
-fn eval<T>(e: Expr<T>): T {
+fn eval<T>(e: Expr<T>) -> T {
     match e {
-        Expr::Lit(n)      => n,
-        Expr::Add(l, r)   => eval(l) + eval(r),
-        Expr::BoolLit(b)  => b,
-        Expr::If(c, t, f) => { if (eval(c)) { return eval(t); } else { return eval(f); } }
-        Expr::Pair(a, b)  => (eval(a), eval(b)),
-        Expr::Fst(p)      => eval(p).0,
+        Expr::Lit(n)      => { return n; }
+        Expr::Add(l, r)   => { return eval(l) + eval(r); }
+        Expr::BoolLit(b)  => { return b; }
+        Expr::If(c, t, f) => { if (eval(c)) { return eval(t); } return eval(f); }
     }
 }
 
-print(eval(Expr::Add(Expr::Lit(40), Expr::Lit(2))));
-print(eval(Expr::If(Expr::BoolLit(true), Expr::Lit(1), Expr::Lit(0))));
+print(eval(new Expr::Add(new Expr::Lit(40), new Expr::Lit(2))));
+print(eval(new Expr::If(new Expr::BoolLit(true), new Expr::Lit(1), new Expr::Lit(0))));
 
-// Length-indexed list: head() is statically safe — Nil cannot reach it.
+// Length-indexed: `head` takes a vector one longer than some N, so `Nil` cannot
+// reach it and the single arm is exhaustive.
+type Zero { }
+type Succ<N> { }
 
-struct Zero {}
-struct Succ<N> {}
-
-enum Vec<N, T> {
-    Nil<T>               : Vec<Zero, T>,
-    Cons<N, T>(T, Vec<N, T>) : Vec<Succ<N>, T>,
+type Vec<N, T> {
+    Nil                   -> Vec<Zero, T>,
+    Cons<M>(T, Vec<M, T>) -> Vec<Succ<M>, T>,
 }
 
-fn head<N, T>(v: Vec<Succ<N>, T>): T {
+fn head<N, T>(v: Vec<Succ<N>, T>) -> T {
     match v {
-        Vec::Cons(x, _) => x,
+        Vec::Cons(x, rest) => { return x; }
     }
 }
 
-var one = Vec::Cons(10, Vec::Nil);
-var two = Vec::Cons(20, Vec::Cons(10, Vec::Nil));
+var one = new Vec::Cons(10, new Vec::Nil);
+var two = new Vec::Cons(20, one);
 
 print(head(two));
 print(head(one));

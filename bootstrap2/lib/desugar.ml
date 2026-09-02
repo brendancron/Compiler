@@ -28,8 +28,8 @@ let rec expr (e : expr) : desugared_expr =
   let it : desugared_expr_kind =
     match e.it with
     (* Everything past the fixed parameters becomes the array the callee
-       declared, so the callee has an ordinary parameter and nothing after
-       this pass knows a call was written any other way. *)
+       declared, so nothing after this pass knows a call was written any other
+       way. *)
     | `Call (({ it = `Var name; _ } as callee), args)
       when Hashtbl.mem variadic name && List.length args >= Hashtbl.find variadic name ->
       let fixed = Hashtbl.find variadic name in
@@ -58,8 +58,8 @@ let rec expr (e : expr) : desugared_expr =
     | #method_call as m -> (map_method_call expr m :> desugared_expr_kind)
     | `Lambda (params, signature, body) -> `Lambda (params, signature, List.map stmt body)
     | #reflect as r -> (map_reflect expr r :> desugared_expr_kind)
-    (* Metaprocessing lowers every one it reaches, so one that arrives here
-       stood where no meta program would ever have run it. *)
+    (* Metaprocessing lowers every one it reaches, so one arriving here stood
+       where no meta program would ever have run it. *)
     | `Code _ ->
       raise
         (Error
@@ -129,8 +129,6 @@ and stmt (s : stmt) : desugared_stmt =
         | None -> body
         | Some st ->
           let step = expr st in
-          (* Synthesized nodes take the span of the source they stand in for, so
-             an error in the step is not reported at the `for`. *)
           { it = `Block [ body; { it = `Expr step; span = step.span; ann = () } ]
           ; span = body.span
           ; ann = ()
@@ -163,13 +161,39 @@ and clause span (c : stmt handler_clause) : desugared_stmt handler =
 let program (p : program) : (desugared_stmt list, error) result =
   Hashtbl.reset declared;
   Hashtbl.reset variadic;
-  List.iter
-    (fun (s : stmt) ->
-      match s.it with
-      | `Handler_decl (name, h) -> Hashtbl.replace declared name h
-      | `Fn (name, params, _, _) ->
-        Option.iter (Hashtbl.replace variadic name) (variadic_arity params)
-      | _ -> ())
-    p;
+  (* Both tables are keyed by bare name and read from anywhere, so a handler or
+     a variadic written inside a block has to be found the same as one written
+     at the top: missing it is an "Unknown handler" for the first and, for the
+     second, silently an ordinary function taking an array. *)
+  let rec collect (s : stmt) =
+    (match s.it with
+     | `Handler_decl (name, h) -> Hashtbl.replace declared name h
+     | `Fn (name, params, _, _) ->
+       Option.iter (Hashtbl.replace variadic name) (variadic_arity params)
+     | _ -> ());
+    List.iter collect (children s)
+  and children (s : stmt) =
+    match s.it with
+    | `Block body | `Fn (_, _, _, body) | `Meta body | `Meta_fn (_, _, _, body) -> body
+    | `Op_decl (_, _, _, body) -> body
+    | `Defer inner | `Gen inner -> [ inner ]
+    | `If (_, t, e) -> t :: Option.to_list e
+    | `While (_, body) -> [ body ]
+    | `For (init, _, _, body) -> Option.to_list init @ [ body ]
+    | `For_in (_, _, body) -> [ body ]
+    | `Match (_, cases) -> List.concat_map snd cases
+    | `Handler_decl (_, h) -> List.concat_map (fun a -> a.arm_body) h.arms
+    | `Run (body, handlers) ->
+      body
+      @ List.concat_map
+          (function
+            | Inline h -> List.concat_map (fun a -> a.arm_body) h.arms
+            | Named _ -> [])
+          handlers
+    | `Impl_decl (_, _, _, body) -> List.concat_map (fun m -> m.md_body) body.ib_methods
+    | `Expr _ | `Var_decl _ | `Return _ | `Import _ | `Derive _ | `Effect_decl _
+    | `Resume _ | `Type_decl _ | `Trait_decl _ -> []
+  in
+  List.iter collect p;
   try Ok (List.map stmt p) with
   | Error e -> Result.Error e

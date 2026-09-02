@@ -1,12 +1,10 @@
-(* The surface tree as Cronyx. What it prints is a program, not a rendering of
-   one: parsing the output gives back the same tree.
-
-   Comments are not in the tree, so they are not in the output. That is what
-   keeps this a way to read a program the compiler built — after `Metaprocess`,
-   what a `gen` produced is ordinary source here — rather than a formatter for
-   files someone wrote. *)
+(* The surface tree as Cronyx: parsing the output gives back the same tree.
+   Comments are not in the tree, so they are not in the output — this is a way
+   to read a program the compiler built, not a formatter for files someone
+   wrote. *)
 
 let pad depth = String.make (depth * 4) ' '
+let line depth text = Printf.sprintf "%s%s\n" (pad depth) text
 
 (* Whichever quote encloses it has to be escaped, and only that one: a `'`
    inside a string needs nothing. *)
@@ -33,6 +31,7 @@ let string_of_unop = function
 let rec type_expr (t : Ast.type_expr) =
   match t.Ast.it with
   | Ast.Ty_name name -> name
+  | Ast.Ty_assoc (owner, member) -> type_expr owner ^ "." ^ member
   | Ast.Ty_variadic inner -> "..." ^ type_expr inner
   | Ast.Ty_app (name, args) ->
     Printf.sprintf "%s<%s>" name (String.concat ", " (List.map type_expr args))
@@ -85,7 +84,6 @@ let rec expr (e : Ast.expr) : string =
   | `Char c -> Printf.sprintf "'%s'" (escape ~quote:'\'' (Utf8.encode [| c |]))
   | `Bool b -> string_of_bool b
   | `Name n -> n
-  (* No literal writes one, so it is printed as the text it holds. *)
   | `Bytes b -> Printf.sprintf "\"%s\"" (escape b)
   | `Var name -> name
   | `Assign (name, v) -> Printf.sprintf "%s = %s" name (expr v)
@@ -159,7 +157,7 @@ and block depth body =
   String.concat "" (List.map (stmt depth) body)
 
 and stmt depth (s : Ast.stmt) : string =
-  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  let line = line depth in
   let braced head body = line (Printf.sprintf "%s {" head) ^ block (depth + 1) body ^ line "}" in
   match s.Ast.it with
   | `Expr e -> line (expr e ^ ";")
@@ -280,6 +278,11 @@ and stmt depth (s : Ast.stmt) : string =
     ^ String.concat
         ""
         (List.map
+           (fun name -> Printf.sprintf "%stype %s;\n" (pad (depth + 1)) name)
+           sigs.Ast.tb_assoc)
+    ^ String.concat
+        ""
+        (List.map
            (fun (m : Ast.method_sig) ->
              Printf.sprintf
                "%sfn %s(%s)%s;\n"
@@ -287,9 +290,9 @@ and stmt depth (s : Ast.stmt) : string =
                m.Ast.ms_name
                (String.concat ", " (List.map param m.Ast.ms_params))
                (signature m.Ast.ms_signature))
-           sigs)
+           sigs.Ast.tb_methods)
     ^ line "}"
-  | `Impl_decl (trait, target, params, methods) ->
+  | `Impl_decl (trait, target, params, impl) ->
     line
       (Printf.sprintf
          "impl %s%s%s {"
@@ -306,7 +309,13 @@ and stmt depth (s : Ast.stmt) : string =
          (match params with
           | [] -> ""
           | ps -> Printf.sprintf "<%s>" (String.concat ", " ps)))
-    ^ String.concat "" (List.map (method_def (depth + 1)) methods)
+    ^ String.concat
+        ""
+        (List.map
+           (fun (name, bound) ->
+             Printf.sprintf "%stype %s = %s;\n" (pad (depth + 1)) name (type_expr bound))
+           impl.Ast.ib_assoc)
+    ^ String.concat "" (List.map (method_def (depth + 1)) impl.Ast.ib_methods)
     ^ line "}"
   | `Match (scrutinee, cases) ->
     line (Printf.sprintf "match %s {" (expr scrutinee))
@@ -321,7 +330,7 @@ and nested depth (s : Ast.stmt) =
   | _ -> stmt (depth + 1) s
 
 and type_decl depth name params body =
-  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  let line = line depth in
   let head =
     Printf.sprintf
       "type %s%s {"
@@ -342,9 +351,12 @@ and type_decl depth name params body =
          (List.map
             (fun (v : Ast.variant) ->
               Printf.sprintf
-                "%s%s%s"
+                "%s%s%s%s%s"
                 (pad (depth + 1))
                 v.Ast.v_name
+                (match v.Ast.v_params with
+                 | [] -> ""
+                 | ps -> Printf.sprintf "<%s>" (String.concat ", " ps))
                 (match v.Ast.v_payload with
                  | Ast.P_none -> ""
                  | Ast.P_tuple items ->
@@ -354,13 +366,16 @@ and type_decl depth name params body =
                      " { %s }"
                      (String.concat
                         ", "
-                        (List.map (fun (l, t) -> l ^ ": " ^ type_expr t) fields))))
+                        (List.map (fun (l, t) -> l ^ ": " ^ type_expr t) fields)))
+                (match v.Ast.v_result with
+                 | None -> ""
+                 | Some head -> " -> " ^ type_expr head))
             variants))
   ^ "\n"
   ^ line "}"
 
 and effect_decl depth name params ops =
-  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  let line = line depth in
   line
     (Printf.sprintf
        "effect %s%s {"
@@ -390,7 +405,7 @@ and effect_decl depth name params ops =
 (* Each clause reopens the brace the one before it closed, so only the last
    leaves it shut. *)
 and handlers_of depth handlers =
-  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  let line = line depth in
   let clause (h : Ast.stmt Ast.handler_clause) =
     match h with
     | Ast.Named name -> line (Printf.sprintf "} with %s;" name)
@@ -404,7 +419,7 @@ and handlers_of depth handlers =
   | _ -> printed
 
 and arm depth (a : Ast.stmt Ast.arm) =
-  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  let line = line depth in
   line
     (Printf.sprintf
        "%s %s(%s) {"
@@ -418,7 +433,7 @@ and arm depth (a : Ast.stmt Ast.arm) =
   ^ line "}"
 
 and method_def depth (m : (Ast.stmt, unit) Ast.method_def) =
-  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  let line = line depth in
   line
     (Printf.sprintf
        "fn %s%s(%s)%s {"
@@ -430,7 +445,7 @@ and method_def depth (m : (Ast.stmt, unit) Ast.method_def) =
   ^ line "}"
 
 and case depth (p, body) =
-  let line text = Printf.sprintf "%s%s\n" (pad depth) text in
+  let line = line depth in
   line
     (Printf.sprintf
        "%s => {"

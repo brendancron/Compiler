@@ -2,8 +2,9 @@ open Value
 
 exception Return_value of value * Ast.span
 
-(* A handler that never resumes; caught by the `Scope` its `run` became. *)
-exception Aborted
+(* A handler that never resumes; caught by the `Scope` its own `run` became, and
+   passed through any in between. *)
+exception Aborted of string
 
 let compare_ordered op x y =
   match op with
@@ -74,21 +75,7 @@ let in_bounds span items i =
 let rec eval env (e : Ast.cps_expr) : value =
   let span = e.Ast.span in
   match e.Ast.it with
-  | `Lambda (params, _, body) ->
-    let names = List.map (fun (p : Ast.param) -> p.Ast.name) params in
-    Fn
-      { name = "fn"
-      ; arity = Some (List.length names)
-      ; apply =
-          (fun _ args ->
-            let frame = new_env (Some env) in
-            List.iter2 (define frame) names args;
-            (try
-               run_block frame body;
-               Unit
-             with
-             | Return_value (v, _) -> v))
-      }
+  | `Lambda (params, _, body) -> closure env "fn" params body
   | `Int n -> Int n
   | `Float n -> Float n
   | `Str s -> Str s
@@ -175,8 +162,23 @@ let rec eval env (e : Ast.cps_expr) : value =
      | Tuple items -> List.nth items index
      | v -> fail span "Cannot take a field of %s." (type_name v))
 (* OCaml leaves the order of an application's arguments and of [List.map]
-   unspecified, and evaluates both right to left in practice. Every operand list
-   a program can observe the order of is sequenced here instead. *)
+   unspecified, and evaluates both right to left in practice. *)
+and closure env name params body =
+  let names = List.map (fun (p : Ast.param) -> p.Ast.name) params in
+  Fn
+    { name
+    ; arity = Some (List.length names)
+    ; apply =
+        (fun _ args ->
+          let frame = new_env (Some env) in
+          List.iter2 (define frame) names args;
+          (try
+             run_block frame body;
+             Unit
+           with
+           | Return_value (v, _) -> v))
+    }
+
 and eval_all env = function
   | [] -> []
   | e :: rest ->
@@ -200,12 +202,11 @@ and call span f args =
   | v -> fail span "Cannot call %s." (type_name v)
 
 (* Deferred statements run when the block is left, however it is left, and in
-   reverse: a pair that belongs together is written together, and the second
-   one still happens when the first's block returns out from under it. *)
+   reverse. *)
 and run_block env body =
   (* Declared, not executed: a function is in scope for the whole block it was
-     written in, which is what the checker already assumes when it accepts a
-     call above the declaration. *)
+     written in, which is what the checker assumes when it accepts a call above
+     the declaration. *)
   List.iter
     (fun (s : Ast.cps_stmt) ->
       match s.Ast.it with
@@ -234,11 +235,19 @@ and exec env (s : Ast.cps_stmt) : unit =
   let span = s.Ast.span in
   match s.Ast.it with
   | `Expr e -> ignore (eval env e)
-  (* A handler that never resumes leaves by unwinding to the block it was
-     installed on. Nothing catches this in between: a function's own handler
-     is for `return`. *)
-  | `Scope body -> (try List.iter (exec env) body with Aborted -> ())
-  | `Abort -> raise Aborted
+  (* Nothing catches this in between: a function's own handler is for
+     `return`. *)
+  | `Scope (scope, body, on_abort) ->
+    (match List.iter (exec env) body with
+     | () -> ()
+     | exception Aborted caught when String.equal caught scope ->
+       List.iter (exec env) on_abort)
+  | `Abort scope -> raise (Aborted scope)
+  | `On_unwind (body, cleanup) ->
+    (try List.iter (exec env) body with
+     | e ->
+       List.iter (exec env) cleanup;
+       raise e)
   | `Var_decl (name, _, init) ->
     let v =
       match init with
@@ -265,24 +274,7 @@ and exec env (s : Ast.cps_stmt) : unit =
     done
   (* The closure captures the env it is declared in, which is the same table the
      name lands in — so recursion works without a separate binding step. *)
-  | `Fn (name, params, _, body) ->
-    let names = List.map (fun (p : Ast.param) -> p.Ast.name) params in
-    define
-      env
-      name
-      (Fn
-         { name
-         ; arity = Some (List.length names)
-         ; apply =
-             (fun _ args ->
-               let frame = new_env (Some env) in
-               List.iter2 (define frame) names args;
-               (try
-                  run_block frame body;
-                  Unit
-                with
-                | Return_value (v, _) -> v))
-         })
+  | `Fn (name, params, _, body) -> define env name (closure env name params body)
   | `Return e ->
     let v =
       match e with
@@ -311,7 +303,7 @@ and exec env (s : Ast.cps_stmt) : unit =
          | Some bindings ->
            let scope = new_env (Some env) in
            List.iter (fun (name, v) -> define scope name v) bindings;
-           List.iter (exec scope) body)
+           run_block scope body)
     in
     first cases
 

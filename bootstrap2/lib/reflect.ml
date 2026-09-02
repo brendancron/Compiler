@@ -62,9 +62,9 @@ let shape_of span (ty : Types.ty) =
       | Some (Typecheck.Sum (_, variants)) -> variants
       | _ -> []
     in
-    let each (label, payload) =
+    let each (label, (declared : Typecheck.variant_decl)) =
       let arity =
-        match payload with
+        match declared.Typecheck.vd_payload with
         | Ast.P_none -> 0
         | Ast.P_tuple items -> List.length items
         | Ast.P_fields items -> List.length items

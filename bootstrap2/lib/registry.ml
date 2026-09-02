@@ -64,7 +64,7 @@ let overloads t name =
     t.indexed
     []
 
-(* Without the fallback below, which is for reading an entry rather than for
+(* Without [indexed]'s fallback, which is for reading an entry rather than for
    deciding whether one is already there. *)
 let exact_index t name index = Hashtbl.find_opt t.indexed (name, index)
 
@@ -81,9 +81,9 @@ let indexed t name index =
 
 let is_indexed t name = overloads t name <> []
 
-(* Reached through the type rather than through a value of it, so a call to one
-   passes no receiver. The checker knows which these are; the passes that build
-   the call have to be told. *)
+(* Reached through the type rather than through a value of it, so a call passes
+   no receiver. The checker knows which these are; the passes that build the
+   call have to be told. *)
 let mark_associated t owner method_ = Hashtbl.replace t.associated (owner, method_) ()
 let is_associated t owner method_ = Hashtbl.mem t.associated (owner, method_)
 let register_constructor t name fn = Hashtbl.replace t.constructors name fn

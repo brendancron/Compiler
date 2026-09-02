@@ -5,22 +5,19 @@
 (generate_opam_files true)
 
 (source
- (github username/reponame))
+ (github brendancron/CronyxLang))
 
-(authors "Author Name <author@example.com>")
+(authors "Brendan Cron <brendancron@gmail.com>")
 
-(maintainers "Maintainer Name <maintainer@example.com>")
-
-(license LICENSE)
-
-(documentation https://url/to/documentation)
+(maintainers "Brendan Cron <brendancron@gmail.com>")
 
 (package
  (name bootstrap2)
- (synopsis "A short synopsis")
- (description "A longer description")
+ (synopsis "A self-hosting-oriented compiler for the Cronyx language")
+ (description
+  "The second bootstrap compiler for Cronyx: scanner, parser, type checker, metaprogramming, effect handlers via a selective CPS transform, and a tree-walking interpreter.")
  (depends ocaml)
  (tags
-  ("add topics" "to describe" your project)))
+  (compiler language metaprogramming "algebraic effects")))
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

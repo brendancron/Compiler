@@ -1,6 +1,6 @@
 # Elaboration
 
-`Resolve` runs after type checking and turns every construct whose meaning depends on a type — operators, compound assignment, indexing, literals — into a concrete call or a primitive, chosen once at compile time. It is the last stage of the [elaboration](architecture.md) cluster, which is where its name comes from.
+`Resolve` runs after type checking and turns every construct whose meaning depends on a type — operators, compound assignment, indexing, literals — into a concrete call or a primitive, chosen once at compile time. It is the last stage of the [elaboration](Architecture.md) cluster, which is where its name comes from.
 
 That is what lets a user-defined type give meaning to `+`, `==`, `[]`, and the rest without `int + int` costing anything more than it does today.
 

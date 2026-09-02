@@ -1,0 +1,22 @@
+// The condition is re-evaluated every iteration, so the operation in it is
+// performed every iteration too — hoisting it out of the loop would be a
+// different program, and hoisting it into the body is the same one.
+effect Ask { ctl next(): int; }
+
+var count = 3;
+
+fn drain() -> <Ask> unit {
+    while (next() > 0) {
+        print("tick");
+    }
+}
+
+run {
+    drain();
+} handle Ask {
+    ctl next() {
+        count = count - 1;
+        resume count;
+        print("h");
+    }
+}

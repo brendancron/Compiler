@@ -1,0 +1,15 @@
+// The arm is the only thing that reveals `Log`, and refining must not lose it:
+// nothing else would ask for a handler, and `ev#note` would be missing at run
+// time rather than reported here.
+effect Log { fn note(m: string): unit; }
+
+type Q<T> { Num -> Q<int>, Text -> Q<string> }
+
+fn ask<T>(q: Q<T>) -> T {
+    match q {
+        Q::Num  => { note("num"); return 7; }
+        Q::Text => { return "hi"; }
+    }
+}
+
+print(ask(new Q::Num));

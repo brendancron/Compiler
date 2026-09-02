@@ -9,7 +9,7 @@ type state =
   { file : string
   ; source : string
   ; mutable start : int (* offset of the first char of the token being scanned *)
-  ; mutable start_line : int (* line/col of that first char, captured before scanning *)
+  ; mutable start_line : int
   ; mutable start_col : int
   ; mutable current : int (* offset of the next char to consume *)
   ; mutable line : int
@@ -144,7 +144,6 @@ let char_literal s =
     if String.length text = 0
     then error s "A char literal holds exactly one character."
     else (
-      (* One scalar value, which is one to four bytes of UTF-8. *)
       let decoded = String.get_utf_8_uchar text 0 in
       if (not (Uchar.utf_decode_is_valid decoded))
          || Uchar.utf_decode_length decoded <> String.length text
@@ -239,8 +238,7 @@ let scan_token s =
     then line_comment s
     else add_token s (if matches s '=' then Token.Slash_equal else Token.Slash)
   | '%' -> add_token s (if matches s '=' then Token.Percent_equal else Token.Percent)
-  (* Spelled either way: `and` and `&&` are one operator, as are `or` and
-     `||`. A single `&` or `|` is not an operator at all. *)
+  (* A single `&` or `|` is not an operator at all. *)
   | '&' when matches s '&' -> add_token s Token.Amp_amp
   | '|' when matches s '|' -> add_token s Token.Pipe_pipe
   | ' ' | '\r' | '\t' -> ()

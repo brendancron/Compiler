@@ -13,7 +13,7 @@ let row_of (t : Types.ty) =
 
 let rec record (s : Ast.typed_stmt) =
   match s.Ast.it with
-  | `Impl_decl (_, type_name, _, methods) ->
+  | `Impl_decl (_, type_name, _, impl) ->
     List.iter
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
         Hashtbl.replace
@@ -21,7 +21,7 @@ let rec record (s : Ast.typed_stmt) =
           (Ast.method_name type_name m.Ast.md_name)
           (row_of m.Ast.md_ann);
         List.iter record m.Ast.md_body)
-      methods
+      impl.Ast.ib_methods
   | `Op_decl (op, params, signature, body) ->
     Hashtbl.replace declared_rows (Ast.op_entry_name op params signature) (row_of s.Ast.ann);
     List.iter record body
@@ -69,9 +69,7 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
   and ann = e.Ast.ann in
   let it : Ast.resolved_expr_kind =
     match e.Ast.it with
-    (* No in-place entry exists, so it derives from the plain operator. The
-       target's type is the node's own, which is what the rebuilt read of it
-       carries. *)
+    (* No in-place entry exists, so it derives from the plain operator. *)
     | `Compound (op, name, v) ->
       let target : Ast.resolved_expr = { Ast.it = `Var name; span; ann } in
       let combined : Ast.resolved_expr =
@@ -84,7 +82,9 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
       (match Registry.find registry op a.Ast.ann b.Ast.ann with
        | Some { Registry.emit = Registry.Call name; _ } ->
          `Call (fn_ref span name [ a; b ] ann, [ a; b ])
-       | _ -> `Binop (op, a, b))
+       (* Spelled out rather than caught by a wildcard, so a third emission
+          form has to be decided here instead of quietly staying an operator. *)
+       | Some { Registry.emit = Registry.Primitive; _ } | None -> `Binop (op, a, b))
     | `Method_call (receiver, name, _, args) ->
       let receiver = expr registry receiver in
       let args = List.map (expr registry) args in
@@ -104,8 +104,8 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
       else if String.equal name Types.array_len && args = [] && receiver.Ast.ann = Types.Str
       then `Str_len receiver
       else (
-        (* An associated function is reached through the type, so what stood in
-           for the receiver is not an argument. *)
+        (* An associated function takes no receiver, so what stood in for it is
+           not an argument. *)
         let all =
           if Registry.is_associated registry owner name then args else receiver :: args
         in
@@ -180,8 +180,8 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
     | #Ast.reflect as r ->
       (Ast.map_reflect (expr registry) r :> Ast.resolved_expr_kind)
   in
-  (* A deferred method call carries whatever type its caller pinned, and the
-     receiver was only recognized as an array above. *)
+  (* A deferred method call carries whatever type its caller pinned; the length
+     intrinsics above answer with an int whatever that was. *)
   let ann =
     match it with
     | `Array_len _ | `Str_len _ -> Types.Int
@@ -220,7 +220,7 @@ and stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =
     [ node
         (`Fn (Ast.op_entry_name op params signature, params, signature, block registry body))
     ]
-  | `Impl_decl (_, type_name, _, methods) ->
+  | `Impl_decl (_, type_name, _, impl) ->
     List.map
       (fun (m : (Ast.typed_stmt, Types.ty) Ast.method_def) ->
         { Ast.it =
@@ -233,7 +233,7 @@ and stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =
         ; span
         ; ann = m.Ast.md_ann
         })
-      methods
+      impl.Ast.ib_methods
   | `Trait_decl _ -> []
   | #Ast.type_defs as t -> [ node t ]
   | #Ast.matching as m ->

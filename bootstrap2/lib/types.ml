@@ -41,9 +41,9 @@ and kind =
   | Addable (* int, float, str — the operand type of `+` *)
   | Numeric (* int, float *)
   | Collection of infer_ty
-  (* Trait names a written `<T: Summary>` demands. A method call resolves
-     through the trait's declared signature, so the owner need not be known. *)
-  (* A trait and what it was named at: `TryFrom<string>` rather than `TryFrom`. *)
+  (* A trait and what it was named at: `TryFrom<string>` rather than `TryFrom`.
+     A method call resolves through the trait's declared signature, so the
+     owner need not be known. *)
   | Bound of (string * infer_ty list) list
 
 and tv =
@@ -105,10 +105,41 @@ let reset () =
   counter := 0;
   Hashtbl.reset declared_params
 
+(* Unification is by mutation, so an equation that holds only inside a match arm
+   has to be taken back when the arm ends — a GADT constructor refines the
+   scrutinee's parameters there and nowhere else. Recording is off unless
+   something asked for it, so every other unification stays permanent and pays
+   nothing. *)
+type undo = Undo : 'a ref * 'a -> undo
+
+let trail : undo list ref = ref []
+let recording = ref false
+
+let note (cell : 'a ref) = if !recording then trail := Undo (cell, !cell) :: !trail
+
+
+
+(* Runs [f] with every mutation recorded, then takes them all back. Nothing in
+   the checker needs this any more — refinement solves a substitution instead of
+   unifying and undoing — and it is kept because a speculative unification is
+   the obvious thing to want next and this is how it is done here. *)
+let retracting f =
+  let outer_trail = !trail
+  and outer_recording = !recording in
+  trail := [];
+  recording := true;
+  let undo () =
+    List.iter (fun (Undo (cell, previous)) -> cell := previous) !trail;
+    trail := outer_trail;
+    recording := outer_recording
+  in
+  Fun.protect ~finally:undo f
+
 let rec repr (t : infer_ty) : infer_ty =
   match t with
   | IVar ({ contents = Link inner } as r) ->
     let target = repr inner in
+    note r;
     r := Link target;
     target
   | t -> t
@@ -117,6 +148,7 @@ let rec repr_row (r : infer_row) : infer_row =
   match r with
   | RVar ({ contents = RLink inner } as v) ->
     let target = repr_row inner in
+    note v;
     v := RLink target;
     target
   | r -> r
@@ -125,6 +157,7 @@ let rec repr_fields (f : infer_fields) : infer_fields =
   match f with
   | FVar ({ contents = FLink inner } as v) ->
     let target = repr_fields inner in
+    note v;
     v := FLink target;
     target
   | f -> f
@@ -133,9 +166,8 @@ let rec repr_fields (f : infer_fields) : infer_fields =
    built from one, so a literal that narrowed to nothing else is one. *)
 let array_name = "Array"
 
-(* What `typeof` answers with. Its fields are the reflection a program can ask
-   for; it is not a runtime value, so nothing constructs one — [Reflect] folds
-   each projection to the data it names. *)
+(* What `typeof` answers with. Not a runtime value, so nothing constructs one —
+   [Reflect] folds each projection to the data it names. *)
 let reflection_name = "Type"
 let shape_name = "TypeShape"
 let field_name = "TypeField"
@@ -151,19 +183,15 @@ let ireflected =
 
 let reflected = Named (reflection_name, [], reflection_fields)
 
-(* A captured chunk of program. Like a type, it exists only while compiling. *)
+(* Compile-time only, like [reflection_name]. *)
 let code_name = "Code"
 let icode = INamed (code_name, [], FEmpty)
 
-(* An identifier generated code can be given. Compile-time only, like the
-   others: a program that still holds one when it runs has kept a promise the
-   compiler made to itself. *)
 let name_name = "Name"
 let iname = INamed (name_name, [], FEmpty)
 let name = Named (name_name, [], [])
 let string_name = "string"
 
-(* Reading a length is the one array operation with a method's syntax. *)
 let array_len = "len"
 let array elem = Named (array_name, [ elem ], [])
 let iarray elem = INamed (array_name, [ elem ], FEmpty)
@@ -374,7 +402,7 @@ let rec row_occurs id (r : infer_row) =
 let extra_admits : (kind -> infer_ty -> bool) ref = ref (fun _ _ -> false)
 
 (* Finding the label is also agreeing on what it was instantiated at, so the
-   arguments are unified here rather than compared. *)
+   arguments are unified rather than compared. *)
 let rec rewrite_row label args (r : infer_row) : infer_row =
   match repr_row r with
   | RCons (l, found, rest) when String.equal l label ->
@@ -386,6 +414,7 @@ let rec rewrite_row label args (r : infer_row) : infer_row =
   | RCons (l, found, rest) -> RCons (l, found, rewrite_row label args rest)
   | RVar ({ contents = RUnbound _ } as v) ->
     let tail = fresh_row () in
+    note v;
     v := RLink (RCons (label, args, tail));
     tail
   | RVar { contents = RLink _ } -> assert false
@@ -398,9 +427,7 @@ let rec rewrite_row label args (r : infer_row) : infer_row =
    grows to admit what it calls; a closed one rejects it. *)
 and row_within (inner : infer_row) (outer : infer_row) : unit =
   match repr_row inner with
-  | REmpty -> ()
-  (* Nothing is known about the callee's row yet, so nothing is required. *)
-  | RVar _ -> ()
+  | REmpty | RVar _ -> ()
   | RCons (label, args, rest) ->
     ignore (rewrite_row label args outer);
     row_within rest outer
@@ -412,6 +439,7 @@ and unify_row (a : infer_row) (b : infer_row) : unit =
   | RVar ({ contents = RUnbound id } as v), other
   | other, RVar ({ contents = RUnbound id } as v) ->
     if row_occurs id other then error "This effect row is recursive.";
+    note v;
     v := RLink other
   | RCons (label, args, rest_a), (RCons _ as b) ->
     let rest_b = rewrite_row label args b in
@@ -435,9 +463,10 @@ and rewrite_fields label (f : infer_fields) : infer_ty * infer_fields =
   | FCons (l, ty, rest) ->
     let found, rest = rewrite_fields label rest in
     found, FCons (l, ty, rest)
-  | FVar ({ contents = FUnbound _ } as v) ->
+  | FVar ({ contents = FUnbound id } as v) ->
     let ty = fresh () in
     let tail = fresh_fields () in
+    note v;
     v := FLink (FCons (label, ty, tail));
     ty, tail
   | FVar { contents = FLink _ } -> assert false
@@ -466,6 +495,7 @@ and unify_fields (a : infer_fields) (b : infer_fields) : unit =
   | FVar ({ contents = FUnbound id } as v), other
   | other, FVar ({ contents = FUnbound id } as v) ->
     if fields_occurs id other then error "This record type is recursive.";
+    note v;
     v := FLink other
   | FCons (label, ty, rest_a), (FCons _ as b) ->
     let found, rest_b = rewrite_fields label b in
@@ -507,17 +537,37 @@ and unify (a : infer_ty) (b : infer_ty) : unit =
   | IVar r1, IVar r2 when r1 == r2 -> ()
   | ( IVar ({ contents = Unbound (id1, k1) } as r1)
     , IVar ({ contents = Unbound (id2, k2) } as r2) ) ->
-    r2 := Unbound (id2, strongest k1 k2);
-    (* The survivor inherits the mark, or a declared parameter stops being one
-       the moment an operator gives it a kind. *)
-    if Hashtbl.mem declared_params id1 then Hashtbl.replace declared_params id2 ();
-    r1 := Link (IVar r2)
+    (* A declared parameter is the survivor, so the identity a written `<T>` was
+       given stays the representative. A scheme naming it — what a recursive
+       occurrence quantifies over — records an id, and an alias would leave that
+       id pointing at nothing and the variable unquantified. *)
+    let keep, dropped, kept =
+      if Hashtbl.mem declared_params id1 && not (Hashtbl.mem declared_params id2)
+      then r1, r2, id1
+      else r2, r1, id2
+    in
+    (* Only when the kind actually changes. Rewriting the survivor's cell to the
+       kind it already had is a write like any other, and against an older
+       variable that is the difference between an arm constraining something and
+       an arm merely mentioning it. *)
+    (match k1, k2 with
+     | Any, Any -> ()
+     | _ ->
+       note keep;
+       keep := Unbound (kept, strongest k1 k2));
+    (* Or a declared parameter stops being one the moment an operator gives it
+       a kind. *)
+    if Hashtbl.mem declared_params id1 || Hashtbl.mem declared_params id2
+    then Hashtbl.replace declared_params kept ();
+    note dropped;
+    dropped := Link (IVar keep)
   | IVar ({ contents = Unbound (id, kind) } as r), t
   | t, IVar ({ contents = Unbound (id, kind) } as r) ->
     if occurs id t
     then error "This expression would have an infinitely recursive type.";
     if not (kind_admits kind t)
     then error "Expected %s, got %s." (string_of_kind kind) (string_of_infer_ty t);
+    note r;
     r := Link t
   | IInt, IInt | IFloat, IFloat | IStr, IStr | IByte, IByte | IChr, IChr | IBool, IBool | IUnit, IUnit -> ()
   | IRecord a, IRecord b -> unify_fields a b
@@ -576,7 +626,6 @@ let free_vars (t : infer_ty) : (int * kind) list =
 
 let free_row_vars (t : infer_ty) : int list =
   let acc = ref [] in
-  (* An entry's arguments are types and may hold row variables of their own. *)
   let rec walk_row r =
     match repr_row r with
     | REmpty -> ()
@@ -712,6 +761,73 @@ let instantiate ?(bound = []) (s : scheme) : infer_ty =
       | concrete -> concrete
     in
     walk s.body)
+
+(* What a type is right now, with every variable that is bound expanded and
+   every variable that is not left shared. A tree checked under an equation that
+   is about to be taken back keeps its annotations this way: the equation's
+   consequences are written into the copy before the equation goes. *)
+let rec snapshot (t : infer_ty) : infer_ty =
+  match repr t with
+  | ITuple items -> ITuple (List.map snapshot items)
+  | IRecord f -> IRecord (snapshot_fields f)
+  | INamed (name, args, f) -> INamed (name, List.map snapshot args, snapshot_fields f)
+  | ISum (name, args) -> ISum (name, List.map snapshot args)
+  | IFn (params, ret, row) -> IFn (List.map snapshot params, snapshot ret, row)
+  | settled -> settled
+
+and snapshot_fields (f : infer_fields) : infer_fields =
+  match repr_fields f with
+  | FCons (label, ty, rest) -> FCons (label, snapshot ty, snapshot_fields rest)
+  | settled -> settled
+
+(* A solution to `these ≡ those` as an assoc list, with nothing written. What a
+   constructor says about the scrutinee holds inside one arm, so it is applied
+   to what that arm sees rather than to the store — which is the difference
+   between refining and unifying-then-taking-it-back. *)
+let solve (pairs : (infer_ty * infer_ty) list) : (int * infer_ty) list option =
+  let bindings = ref [] in
+  let rec through t =
+    match repr t with
+    | IVar { contents = Unbound (id, _) } as unbound ->
+      (match List.assoc_opt id !bindings with
+       | Some bound -> through bound
+       | None -> unbound)
+    | settled -> settled
+  in
+  let rec agree a b =
+    match through a, through b with
+    | IVar { contents = Unbound (left, _) }, IVar { contents = Unbound (right, _) }
+      when left = right -> true
+    | IVar { contents = Unbound (id, _) }, other | other, IVar { contents = Unbound (id, _) } ->
+      bindings := (id, other) :: !bindings;
+      true
+    | IInt, IInt | IFloat, IFloat | IStr, IStr | IByte, IByte | IChr, IChr
+    | IBool, IBool | IUnit, IUnit -> true
+    | ITuple xs, ITuple ys ->
+      List.length xs = List.length ys && List.for_all2 agree xs ys
+    | ISum (n, xs), ISum (m, ys) | INamed (n, xs, _), INamed (m, ys, _) ->
+      String.equal n m && List.length xs = List.length ys && List.for_all2 agree xs ys
+    | IFn (ps, r, _), IFn (qs, t, _) ->
+      List.length ps = List.length qs && List.for_all2 agree ps qs && agree r t
+    | _ -> false
+  in
+  if List.for_all (fun (a, b) -> agree a b) pairs
+  then
+    (* Chased through, so a binding never points at another binding's
+       variable and one pass of [substitute] is enough. *)
+    (let rec settle t =
+       match through t with
+       | ITuple items -> ITuple (List.map settle items)
+       | ISum (name, args) -> ISum (name, List.map settle args)
+       | INamed (name, args, f) -> INamed (name, List.map settle args, f)
+       | IFn (params, ret, row) -> IFn (List.map settle params, settle ret, row)
+       | settled -> settled
+     in
+     Some
+       (List.map
+          (fun (id, _) -> id, settle (IVar (ref (Unbound (id, Any)))))
+          !bindings))
+  else None
 
 let declare_param (t : infer_ty) =
   match repr t with

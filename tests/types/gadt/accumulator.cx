@@ -1,0 +1,18 @@
+// A parameter whose type is the one being refined. The arm needs `acc` to be an
+// int, and it reaches the arm through the environment rather than through the
+// payload or the return type — which is the case a refinement that substitutes
+// only into those two would lose.
+type Expr<T> {
+    Lit(int)      -> Expr<int>,
+    BoolLit(bool) -> Expr<bool>,
+}
+
+fn eval<T>(e: Expr<T>, acc: T) -> T {
+    match e {
+        Expr::Lit(n)     => { return acc + n; }
+        Expr::BoolLit(b) => { return b; }
+    }
+}
+
+print(eval(new Expr::Lit(40), 2));
+print(eval(new Expr::BoolLit(true), false));

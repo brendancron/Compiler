@@ -255,7 +255,7 @@ Statements after a block stay where they were written rather than being wrapped 
 
 ## Pipeline placement
 
-CPS runs late, after everything that could introduce a call — see [architecture](architecture.md) for the full order.
+CPS runs late, after everything that could introduce a call — see [Architecture](Architecture.md) for the full order.
 
 The checker's rows *are* the CPS marking. The Rust bootstrap runs a separate `mark_cps` analysis to recover the same information.
 

@@ -1,0 +1,8 @@
+effect Ask { ctl get(): int; }
+
+fn use() -> <Ask> unit {
+    defer print(get());
+    print("body");
+}
+
+run { use(); } handle Ask { ctl get() { resume 5; print("after"); } }

@@ -1,6 +1,6 @@
 (* A node's type is not finished when it is first visited — in
    `fn f(x) { return x + 1; }`, `x` is only pinned at the `+` — so the tree is
-   built with mutable types and converted once. *)
+   built with mutable types and resolved once at the end. *)
 
 type error =
   { span : Ast.span
@@ -8,8 +8,6 @@ type error =
   }
 
 exception Located of error
-
-exception Deferred
 
 type checked_expr = (checked_expr_kind, Types.infer_ty) Ast.node
 
@@ -63,6 +61,11 @@ type effect_info =
 
 let ctx_effects = { ops = Hashtbl.create 16; declared = Hashtbl.create 8 }
 
+(* Operations share one namespace, so which effect claimed a name has to be
+   remembered: without this a second declaration silently overwrites the first
+   and every call site is checked against the wrong signature. *)
+let ctx_op_owner : (string, string) Hashtbl.t = Hashtbl.create 16
+
 (* An effect's type parameters, so a handler's arms resolve the same names its
    operations were declared with. *)
 let ctx_effect_params : (string, (string * Types.infer_ty) list) Hashtbl.t =
@@ -71,7 +74,21 @@ let ctx_effect_params : (string, (string * Types.infer_ty) list) Hashtbl.t =
 type decl =
   | Opaque of Types.infer_ty list
   | Product of Types.infer_ty list * Types.infer_fields
-  | Sum of Types.infer_ty list * (string * Types.infer_ty Ast.payload) list
+  | Sum of Types.infer_ty list * (string * variant_decl) list
+
+(* A constructor's signature: what it takes, what it builds, and the variables
+   it binds itself. An ordinary variant builds the type applied to the type's
+   own parameters and binds nothing; a GADT variant is what makes both of those
+   worth carrying. *)
+and variant_decl =
+  { vd_params : Types.infer_ty list
+  ; vd_payload : Types.infer_ty Ast.payload
+  ; vd_result : Types.infer_ty list
+  (* Written with parameters or a head of its own, so matching it says
+     something about the scrutinee that has to be scoped to the arm. A sum
+     whose variants all answer [false] is checked exactly as before. *)
+  ; vd_refines : bool
+  }
 
 let ctx_types : (string, decl) Hashtbl.t = Hashtbl.create 16
 
@@ -86,6 +103,12 @@ let params_of_decl name =
   | None -> []
 
 let instance vars args = List.map2 (fun v a -> Types.var_id v, a) vars args
+
+(* One fresh copy of everything a constructor binds — the type's parameters and
+   its own together, since a variant's payload and head may mention both. *)
+let instantiation vars declared =
+  let bound = vars @ declared.vd_params in
+  instance bound (List.map (fun _ -> Types.fresh ()) bound)
 
 let ctx_fn_params : (string, (string * Types.infer_ty) list) Hashtbl.t =
   Hashtbl.create 16
@@ -108,8 +131,13 @@ let with_type_params assoc f =
 (* Methods reached through the type rather than through a value of it. *)
 let ctx_associated : (string * string, unit) Hashtbl.t = Hashtbl.create 8
 
-(* A trait's parameters and its signatures. *)
-let ctx_traits : (string, string list * Ast.method_sig list) Hashtbl.t = Hashtbl.create 8
+(* A trait's parameters, its associated type names, and its signatures. *)
+let ctx_traits : (string, string list * Ast.trait_body) Hashtbl.t = Hashtbl.create 8
+
+(* What an impl bound each associated name to, keyed by the implementing type.
+   The trait is not part of the key: two traits naming the same associated type
+   for one type would collide, which no program yet does. *)
+let ctx_assoc : (string * string, Types.infer_ty) Hashtbl.t = Hashtbl.create 8
 
 (* What a type implemented a trait at. Added rather than replaced, so one type
    may implement a trait at more than one argument. *)
@@ -121,13 +149,52 @@ let ctx_impls : (string * string, Types.infer_ty list) Hashtbl.t = Hashtbl.creat
 let ctx_variadic : (string, Types.scheme * Types.infer_ty) Hashtbl.t = Hashtbl.create 4
 let ctx_methods : (string * string, unit) Hashtbl.t = Hashtbl.create 32
 
+(* A declaration written inside a block belongs to that block. The tables are
+   program-global, so what a block adds is taken back out on the way past it —
+   otherwise a type written in a function is visible after it, and two
+   functions cannot each declare one of the same name.
+
+   [add] rather than [replace] on the way back: [ctx_impls] keeps every entry
+   for a key, and the snapshot is oldest-first so the order survives. *)
+let scoped_declarations f =
+  let snapshot table = Hashtbl.fold (fun key v acc -> (key, v) :: acc) table [] in
+  let restore table saved =
+    Hashtbl.reset table;
+    List.iter (fun (key, v) -> Hashtbl.add table key v) saved
+  in
+  let types = snapshot ctx_types
+  and traits = snapshot ctx_traits
+  and methods = snapshot ctx_methods
+  and impls = snapshot ctx_impls
+  and associated = snapshot ctx_associated
+  and assoc = snapshot ctx_assoc
+  and ops = snapshot ctx_effects.ops
+  and declared = snapshot ctx_effects.declared
+  and owners = snapshot ctx_op_owner
+  and effect_params = snapshot ctx_effect_params in
+  Fun.protect
+    ~finally:(fun () ->
+      restore ctx_types types;
+      restore ctx_traits traits;
+      restore ctx_methods methods;
+      restore ctx_impls impls;
+      restore ctx_associated associated;
+      restore ctx_assoc assoc;
+      restore ctx_effects.ops ops;
+      restore ctx_effects.declared declared;
+      restore ctx_op_owner owners;
+      restore ctx_effect_params effect_params)
+    f
+
 let reset_effects () =
   Hashtbl.reset ctx_effects.ops;
   Hashtbl.reset ctx_effects.declared;
+  Hashtbl.reset ctx_op_owner;
   Hashtbl.reset ctx_types;
   Hashtbl.reset ctx_effect_params;
   Hashtbl.reset ctx_traits;
   Hashtbl.reset ctx_associated;
+  Hashtbl.reset ctx_assoc;
   Hashtbl.reset ctx_impls;
   Hashtbl.reset ctx_variadic;
   Hashtbl.reset ctx_methods;
@@ -146,64 +213,42 @@ let rec lookup env name =
      | None -> None)
 
 (* Generalization must not quantify a variable the enclosing scope still uses. *)
-let env_free_vars env =
+let env_free ~free ~quantified env =
   let acc = ref [] in
   let rec walk env =
     Hashtbl.iter
       (fun _ (scheme : Types.scheme) ->
-        Types.free_vars scheme.body
-        |> List.iter (fun (id, _) ->
-          if (not (List.mem id scheme.quantified)) && not (List.mem id !acc)
+        free scheme.Types.body
+        |> List.iter (fun id ->
+          if (not (List.mem id (quantified scheme))) && not (List.mem id !acc)
           then acc := id :: !acc))
       env.bindings;
-    match env.parent with
-    | Some p -> walk p
-    | None -> ()
+    Option.iter walk env.parent
   in
   walk env;
   !acc
+
+let env_free_vars env =
+  env_free
+    ~free:(fun body -> List.map fst (Types.free_vars body))
+    ~quantified:(fun (s : Types.scheme) -> s.Types.quantified)
+    env
 
 let env_free_row_vars env =
-  let acc = ref [] in
-  let rec walk env =
-    Hashtbl.iter
-      (fun _ (scheme : Types.scheme) ->
-        Types.free_row_vars scheme.body
-        |> List.iter (fun id ->
-          if (not (List.mem id scheme.quantified_rows)) && not (List.mem id !acc)
-          then acc := id :: !acc))
-      env.bindings;
-    match env.parent with
-    | Some p -> walk p
-    | None -> ()
-  in
-  walk env;
-  !acc
+  env_free
+    ~free:Types.free_row_vars
+    ~quantified:(fun (s : Types.scheme) -> s.Types.quantified_rows)
+    env
 
 let env_free_field_vars env =
-  let acc = ref [] in
-  let rec walk env =
-    Hashtbl.iter
-      (fun _ (scheme : Types.scheme) ->
-        Types.free_field_vars scheme.body
-        |> List.iter (fun id ->
-          if (not (List.mem id scheme.quantified_fields)) && not (List.mem id !acc)
-          then acc := id :: !acc))
-      env.bindings;
-    match env.parent with
-    | Some p -> walk p
-    | None -> ()
-  in
-  walk env;
-  !acc
+  env_free
+    ~free:Types.free_field_vars
+    ~quantified:(fun (s : Types.scheme) -> s.Types.quantified_fields)
+    env
 
 let fail span fmt =
   Printf.ksprintf (fun message -> raise (Located { span; message })) fmt
 
-(* A callee whose scheme quantifies no rows is either concrete — in which case
-   containment is what is wanted — or still being inferred, a forward or
-   recursive reference sharing a row variable with its own definition. Only the
-   second needs the rows tied together, and only while its row is unknown. *)
 type receiver =
   | Owner of string
   | Via_trait of string
@@ -216,11 +261,10 @@ let listed names =
 
 (* Where a method call's meaning comes from when the receiver's type is not
    written down: a bound supplies the signature, a literal narrows to the
-   container that has the method, and anything else is undecidable and said so.
-   Guessing the single owner of a name was unsound — three types declare `len`,
-   and picking one of them by accident annotated the call with the wrong type. *)
+   container that has the method, and anything else is undecidable. Guessing
+   the single owner of a name is unsound — three types declare `len`, and
+   picking one by accident annotates the call with the wrong type. *)
 let receiver_of span registry (receiver : (_, Types.infer_ty) Ast.node) name elem_owners =
-  let fail_here fmt = Printf.ksprintf (fun m -> raise (Located { span; message = m })) fmt in
   match Types.infer_type_name receiver.Ast.ann with
   | Some owner -> Owner owner
   | None ->
@@ -228,7 +272,7 @@ let receiver_of span registry (receiver : (_, Types.infer_ty) Ast.node) name ele
      | Types.IVar { contents = Types.Unbound (_, Types.Bound traits) } ->
        (match traits with
         | (trait, _) :: _ -> Via_trait trait
-        | [] -> fail_here "Cannot call '%s': the receiver's type is not known here." name)
+        | [] -> fail span "Cannot call '%s': the receiver's type is not known here." name)
      | Types.IVar { contents = Types.Unbound (_, Types.Collection elem) } ->
        let holds owner =
          String.equal owner Types.array_name || Registry.container registry owner <> None
@@ -251,33 +295,37 @@ let receiver_of span registry (receiver : (_, Types.infer_ty) Ast.node) name ele
           | Some ty ->
             (try Types.unify receiver.Ast.ann ty with
              | Types.Type_error message -> raise (Located { span; message }))
-          | None -> fail_here "'%s' cannot be built from a literal." owner);
+          | None -> fail span "'%s' cannot be built from a literal." owner);
          Owner owner
        in
        (match candidates with
-        | [] -> fail_here "No container has a method '%s'." name
+        | [] -> fail span "No container has a method '%s'." name
         (* The array is what a literal is until something asks for more. *)
         | _ when List.mem Types.array_name candidates -> narrow_to Types.array_name
         | [ only ] -> narrow_to only
         | several ->
-          fail_here
+          fail span
             "'%s' does not say which container this is: %s all declare it."
             name
             (listed several))
      | Types.IVar _ ->
        (match elem_owners with
-        | [] -> fail_here "No type has a method '%s'." name
+        | [] -> fail span "No type has a method '%s'." name
         | owners ->
-          fail_here
+          fail span
             "Cannot call '%s': the receiver's type is not known here. %s declare one, so this needs a bound or an annotation."
             name
             (listed owners))
      | other ->
-       fail_here
+       fail span
          "Cannot call '%s' on %s, which no impl can name."
          name
          (Types.string_of_infer_ty other))
 
+(* A callee whose scheme quantifies no rows is either concrete — in which case
+   containment is what is wanted — or still being inferred, a forward or
+   recursive reference sharing a row variable with its own definition. Only the
+   second needs the rows tied together, and only while its row is unknown. *)
 let admits_row (callee : Types.scheme option) row (caller : Types.infer_row) =
   let pending =
     match Types.repr_row row, callee with
@@ -291,17 +339,56 @@ let unify_at span expected actual =
   try Types.unify expected actual with
   | Types.Type_error message -> raise (Located { span; message })
 
+(* The whole context is put back, not only what [set] touched, and it is put
+   back however the body leaves: [check] catches an error per top-level
+   statement and carries on, so a field still pointing at the failed function
+   would follow it into everything after. *)
+let in_ctx ctx ~set body =
+  let saved =
+    ctx.return_type, ctx.saw_return, ctx.row, ctx.resume_type, ctx.in_final_arm
+  in
+  let restore () =
+    let return_type, saw_return, row, resume_type, in_final_arm = saved in
+    ctx.return_type <- return_type;
+    ctx.saw_return <- saw_return;
+    ctx.row <- row;
+    ctx.resume_type <- resume_type;
+    ctx.in_final_arm <- in_final_arm
+  in
+  Fun.protect ~finally:restore (fun () ->
+    set ();
+    body ())
+
+(* A body with no `return` returns unit, which is only knowable once it has been
+   walked — so the check belongs here rather than at each caller. *)
+let in_function_body ctx ~ret ~row body =
+  in_ctx
+    ctx
+    ~set:(fun () ->
+      ctx.return_type <- Some ret;
+      ctx.saw_return <- false;
+      ctx.row <- row)
+    (fun () ->
+      let checked = body () in
+      if not ctx.saw_return then Types.unify ret Types.IUnit;
+      checked)
+
+(* The types the language supplies rather than a declaration. They are not in
+   [ctx_types], so anything that resolves a written name has to ask here. *)
+let primitive = function
+  | "int" -> Some Types.IInt
+  | "float" -> Some Types.IFloat
+  | "string" -> Some Types.IStr
+  | "byte" -> Some Types.IByte
+  | "char" -> Some Types.IChr
+  | "bool" -> Some Types.IBool
+  | "unit" -> Some Types.IUnit
+  | _ -> None
+
 let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
   match t.Ast.it with
-  (* The parameter holds them; the call site is what collected them. *)
   | Ast.Ty_variadic element -> Types.iarray (infer_ty_of_annotation element)
-  | Ast.Ty_name "int" -> Types.IInt
-  | Ast.Ty_name "float" -> Types.IFloat
-  | Ast.Ty_name "string" -> Types.IStr
-  | Ast.Ty_name "byte" -> Types.IByte
-  | Ast.Ty_name "char" -> Types.IChr
-  | Ast.Ty_name "bool" -> Types.IBool
-  | Ast.Ty_name "unit" -> Types.IUnit
+  | Ast.Ty_name name when primitive name <> None -> Option.get (primitive name)
   | Ast.Ty_tuple items -> Types.ITuple (List.map infer_ty_of_annotation items)
   | Ast.Ty_record fields ->
     Types.IRecord
@@ -315,6 +402,16 @@ let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
     (match Hashtbl.find_opt ctx_type_params other with
      | Some var -> var
      | None -> named_type t.Ast.span other [])
+  (* A projection off a type that is still a variable cannot be looked up, so it
+     becomes one too. The copy [Type_mono] makes has a concrete owner, and the
+     lookup succeeds there. *)
+  | Ast.Ty_assoc (owner, member) ->
+    let owner = infer_ty_of_annotation owner in
+    (match Option.bind (Types.infer_type_name owner) (fun name ->
+             Hashtbl.find_opt ctx_assoc (name, member))
+     with
+     | Some bound -> bound
+     | None -> Types.fresh ())
   | Ast.Ty_fn (params, ret, row) ->
     Types.IFn
       ( List.map infer_ty_of_annotation params
@@ -483,12 +580,12 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   | `Effect_decl _ | `Type_decl _ | `Trait_decl _ -> acc
   | `Op_decl (_, _, _, body) ->
     List.fold_left (fun acc st -> assigned_in_stmt st acc) acc body
-  | `Impl_decl (_, _, _, methods) ->
+  | `Impl_decl (_, _, _, impl) ->
     List.fold_left
       (fun acc (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
         List.fold_left (fun acc st -> assigned_in_stmt st acc) acc m.Ast.md_body)
       acc
-      methods
+      impl.Ast.ib_methods
   | `Match (scrutinee, cases) ->
     List.fold_left
       (fun acc (_, body) ->
@@ -685,23 +782,18 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
        in
        node result (`Call (callee_node, args))
      | None ->
-    let result =
-      match callee.Ast.it with
-      | _ ->
-        let ret = Types.fresh () in
-        let row = Types.fresh_row () in
-        Types.unify
-          callee_node.Ast.ann
-          (Types.IFn (List.map (fun (a : checked_expr) -> a.Ast.ann) args, ret, row));
-        let scheme =
-          match callee.Ast.it with
-          | `Var name -> lookup env name
-          | _ -> None
-        in
-        admits_row scheme row ctx.row;
-        ret
-    in
-    node result (`Call (callee_node, args)))
+       let ret = Types.fresh () in
+       let row = Types.fresh_row () in
+       Types.unify
+         callee_node.Ast.ann
+         (Types.IFn (List.map (fun (a : checked_expr) -> a.Ast.ann) args, ret, row));
+       let scheme =
+         match callee.Ast.it with
+         | `Var name -> lookup env name
+         | _ -> None
+       in
+       admits_row scheme row ctx.row;
+       node ret (`Call (callee_node, args)))
   | `Comptime_call (callee, comptime_args, args) ->
     let name =
       match callee.Ast.it with
@@ -755,13 +847,16 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     node ret (`Call (callee_node, args))
   | `Method_call (receiver, name, as_function, args) ->
     (* `T.from(x)` — the receiver names a type rather than a value, which is how
-       an associated function is reached. What stands under it only has to
-       carry the type. *)
+       an associated function is reached. *)
     let named_receiver =
       match receiver.Ast.it with
       | `Var owner when lookup env owner = None ->
         (match Hashtbl.find_opt ctx_type_params owner with
          | Some var -> Some var
+         (* A primitive is not in [ctx_types] — it is recognized by name in
+            [infer_ty_of_annotation] — so it needs asking for separately, or
+            `int.from(…)` reaches nothing while `21.double()` works. *)
+         | None when primitive owner <> None -> primitive owner
          | None ->
            if Hashtbl.mem ctx_types owner
            then Some (named_type receiver.Ast.span owner [])
@@ -785,8 +880,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     in
     (* A dot is a call with the receiver passed first, so a free function
        answers where the type declares no method of that name. An `impl` wins,
-       which keeps a method from being shadowed by whatever function a program
-       happens to have in scope. *)
+       or a method could be shadowed by whatever function is in scope. *)
     let via_function () =
       match lookup env as_function with
       | None -> None
@@ -826,12 +920,14 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
      | Ok found ->
        (match found with
      (* A bound answers without an owner: the trait declares the signature, and
-        which type supplies the body is settled when the parameter is given
-        one. *)
+        which type supplies the body is settled later. *)
      | Via_trait trait ->
-       let trait_params, trait_methods =
-         Option.value (Hashtbl.find_opt ctx_traits trait) ~default:([], [])
+       let trait_params, trait_body =
+         Option.value
+           (Hashtbl.find_opt ctx_traits trait)
+           ~default:([], { Ast.tb_assoc = []; tb_methods = [] })
        in
+       let trait_methods = trait_body.Ast.tb_methods in
        (* `Self` is the type the bound stands for, and the trait's own
           parameters are what the bound named it at. *)
        let bound_args =
@@ -840,12 +936,22 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
            Option.value (List.assoc_opt trait traits) ~default:[]
          | _ -> []
        in
+       (* An associated name stands for whatever the impl bound it to, which is
+          not known from a bound alone, so it reads as a variable here and is
+          pinned when the receiver's own impl is reached. *)
+       let projected name =
+         match Option.bind (Types.infer_type_name receiver.Ast.ann) (fun owner ->
+                 Hashtbl.find_opt ctx_assoc (owner, name))
+         with
+         | Some bound -> bound
+         | None -> Types.fresh ()
+       in
        let in_scope =
          ("Self", receiver.Ast.ann)
-         ::
-         (if List.length trait_params = List.length bound_args
-          then List.combine trait_params bound_args
-          else [])
+         :: List.map (fun name -> name, projected name) trait_body.Ast.tb_assoc
+         @ (if List.length trait_params = List.length bound_args
+            then List.combine trait_params bound_args
+            else [])
        in
        with_type_params in_scope (fun () ->
        let declared =
@@ -945,12 +1051,8 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
          Types.unify fn (Types.IFn (passed, ret, row));
          admits_row (lookup env (Ast.method_name owner name)) row ctx.row;
          node ret (`Method_call (receiver, name, as_function, args)))))
-  (* A bare name is a value's if one answers to it, and the declared type
-     otherwise, so `typeof(Dog)` reaches a type nothing holds. The operand is
-     only ever read for its annotation, so what stands under it does not
-     matter beyond carrying one. *)
-  (* A function with no name is checked the way a named one is, minus the
-     binding and the generalization: it is a value here, not a declaration. *)
+  (* Checked the way a named function is, minus the binding and the
+     generalization: it is a value here, not a declaration. *)
   | `Lambda (params, signature, body) ->
     let param_types = List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) params in
     let declared_ret = annotated_or_fresh signature.Ast.ret in
@@ -960,18 +1062,14 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       (fun (p : Ast.param) ty -> bind scope p.Ast.name (Types.mono ty))
       params
       param_types;
-    let saved_return = ctx.return_type
-    and saved_saw = ctx.saw_return
-    and saved_row = ctx.row in
-    ctx.return_type <- Some declared_ret;
-    ctx.saw_return <- false;
-    ctx.row <- row;
-    let body = infer_block scope ctx body in
-    if not ctx.saw_return then Types.unify declared_ret Types.IUnit;
-    ctx.return_type <- saved_return;
-    ctx.saw_return <- saved_saw;
-    ctx.row <- saved_row;
+    let body =
+      in_function_body ctx ~ret:declared_ret ~row (fun () -> infer_block scope ctx body)
+    in
     node (Types.IFn (param_types, declared_ret, row)) (`Lambda (params, signature, body))
+  (* A bare name is a value's if one answers to it, and the declared type
+     otherwise, so `typeof(Dog)` reaches a type nothing holds. The operand is
+     only ever read for its annotation, so what stands under it does not matter
+     beyond carrying one. *)
   | `Typeof { Ast.it = `Var name; span = inner; _ } when lookup env name = None ->
     let ty =
       try infer_ty_of_annotation { Ast.it = Ast.Ty_name name; span = inner; ann = () } with
@@ -1005,8 +1103,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
          span
          "An array takes a length and a fill value, but %d argument(s) were given."
          (List.length given))
-  (* `new T<A>(x)` is a call of the function the registry names for T, so a type
-     that supplies one is constructed the same way any other is. *)
+  (* `new T<A>(x)` is a call of the function the registry names for T. *)
   | `New_call (name, type_args, args) ->
     (match Registry.constructor ctx.registry name with
      | None -> fail span "'%s' cannot be constructed with arguments." name
@@ -1070,10 +1167,14 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
        (match List.assoc_opt variant variants with
         | None -> fail span "Type '%s' has no variant '%s'." ty variant
         | Some declared ->
-          let args = List.map (fun _ -> Types.fresh ()) vars in
-          let mapping = instance vars args in
+          (* The variant's own parameters are freshened with the type's: a
+             constructor is a signature, and every use gets its own copy. *)
+          let mapping = instantiation vars declared in
+          let args = List.map (Types.substitute mapping) declared.vd_result in
           let expected =
-            List.map (fun (l, t) -> l, Types.substitute mapping t) (Ast.payload_fields declared)
+            List.map
+              (fun (l, t) -> l, Types.substitute mapping t)
+              (Ast.payload_fields declared.vd_payload)
           in
           let given =
             List.map (fun (l, v) -> l, infer_expr env ctx v) (Ast.payload_fields payload)
@@ -1186,8 +1287,6 @@ and declare_ops registry (body : Ast.desugared_stmt list) =
          | Ast.Op_index, [ items ] ->
            let owner = result_name () in
            if Registry.container registry owner <> None then taken "A literal" owner;
-           (* The entry's own signature is the element projection: unifying its
-              result with a target says what that target holds. *)
            with_type_params (type_params_of s.Ast.span signature.Ast.comptime) (fun () ->
              let element =
                match Types.repr (annotated_or_fresh items.Ast.ty) with
@@ -1274,10 +1373,10 @@ and declare_traits (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
-      | `Trait_decl (name, params, methods) ->
+      | `Trait_decl (name, params, trait_body) ->
         if Hashtbl.mem ctx_traits name
         then fail s.Ast.span "Trait '%s' is already declared." name;
-        Hashtbl.replace ctx_traits name (params, methods)
+        Hashtbl.replace ctx_traits name (params, trait_body)
       | _ -> ())
     body
 
@@ -1285,8 +1384,9 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
   List.iter
     (fun (s : Ast.desugared_stmt) ->
       match s.Ast.it with
-      | `Impl_decl (trait, type_name, params, methods) ->
+      | `Impl_decl (trait, type_name, params, impl) ->
         let span = s.Ast.span in
+        let methods = impl.Ast.ib_methods in
         let type_params = List.map (fun name -> name, Types.fresh ()) params in
         let supplies name =
           List.exists
@@ -1295,12 +1395,28 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
             methods
         in
         with_type_params type_params (fun () -> ignore (self_ty span type_name params));
+        with_type_params type_params (fun () ->
+          List.iter
+            (fun (name, bound) ->
+              Hashtbl.replace ctx_assoc (type_name, name) (infer_ty_of_annotation bound))
+            impl.Ast.ib_assoc);
         (match trait with
          | None -> ()
          | Some trait ->
            (match Hashtbl.find_opt ctx_traits (fst trait) with
             | None -> fail span "Unknown trait '%s'." (fst trait)
             | Some (_, required) ->
+              List.iter
+                (fun name ->
+                  if not (List.mem_assoc name impl.Ast.ib_assoc)
+                  then
+                    fail
+                      span
+                      "'%s' for '%s' is missing associated type '%s'."
+                      (fst trait)
+                      type_name
+                      name)
+                required.Ast.tb_assoc;
               List.iter
                 (fun (r : Ast.method_sig) ->
                   if not (supplies r.Ast.ms_name)
@@ -1311,11 +1427,10 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
                       (fst trait)
                       type_name
                       r.Ast.ms_name)
-                required));
+                required.Ast.tb_methods));
         List.iter
           (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
-            (* Without `self` it is an associated function: reached through the
-               type rather than through a value of it, which is what lets a
+            (* Without `self` it is an associated function, which is what lets a
                conversion name the type it produces. *)
             (match m.Ast.md_params with
              | { Ast.name = "self"; _ } :: _ -> ()
@@ -1361,7 +1476,15 @@ and declare_types (body : Ast.desugared_stmt list) =
         then fail s.Ast.span "Type '%s' is already declared." name;
         let type_params = List.map (fun name -> name, Types.fresh ()) params in
         let vars = List.map snd type_params in
-        Hashtbl.replace ctx_types name (Product (vars, Types.FEmpty));
+        (* The placeholder a recursive mention resolves against while the rest
+           of the declaration is read. It has to be the right shape already, or
+           `Add(Expr<int>, …)` would read `Expr` as a product. *)
+        Hashtbl.replace
+          ctx_types
+          name
+          (match body with
+           | Ast.T_variants _ -> Sum (vars, [])
+           | Ast.T_fields _ -> Product (vars, Types.FEmpty));
         let declared =
           with_type_params type_params (fun () ->
             match body with
@@ -1373,16 +1496,62 @@ and declare_types (body : Ast.desugared_stmt list) =
                     fields
                     Types.FEmpty )
             | Ast.T_variants variants ->
-              Sum
-                ( vars
-                , List.map
-                    (fun (v : Ast.variant) ->
-                      v.Ast.v_name, Ast.map_payload infer_ty_of_annotation v.Ast.v_payload)
-                    variants ))
+              Sum (vars, List.map (variant_of s.Ast.span name vars) variants))
         in
         Hashtbl.replace ctx_types name declared
       | _ -> ())
     body
+
+(* A variant's own parameters are in scope for its payload and its head, on top
+   of the type's. A head that is written is the type at whatever arguments the
+   constructor pins; one that is not is the type at its own parameters, which is
+   every variant that is not a GADT's. *)
+and variant_of span owner vars (v : Ast.variant) =
+  let own = List.map (fun name -> name, Types.fresh ()) v.Ast.v_params in
+  with_type_params own (fun () ->
+    let payload = Ast.map_payload infer_ty_of_annotation v.Ast.v_payload in
+    let result =
+      match v.Ast.v_result with
+      | None -> vars
+      | Some head ->
+        (match Types.repr (infer_ty_of_annotation head) with
+         | Types.ISum (built, args) when String.equal built owner -> args
+         | other ->
+           fail
+             span
+             "Variant '%s' builds %s, but it is declared in '%s'."
+             v.Ast.v_name
+             (Types.string_of_infer_ty other)
+             owner)
+    in
+    ( v.Ast.v_name
+    , { vd_params = List.map snd own
+      ; vd_payload = payload
+      ; vd_result = result
+      ; vd_refines = v.Ast.v_params <> [] || v.Ast.v_result <> None
+      } ))
+
+(* What a recursive occurrence sees. Quantifying the parameters the author wrote
+   is what lets a function call itself at a different instantiation than the one
+   being checked — `depth<T>` reaching `depth` at `Nested<(T, T)>`. Inference
+   cannot find that on its own, which is why it takes a written `<T>` and why
+   only those variables are quantified: everything else about the signature is
+   still being inferred and has to stay shared with the body.
+
+   The row is left monomorphic on purpose, so recursion still contributes to the
+   effects the function is inferred to perform. *)
+and declared_scheme type_params body =
+  match
+    List.filter_map
+      (fun (_, var) ->
+        match Types.repr var with
+        | Types.IVar { contents = Types.Unbound (id, _) } -> Some id
+        | _ -> None)
+      type_params
+  with
+  | [] -> Types.mono body
+  | quantified ->
+    { Types.quantified; quantified_rows = []; quantified_fields = []; body }
 
 and hoist env (body : Ast.desugared_stmt list) =
   List.iter
@@ -1404,9 +1573,9 @@ and hoist env (body : Ast.desugared_stmt list) =
                   ( param_types
                   , annotated_or_fresh signature.Ast.ret
                   , Types.fresh_row () ))))
-      | `Impl_decl (_, type_name, params, methods) ->
-        (* Declared, like a written `<T>`: the author said the impl is generic
-           in T, so a kind constraint from its body must not default it. *)
+      | `Impl_decl (_, type_name, params, impl) ->
+        (* Declared, like a written `<T>`, so a kind constraint from the body
+           must not default it. *)
         let impl_params =
           List.map
             (fun name ->
@@ -1447,7 +1616,7 @@ and hoist env (body : Ast.desugared_stmt list) =
                         , annotated_or_fresh m.Ast.md_signature.Ast.ret
                         , row ))))
             | _ -> ())
-          methods
+          impl.Ast.ib_methods
       | `Fn (name, params, signature, _) ->
         let type_params = type_params_of s.Ast.span signature.Ast.comptime in
         Hashtbl.replace ctx_fn_params name type_params;
@@ -1463,7 +1632,8 @@ and hoist env (body : Ast.desugared_stmt list) =
           bind
             env
             name
-            (Types.mono
+            (declared_scheme
+               type_params
                (Types.IFn (param_types, annotated_or_fresh signature.Ast.ret, row))))
       | _ -> ())
     body
@@ -1471,12 +1641,13 @@ and hoist env (body : Ast.desugared_stmt list) =
 (* This order is load-bearing: hoisting reads signatures, which may name a
    declared type or a trait, and a use may precede its declaration. *)
 and infer_block env ctx (body : Ast.desugared_stmt list) : checked_stmt list =
-  declare_types body;
-  declare_traits body;
-  declare_impls ctx.registry body;
-  hoist env body;
-  let assigned = assigned_names body in
-  List.map (fun s -> infer_stmt env ctx assigned s) body
+  scoped_declarations (fun () ->
+    declare_types body;
+    declare_traits body;
+    declare_impls ctx.registry body;
+    hoist env body;
+    let assigned = assigned_names body in
+    List.map (fun s -> infer_stmt env ctx assigned s) body)
 
 and infer_stmt env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
   try infer_stmt_impl env ctx assigned s with
@@ -1549,17 +1720,10 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
       (fun (p : Ast.param) ty -> bind scope p.Ast.name (Types.mono ty))
       params
       param_types;
-    let saved_return = ctx.return_type
-    and saved_saw = ctx.saw_return
-    and saved_row = ctx.row in
-    ctx.return_type <- Some declared_ret;
-    ctx.saw_return <- false;
-    ctx.row <- declared_row;
-    let body = infer_block scope ctx body in
-    if not ctx.saw_return then Types.unify declared_ret Types.IUnit;
-    ctx.return_type <- saved_return;
-    ctx.saw_return <- saved_saw;
-    ctx.row <- saved_row;
+    let body =
+      in_function_body ctx ~ret:declared_ret ~row:declared_row (fun () ->
+        infer_block scope ctx body)
+    in
     let fn_type = Types.IFn (param_types, declared_ret, declared_row) in
     (* Leaving [hoist]'s binding in place would make the function's own variables
        count as free in the enclosing scope, so nothing would ever be
@@ -1574,7 +1738,6 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
          ~env_fields:(env_free_field_vars env)
          fn_type);
     Ast.annotated span fn_type (`Fn (name, params, signature, body)))
-  (* Checked where it is written; when it runs is the block's business. *)
   | `Defer inner -> node (`Defer (infer_stmt env ctx assigned inner))
   | `Type_decl (name, params, body) -> node (`Type_decl (name, params, body))
   | `Op_decl (op, params, signature, body) ->
@@ -1595,23 +1758,16 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
       param_types;
     let declared_ret = annotated_or_fresh signature.Ast.ret in
     let declared_row = Types.fresh_row () in
-    let saved_return = ctx.return_type
-    and saved_saw = ctx.saw_return
-    and saved_row = ctx.row in
-    ctx.return_type <- Some declared_ret;
-    ctx.saw_return <- false;
-    ctx.row <- declared_row;
-    let body = infer_block scope ctx body in
-    if not ctx.saw_return then Types.unify declared_ret Types.IUnit;
-    ctx.return_type <- saved_return;
-    ctx.saw_return <- saved_saw;
-    ctx.row <- saved_row;
+    let body =
+      in_function_body ctx ~ret:declared_ret ~row:declared_row (fun () ->
+        infer_block scope ctx body)
+    in
     Ast.annotated
       span
       (Types.IFn (param_types, declared_ret, declared_row))
       (`Op_decl (op, params, signature, body)))
   | `Trait_decl (name, params, methods) -> node (`Trait_decl (name, params, methods))
-  | `Impl_decl (trait, type_name, params, methods) ->
+  | `Impl_decl (trait, type_name, params, impl) ->
     let inferred =
       List.map
         (fun (m : (Ast.desugared_stmt, unit) Ast.method_def) ->
@@ -1641,20 +1797,13 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
             (fun (p : Ast.param) ty -> bind scope p.Ast.name (Types.mono ty))
             m.Ast.md_params
             param_types;
-          let saved_return = ctx.return_type
-          and saved_saw = ctx.saw_return
-          and saved_row = ctx.row in
-          ctx.return_type <- Some declared_ret;
-          ctx.saw_return <- false;
-          ctx.row <- declared_row;
-          let body = infer_block scope ctx m.Ast.md_body in
-          if not ctx.saw_return then Types.unify declared_ret Types.IUnit;
-          ctx.return_type <- saved_return;
-          ctx.saw_return <- saved_saw;
-          ctx.row <- saved_row;
+          let body =
+            in_function_body ctx ~ret:declared_ret ~row:declared_row (fun () ->
+              infer_block scope ctx m.Ast.md_body)
+          in
           let fn_type = Types.IFn (param_types, declared_ret, declared_row) in
           mangled, fn_type, { m with Ast.md_body = body; md_ann = fn_type }))
-        methods
+        impl.Ast.ib_methods
     in
     (* One variable per impl type parameter is shared by every method, so a
        sibling still bound to it monomorphically makes it look used by the
@@ -1669,7 +1818,7 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
         bind env mangled (Types.generalize ~env_vars ~env_rows ~env_fields fn_type))
       inferred;
     node
-      (`Impl_decl (trait, type_name, params, List.map (fun (_, _, m) -> m) inferred))
+      (`Impl_decl (trait, type_name, params, { impl with Ast.ib_methods = List.map (fun (_, _, m) -> m) inferred }))
   | `Match (scrutinee, cases) ->
     let scrutinee = infer_expr env ctx scrutinee in
     let sum, sum_args =
@@ -1681,52 +1830,155 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
           "Only a sum type can be matched, and this is %s."
           (Types.string_of_infer_ty other)
     in
-    let variants =
+    let vars, variants =
       match Hashtbl.find_opt ctx_types sum with
-      | Some (Sum (vars, variants)) ->
-        let mapping = instance vars sum_args in
-        List.map
-          (fun (name, payload) ->
-            name, Ast.map_payload (Types.substitute mapping) payload)
-          variants
+      | Some (Sum (vars, variants)) -> vars, variants
       | _ -> fail span "Unknown sum type '%s'." sum
     in
+    (* Matching a constructor is learning that the scrutinee's arguments are the
+       ones that constructor builds. For an ordinary variant those are the
+       type's own parameters and this says nothing; for a GADT it is where
+       `Expr<T>` becomes `Expr<int>` — and only for this arm, which is why it is
+       solved into a substitution rather than unified into the store. *)
+    let refine declared =
+      let freshened = instantiation vars declared in
+      let head = List.map (Types.substitute freshened) declared.vd_result in
+      match Types.solve (List.combine sum_args head) with
+      | Some refinement -> freshened, refinement
+      | None -> raise Not_found
+    in
+    (* A variant whose head cannot be the scrutinee's type is not reachable
+       here, so a match that leaves it out is still exhaustive — which is what
+       lets `head` take a vector that cannot be `Nil`. *)
+    let reachable declared =
+      match refine declared with
+      | _ -> true
+      | exception Not_found -> false
+    in
+    (* Everything the arm sees is rewritten by the refinement: the payload it
+       binds, the return type it must produce, the names already in scope whose
+       type mentions a refined variable, and what a written `T` means inside it.
+       The store is left alone, so a constraint the arm places on anything else
+       is ordinary and permanent. *)
+    let refined_scope refinement =
+      let scope = new_env (Some env) in
+      (* A variable the scheme quantifies is bound by it, not by the match — the
+         recursive occurrence of the function being checked quantifies the very
+         parameter being refined, and substituting into it would make the
+         function monomorphic at this arm's type. *)
+      let applicable (scheme : Types.scheme) =
+        List.filter (fun (id, _) -> not (List.mem id scheme.Types.quantified)) refinement
+      in
+      let rec walk visible =
+        Option.iter walk visible.parent;
+        Hashtbl.iter
+          (fun name (scheme : Types.scheme) ->
+            match applicable scheme with
+            | [] -> ()
+            | refinement ->
+              if
+                List.exists
+                  (fun (id, _) -> List.mem_assoc id refinement)
+                  (Types.free_vars scheme.Types.body)
+              then
+                bind
+                  scope
+                  name
+                  { scheme with Types.body = Types.substitute refinement scheme.Types.body })
+          visible.bindings
+      in
+      walk env;
+      scope
+    in
+    let refined_params refinement =
+      Hashtbl.fold
+        (fun name var found ->
+          match Types.repr var with
+          | Types.IVar { contents = Types.Unbound (id, _) } when List.mem_assoc id refinement ->
+            (name, Types.substitute refinement var) :: found
+          | _ -> found)
+        ctx_type_params
+        []
+    in
     let covered = ref [] in
+    let arm variant declared payload body =
+      let freshened, refinement =
+        if not declared.vd_refines
+        then instance vars sum_args, []
+        else (
+          match refine declared with
+          | solved -> solved
+          (* The head it builds cannot be the scrutinee's type, so no value
+             reaching here was ever built by it. *)
+          | exception Not_found ->
+            fail
+              span
+              "'%s' cannot be a %s, so this arm can never match."
+              variant
+              (Types.string_of_infer_ty (Types.ISum (sum, sum_args))))
+      in
+      let scope = if refinement = [] then new_env (Some env) else refined_scope refinement in
+      let expected =
+        List.map
+          (fun (l, t) -> l, Types.substitute refinement (Types.substitute freshened t))
+          (Ast.payload_fields declared.vd_payload)
+      in
+      let bindings = Ast.payload_fields payload in
+      if List.length expected <> List.length bindings
+      then
+        fail
+          span
+          "Variant '%s' carries %d value(s) but %d were bound."
+          variant
+          (List.length expected)
+          (List.length bindings);
+      List.iter
+        (fun (l, name) ->
+          match List.assoc_opt l expected with
+          | Some ty -> bind scope name (Types.mono ty)
+          | None -> fail span "Variant '%s' has no field '%s'." variant l)
+        bindings;
+      if refinement = []
+      then infer_block scope ctx body
+      else
+        with_type_params (refined_params refinement) (fun () ->
+          (* [in_ctx] puts the whole context back, and a `return` in the arm is
+             a fact about the function rather than about the arm — so that one
+             field is carried out by hand. *)
+          let returned = ref false in
+          let checked =
+            in_ctx
+              ctx
+              ~set:(fun () ->
+                ctx.return_type <- Option.map (Types.substitute refinement) ctx.return_type)
+              (fun () ->
+                let checked = infer_block scope ctx body in
+                returned := ctx.saw_return;
+                checked)
+          in
+          if !returned then ctx.saw_return <- true;
+          checked)
+    in
     let cases =
       List.map
         (fun ((pattern : Ast.pattern), body) ->
-          let scope = new_env (Some env) in
-          (match pattern with
-           | Ast.Pat_wild -> covered := List.map fst variants
-           | Ast.Pat_variant (ty, variant, payload) ->
-             if not (String.equal ty sum)
-             then fail span "This matches a %s, not a %s." ty sum;
-             (match List.assoc_opt variant variants with
-              | None -> fail span "Type '%s' has no variant '%s'." sum variant
-              | Some declared ->
-                covered := variant :: !covered;
-                let expected = Ast.payload_fields declared in
-                let bindings = Ast.payload_fields payload in
-                if List.length expected <> List.length bindings
-                then
-                  fail
-                    span
-                    "Variant '%s' carries %d value(s) but %d were bound."
-                    variant
-                    (List.length expected)
-                    (List.length bindings);
-                List.iter
-                  (fun (l, name) ->
-                    match List.assoc_opt l expected with
-                    | Some ty -> bind scope name (Types.mono ty)
-                    | None -> fail span "Variant '%s' has no field '%s'." variant l)
-                  bindings));
-          pattern, infer_block scope ctx body)
+          match pattern with
+          | Ast.Pat_wild ->
+            covered := List.map fst variants;
+            pattern, infer_block (new_env (Some env)) ctx body
+          | Ast.Pat_variant (ty, variant, payload) ->
+            if not (String.equal ty sum)
+            then fail span "This matches a %s, not a %s." ty sum;
+            (match List.assoc_opt variant variants with
+             | None -> fail span "Type '%s' has no variant '%s'." sum variant
+             | Some declared ->
+               covered := variant :: !covered;
+               pattern, arm variant declared payload body))
         cases
     in
     List.iter
-      (fun (name, _) ->
-        if not (List.mem name !covered)
+      (fun (name, declared) ->
+        if (not (List.mem name !covered)) && reachable declared
         then fail span "This match does not cover '%s'." name)
       variants;
     node (`Match (scrutinee, cases))
@@ -1739,6 +1991,11 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     with_type_params bound (fun () ->
     List.iter
       (fun (o : Ast.op_decl) ->
+        (match Hashtbl.find_opt ctx_op_owner o.Ast.op_name with
+         | Some owner when not (String.equal owner name) ->
+           fail span "Effect '%s' already declares an operation '%s'." owner o.Ast.op_name
+         | _ -> ());
+        Hashtbl.replace ctx_op_owner o.Ast.op_name name;
         Hashtbl.replace ctx_effects.ops o.Ast.op_name o;
         let params =
           List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) o.Ast.op_params
@@ -1749,10 +2006,9 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
         let op_type =
           Types.IFn (params, ret, Types.RCons (name, List.map snd bound, Types.fresh_row ()))
         in
-        (* A `final ctl` never hands anything back, so what its result is
-           called is the call site's business, and every site may answer
-           differently. Quantifying is sound for exactly that reason, and only
-           over what the arguments do not already pin down. *)
+        (* A `final ctl` never hands anything back, so every call site may read
+           its result as whatever it needs. Quantifying is sound for exactly
+           that reason, and only over what the arguments do not pin down. *)
         let effect_vars =
           List.filter_map
             (fun (_, v) ->
@@ -1816,11 +2072,10 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
             h.Ast.arms)
       handlers;
     let body_row = Types.fresh_row () in
-    let saved_row = ctx.row in
-    ctx.row <- body_row;
-    let scope = new_env (Some env) in
-    let body = infer_block scope ctx body in
-    ctx.row <- saved_row;
+    let body =
+      in_ctx ctx ~set:(fun () -> ctx.row <- body_row) (fun () ->
+        infer_block (new_env (Some env)) ctx body)
+    in
     (* Each handler discharges one instantiation, and which one is settled by
        unifying against what its arms turn out to take. *)
     let instantiated =
@@ -1907,19 +2162,19 @@ and infer_handler env ctx assigned ~args (h : Ast.desugared_stmt Ast.handler)
         (List.length a.Ast.arm_params);
     let scope = new_env (Some env) in
     List.iter2 (fun name ty -> bind scope name (Types.mono ty)) a.Ast.arm_params param_types;
-    let saved_resume = ctx.resume_type
-    and saved_return = ctx.return_type
-    and saved_saw = ctx.saw_return in
-    ctx.resume_type <- (match a.Ast.arm_kind with
-                        | Ast.Op_ctl -> Some (annotated_or_fresh op.Ast.op_ret)
-                        | Ast.Op_fn | Ast.Op_final -> None);
-    ctx.in_final_arm <- a.Ast.arm_kind = Ast.Op_final;
-    ctx.return_type <- Some (annotated_or_fresh op.Ast.op_ret);
-    ctx.saw_return <- false;
-    let body = List.map (infer_stmt scope ctx assigned) a.Ast.arm_body in
-    ctx.resume_type <- saved_resume;
-    ctx.return_type <- saved_return;
-    ctx.saw_return <- saved_saw;
+    let body =
+      in_ctx
+        ctx
+        ~set:(fun () ->
+          ctx.resume_type
+          <- (match a.Ast.arm_kind with
+              | Ast.Op_ctl -> Some (annotated_or_fresh op.Ast.op_ret)
+              | Ast.Op_fn | Ast.Op_final -> None);
+          ctx.in_final_arm <- a.Ast.arm_kind = Ast.Op_final;
+          ctx.return_type <- Some (annotated_or_fresh op.Ast.op_ret);
+          ctx.saw_return <- false)
+        (fun () -> List.map (infer_stmt scope ctx assigned) a.Ast.arm_body)
+    in
     { Ast.arm_name = a.Ast.arm_name
     ; arm_kind = a.Ast.arm_kind
     ; arm_params = a.Ast.arm_params
@@ -1975,8 +2230,7 @@ and resolve_stmt (s : checked_stmt) : Ast.typed_stmt =
   { Ast.it; span = s.Ast.span; ann = Types.resolve s.Ast.ann }
 
 (* A closed row here would close the caller's, since a call unifies the two.
-   Quantifying gives every call site its own, as generalization does for a pure
-   function written in Cronyx. *)
+   Quantifying gives every call site its own. *)
 let pure params ret =
   let row = Types.fresh_row () in
   let scheme_of body =
@@ -2009,8 +2263,6 @@ let admits registry kind (t : Types.infer_ty) =
   | Types.Bound traits ->
     (match Types.infer_type_name t with
      | Some name ->
-       (* An impl of that trait for this type, at arguments that agree with the
-          ones the bound named. *)
        List.for_all
          (fun (trait, args) ->
            List.exists

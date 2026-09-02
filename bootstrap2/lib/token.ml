@@ -79,7 +79,7 @@ type token_type =
 type token =
   { token_type : token_type
   ; lexeme : string
-  ; file : string (* the unit it was read from, carried so spans have one *)
+  ; file : string
   ; line : int (* 1-based *)
   ; col : int (* 1-based, counted from the start of `line` *)
   }

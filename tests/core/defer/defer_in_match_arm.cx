@@ -1,0 +1,15 @@
+type Color { Red, Blue }
+
+fn main() -> unit {
+    var c = new Color::Red;
+    match c {
+        Color::Red => {
+            defer print("deferred in arm");
+            print("in arm");
+        }
+        Color::Blue => { }
+    }
+    print("after match");
+}
+
+main();

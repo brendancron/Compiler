@@ -197,9 +197,14 @@ let rec expr (e : Ast.cps_expr) : unit =
 and stmt (s : Ast.cps_stmt) : unit =
   match s.Ast.it with
   | `Expr e -> expr e
-  | `Scope body -> List.iter stmt body
+  | `Scope (_, body, on_abort) ->
+    List.iter stmt body;
+    List.iter stmt on_abort
   | `Defer s -> stmt s
-  | `Abort -> ()
+  | `Abort _ -> ()
+  | `On_unwind (body, cleanup) ->
+    List.iter stmt body;
+    List.iter stmt cleanup
   | `Var_decl (_, _, init) -> Option.iter expr init
   | `Block body -> List.iter stmt body
   | `If (cond, then_branch, else_branch) ->

@@ -30,15 +30,31 @@ type state =
   }
 
 (* A trait name after the colon is a bound on a type parameter, not the type of
-   a value parameter, and this pass runs before anything knows which names are
-   traits — so it collects them itself. *)
+   a value parameter. This pass runs before anything knows which names are
+   traits, so it collects them itself. *)
 let traits : (string, unit) Hashtbl.t = Hashtbl.create 8
 
-let rec note_traits (s : desugared_stmt) =
+(* No wildcard: a statement that can hold another has to be listed, or a
+   declaration written inside it is silently not seen. A trait missed here is
+   read as a comptime value parameter by whoever tests the bound. *)
+let children (s : desugared_stmt) : desugared_stmt list =
   match s.it with
-  | `Trait_decl (name, _, _) -> Hashtbl.replace traits name ()
-  | `Block body | `Fn (_, _, _, body) -> List.iter note_traits body
-  | _ -> ()
+  | `Block body | `Fn (_, _, _, body) | `Op_decl (_, _, _, body) -> body
+  | `Defer inner -> [ inner ]
+  | `If (_, t, e) -> t :: Option.to_list e
+  | `While (_, body) -> [ body ]
+  | `Match (_, cases) -> List.concat_map snd cases
+  | `Run (body, handlers) ->
+    body @ List.concat_map (fun h -> List.concat_map (fun a -> a.arm_body) h.arms) handlers
+  | `Impl_decl (_, _, _, body) -> List.concat_map (fun m -> m.md_body) body.ib_methods
+  | `Expr _ | `Var_decl _ | `Return _ | `Effect_decl _ | `Resume _ | `Type_decl _
+  | `Trait_decl _ -> []
+
+let rec note_traits (s : desugared_stmt) =
+  (match s.it with
+   | `Trait_decl (name, _, _) -> Hashtbl.replace traits name ()
+   | _ -> ());
+  List.iter note_traits (children s)
 
 let is_value (p : comptime_param) =
   match p.cp_ty with
@@ -51,28 +67,31 @@ let is_value (p : comptime_param) =
 let split (signature : signature) =
   List.partition is_value signature.comptime
 
-let rec key_of (e : desugared_expr) =
+(* Which copy an argument selects, and — being total — what decides whether the
+   argument may be one at all. Two functions drifted apart here: the test
+   admitted every `lit`, including the bytes an `embed` becomes, and this
+   answered for six of them. *)
+let rec key_of (e : desugared_expr) : string option =
   match e.it with
-  | `Int n -> string_of_int n
-  | `Float n -> Printf.sprintf "%h" n
-  | `Str s -> Printf.sprintf "%S" (Utf8.encode s)
-  | `Char c -> Printf.sprintf "'%d'" (Uchar.to_int c)
-  | `Bool b -> string_of_bool b
-  | `Unop (Neg, inner) -> "-" ^ key_of inner
-  | _ -> assert false (* [literal_of] admitted it *)
+  | `Int n -> Some (string_of_int n)
+  | `Float n -> Some (Printf.sprintf "%h" n)
+  | `Str s -> Some (Printf.sprintf "%S" (Utf8.encode s))
+  | `Char c -> Some (Printf.sprintf "'%d'" (Uchar.to_int c))
+  | `Bool b -> Some (string_of_bool b)
+  | `Unop (Neg, inner) -> Option.map (fun key -> "-" ^ key) (key_of inner)
+  | _ -> None
 
-let rec is_literal (e : desugared_expr) =
-  match e.it with
-  | #lit -> true
-  | `Unop (Neg, inner) -> is_literal inner
-  | _ -> false
+(* A substitution stops at a binder: a local of the same name is a different
+   variable, and replacing its uses would compute something else entirely. *)
+let shadow names env = List.filter (fun (name, _) -> not (List.mem name names)) env
+let param_names params = List.map (fun (p : param) -> p.name) params
 
 let rec subst_expr env (e : desugared_expr) : desugared_expr =
   let it : desugared_expr_kind =
     match e.it with
     | `Var name when List.mem_assoc name env -> (List.assoc name env).it
     | `Lambda (params, signature, body) ->
-      `Lambda (params, signature, List.map (subst_stmt env) body)
+      `Lambda (params, signature, subst_body (shadow (param_names params) env) body)
     | #lit as l -> l
     | #vars as v -> (map_vars (subst_expr env) v :> desugared_expr_kind)
     | #ops as o -> (map_ops (subst_expr env) o :> desugared_expr_kind)
@@ -83,8 +102,8 @@ let rec subst_expr env (e : desugared_expr) : desugared_expr =
     | #record as r -> (map_record (subst_expr env) r :> desugared_expr_kind)
     | #nominal as n -> (map_nominal (subst_expr env) n :> desugared_expr_kind)
     | #collection as c -> (map_collection (subst_expr env) c :> desugared_expr_kind)
-    (* A parameter passed straight on parsed as a type, so substitution has to
-       reach into the comptime list too. *)
+    (* A parameter passed straight on parsed as a type, so substitution reaches
+       into the comptime list too. *)
     | `Comptime_call (callee, comptime_args, args) ->
       let arg = function
         | Ct_type { it = Ty_name written; _ } when List.mem_assoc written env ->
@@ -100,9 +119,38 @@ let rec subst_expr env (e : desugared_expr) : desugared_expr =
   in
   { e with it }
 
+(* A `var` binds for the statements after it, so the tail is substituted under
+   an environment the name has been dropped from. *)
+and subst_body env (body : desugared_stmt list) : desugared_stmt list =
+  match body with
+  | [] -> []
+  | s :: rest ->
+    let substituted = subst_stmt env s in
+    let env =
+      match s.it with
+      | `Var_decl (name, _, _) -> shadow [ name ] env
+      | _ -> env
+    in
+    substituted :: subst_body env rest
+
 and subst_stmt env (s : desugared_stmt) : desugared_stmt =
   let it : desugared_stmt_kind =
     match s.it with
+    | `Block body -> `Block (subst_body env body)
+    | `Fn (name, params, signature, body) ->
+      `Fn (name, params, signature, subst_body (shadow (param_names params) env) body)
+    | `Match (scrutinee, cases) ->
+      `Match
+        ( subst_expr env scrutinee
+        , List.map
+            (fun (pattern, body) ->
+              let bound =
+                match pattern with
+                | Pat_variant (_, _, payload) -> List.map snd (payload_fields payload)
+                | Pat_wild -> []
+              in
+              pattern, subst_body (shadow bound env) body)
+            cases )
     | #stmts as st ->
       (map_stmts (subst_expr env) (subst_stmt env) st :> desugared_stmt_kind)
     | #effects as e ->
@@ -116,11 +164,10 @@ and subst_stmt env (s : desugared_stmt) : desugared_stmt =
     | #op_defs as o -> (map_op_defs (subst_stmt env) o :> desugared_stmt_kind)
     | #method_defs as m ->
       (map_method_defs (subst_stmt env) Fun.id m :> desugared_stmt_kind)
-    | #matching as m ->
-      (map_matching (subst_expr env) (subst_stmt env) m :> desugared_stmt_kind)
   in
   { s with it }
 
+(* The argument as written, paired with the key it selects a copy by. *)
 let literal_of name (arg : desugared_expr comptime_arg) =
   let written =
     match arg with
@@ -130,28 +177,36 @@ let literal_of name (arg : desugared_expr comptime_arg) =
       fail t.span "'%s' takes a value here, not a type." name
     | Ct_value v -> v
   in
-  if is_literal written
-  then written
-  else (
-    match written.it with
-    | `Var unknown ->
-      fail
-        written.span
-        "'%s' is not known at compile time: it is a run-time variable, not a \
-         comptime parameter of the enclosing function."
-        unknown
-    | `Call _ | `Comptime_call _ ->
-      fail
-        written.span
-        "This argument to '%s' is not known at compile time: a call is only \
-         comptime-evaluable inside a meta block, which does not exist yet."
-        name
-    | _ ->
-      fail
-        written.span
-        "This argument to '%s' is not known at compile time; only a literal or \
-         a comptime parameter of the enclosing function is."
-        name)
+  match key_of written with
+  | Some key -> written, key
+  | None ->
+    (match written.it with
+     | `Var unknown ->
+       fail
+         written.span
+         "'%s' is not known at compile time: it is a run-time variable, not a \
+          comptime parameter of the enclosing function."
+         unknown
+     | `Call _ | `Comptime_call _ ->
+       fail
+         written.span
+         "This argument to '%s' is not known at compile time: a call is only \
+          comptime-evaluable inside a meta block, which does not exist yet."
+         name
+     (* An `embed` is already resolved to its contents by here, so it is known
+        at compile time and the message above would be a lie. *)
+     | `Bytes _ ->
+       fail
+         written.span
+         "Embedded bytes cannot be a comptime argument to '%s': a comptime \
+          value is a number, string, char or bool."
+         name
+     | _ ->
+       fail
+         written.span
+         "This argument to '%s' is not known at compile time; only a literal or \
+          a comptime parameter of the enclosing function is."
+         name)
 
 let copy_name state name key =
   match Hashtbl.find_opt state.copies (name, key) with
@@ -215,7 +270,8 @@ and specialize state span name comptime_args args : desugared_expr_kind =
   in
   let values = List.rev values
   and types = List.rev types in
-  let key = String.concat "," (List.map (fun (_, v) -> key_of v) values) in
+  let key = String.concat "," (List.map (fun (_, (_, key)) -> key) values) in
+  let bound = List.map (fun (param, (written, _)) -> param, written) values in
   let copy, is_new = copy_name state name key in
   if is_new
   then (
@@ -226,7 +282,7 @@ and specialize state span name comptime_args args : desugared_expr_kind =
             ( copy
             , template.t_params
             , { template.t_signature with comptime = type_params }
-            , List.map (subst_stmt values) template.t_body )
+            , subst_body bound template.t_body )
       ; span
       ; ann = ()
       }
@@ -235,9 +291,23 @@ and specialize state span name comptime_args args : desugared_expr_kind =
   let callee : desugared_expr = { it = `Var copy; span; ann = () } in
   if types = [] then `Call (callee, args) else `Comptime_call (callee, types, args)
 
+(* A template is replaced by its copies wherever it stands, so a statement list
+   holding one is filtered rather than mapped: left in place its comptime value
+   parameter reaches the checker, which has nothing to do with it. *)
+and body state (stmts : desugared_stmt list) : desugared_stmt list =
+  List.filter_map
+    (fun s ->
+      match s.it with
+      | `Fn (name, _, _, _) when Hashtbl.mem state.templates name -> None
+      | _ -> Some (stmt state s))
+    stmts
+
 and stmt state (s : desugared_stmt) : desugared_stmt =
   let it : desugared_stmt_kind =
     match s.it with
+    | `Block inner -> `Block (body state inner)
+    | `Fn (name, params, signature, inner) ->
+      `Fn (name, params, signature, body state inner)
     | #stmts as st ->
       (map_stmts (expr state) (stmt state) st :> desugared_stmt_kind)
     | #effects as e ->
@@ -245,6 +315,15 @@ and stmt state (s : desugared_stmt) : desugared_stmt =
        :> desugared_stmt_kind)
     | #type_defs as t -> t
     | #op_defs as o -> (map_op_defs (stmt state) o :> desugared_stmt_kind)
+    | `Impl_decl (trait, type_name, params, impl) ->
+      `Impl_decl
+        ( trait
+        , type_name
+        , params
+        , { impl with
+            ib_methods =
+              List.map (fun m -> { m with md_body = body state m.md_body }) impl.ib_methods
+          } )
     | #method_defs as m ->
       (map_method_defs (stmt state) Fun.id m :> desugared_stmt_kind)
     | #matching as m ->
@@ -253,29 +332,17 @@ and stmt state (s : desugared_stmt) : desugared_stmt =
   { s with it }
 
 let rec collect state (s : desugared_stmt) =
-  match s.it with
-  | `Fn (name, params, signature, body) ->
-    let values, _ = split signature in
-    if values <> []
-    then
-      Hashtbl.replace
-        state.templates
-        name
-        { t_params = params; t_signature = signature; t_body = body };
-    List.iter (collect state) body
-  | `Block body -> List.iter (collect state) body
-  | `If (_, then_branch, else_branch) ->
-    collect state then_branch;
-    Option.iter (collect state) else_branch
-  | `While (_, body) -> collect state body
-  | `Run (body, _) -> List.iter (collect state) body
-  | `Match (_, cases) -> List.iter (fun (_, body) -> List.iter (collect state) body) cases
-  | _ -> ()
-
-let is_template state (s : desugared_stmt) =
-  match s.it with
-  | `Fn (name, _, _, _) -> Hashtbl.mem state.templates name
-  | _ -> false
+  (match s.it with
+   | `Fn (name, params, signature, body) ->
+     let values, _ = split signature in
+     if values <> []
+     then
+       Hashtbl.replace
+         state.templates
+         name
+         { t_params = params; t_signature = signature; t_body = body }
+   | _ -> ());
+  List.iter (collect state) (children s)
 
 let program (p : desugared_stmt list) : (desugared_stmt list, error) result =
   let state =
@@ -292,11 +359,7 @@ let program (p : desugared_stmt list) : (desugared_stmt list, error) result =
   then Ok p
   else (
     try
-      let rewritten =
-        List.filter_map
-          (fun s -> if is_template state s then None else Some (stmt state s))
-          p
-      in
+      let rewritten = body state p in
       (* A copy's own body may call another template, so this runs until no new
          copy is asked for. *)
       let rec drain () =

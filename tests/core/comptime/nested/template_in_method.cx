@@ -1,0 +1,13 @@
+trait Show { fn show(self) -> string; }
+impl Show for int {
+    fn show(self) -> string {
+        fn repeat<n: int>(s: string) -> string {
+            var out = "";
+            var i = 0;
+            while (i < n) { out = out + s; i = i + 1; }
+            return out;
+        }
+        return repeat<2>(str(self));
+    }
+}
+print(5.show());

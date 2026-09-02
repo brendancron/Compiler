@@ -1,7 +1,4 @@
-(* What a program can use without declaring it: the types, their signatures, the
-   entries that make them containers, and the values that implement them.
-
-   Nothing that consumes a program reads this. The checker registers these the
+(* What a program can use without declaring it. The checker registers these the
    same way it registers a declaration, and the interpreter is handed the values
    without being told which are builtin. *)
 
@@ -19,8 +16,7 @@ let methods : (string * string * (unit -> Types.infer_ty list * Types.infer_ty))
    function of no arguments, which is what stops one being passed around as a
    value that could be anything. *)
 let variadic : (string * (unit -> Types.infer_ty)) list =
-  [ (* What a lowered `gen` calls. The name is unforgeable, and it is bound only
-       while a meta block runs. *)
+  [ (* What a lowered `gen` calls, bound only while a meta block runs. *)
     Ast.generated [ "meta"; "emit" ], (fun () -> Types.IUnit)
   ; Ast.generated [ "meta"; "value" ], (fun () -> Types.IUnit)
     (* What a lowered `code` calls, taking the same bindings a `gen` does. *)
@@ -29,11 +25,8 @@ let variadic : (string * (unit -> Types.infer_ty)) list =
 
 let functions : (string * (unit -> Types.infer_ty list * Types.infer_ty)) list =
   [ "clock", (fun () -> [], Types.IFloat)
-    (* One argument, so it needs no rule of its own: several are written as
-       one string, and what a value looks like is its own business. *)
   ; ("print", fun () -> [ Types.fresh () ], Types.IUnit)
   ; ("str", fun () -> [ Types.fresh () ], Types.IStr)
-    (* A scalar value is a code point, so this is the number it already is. *)
   ; ("ord", fun () -> [ Types.IChr ], Types.IInt)
   ; ( "same"
     , fun () ->
@@ -95,7 +88,6 @@ let values ~out =
       | _ -> Value.fail span "Cannot apply bytes to these arguments.")
   ]
 
-(* The scope a program starts in. *)
 let env ~out =
   let env = Value.new_env None in
   List.iter (fun (name, v) -> Value.define env name v) (values ~out);

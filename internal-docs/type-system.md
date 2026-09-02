@@ -1,6 +1,6 @@
 # Type system and type checking — bootstrap2
 
-Status: **implemented.** `lib/types.ml` and `lib/typecheck.ml` run after `Desugar`; every program goes through the checker. See [architecture](architecture.md) for where that sits now.
+Status: **implemented.** `lib/types.ml` and `lib/typecheck.ml` run after `Desugar`; every program goes through the checker. See [Architecture](Architecture.md) for where that sits now.
 
 This records the design of the OCaml bootstrap's static type system, what was carried over from the Rust bootstrap's checker (`bootstrap/src/semantics/types/`), what was done differently, and what is still missing.
 
@@ -24,7 +24,7 @@ Types are needed downstream, not merely for error reporting. That decides severa
 | Polymorphism | Full let-polymorphism, with the value restriction. |
 | First cut | Typed AST end-to-end, interpreter runs on it. |
 | Desugar spans | Fixed before the checker is written. |
-| Effects | Every function type carries a row. See [effects](effects.md). |
+| Effects | Every function type carries a row. See [Algebraic Effects](Algebraic%20Effects.md). |
 
 ## Representation: two type languages, not one
 
@@ -44,7 +44,7 @@ type ty =
   | Generic of int
 ```
 
-The row on a function type is its effects; see [effects](effects.md).
+The row on a function type is its effects; see [Algebraic Effects](Algebraic%20Effects.md).
 
 `resolve : infer_ty -> ty` collapses `Link` chains, defaults unconstrained numeric variables to `Int`, and maps anything still genuinely unconstrained to `Generic`.
 
@@ -202,6 +202,24 @@ Three rules. **Only the last parameter** may be variadic — anything after it h
 
 Only functions. A `var` is a statement, and its initializer runs where it is written, so a function referring to one declared later is still rejected — by the checker, before anything runs.
 
+**A function with a written `<T>` can call itself at another instantiation.** Its recursive occurrence is bound to the declared signature *generalized* rather than to `Types.mono`, so `depth<T>(n: Nested<T>)` reaching `depth` at `Nested<(T, T)>` checks. Inference cannot find that on its own, which is why it takes a written signature and why only the variables the author wrote are quantified — everything else about the signature is still being inferred and stays shared with the body. The row stays monomorphic, so recursion still contributes to the effects the function is inferred to perform.
+
+A declared parameter is now the survivor when unification joins two variables. The scheme records an id, and an operator aliasing `T` to a fresh variable would leave that id pointing at nothing and the parameter silently unquantified.
+
+**Two consequences in `Specialize`.** A call a function makes to *itself* no longer makes its body type-directed: copying cannot resolve that call, since every copy asks for one more at a further type. And when a body genuinely does need a copy per type — an operator on the recursive payload — no finite set exists, so specialization is capped and the program rejected with a diagnostic rather than compiled forever. `tests/types/inference/errors/unspecializable_recursion` pins it.
+
+**A variant may fix the type parameter, and matching it refines.** `Lit(int) -> Expr<int>` says what that constructor builds rather than leaving it the type applied to its own parameters, and `If<A>(…)` binds a variable the head does not mention. Building one gives the head it declared; matching one says the scrutinee's arguments *are* that head, which is how `return n` typechecks against `T` in the `Lit` arm.
+
+`->` rather than a colon, because that is how Cronyx already writes a result and the colon after a variant label is what tells the parser it is reading fields.
+
+The equation holds in the arm and nowhere else, so `Types.solve` produces it as a substitution and the arm is checked under that rather than under a mutated store. A sum whose variants declare neither parameters nor a head is checked on exactly the path it always was, and pays none of this.
+
+The same solver answers exhaustiveness. A variant whose head cannot be the scrutinee's type is unreachable, so a match may leave it out — which is what lets `head(v: Vec<Succ<N>, T>)` have one arm — and an arm *for* one is rejected, since no value reaching it was built that way.
+
+Koka is the usual tiebreaker and has no GADTs, so OCaml is the reference: the same HM-with-unification setting, and the same conclusion that this is checked against a written signature rather than inferred.
+
+**The refinement is a substitution applied to what the arm sees** — its payload, its expected return type, the names in scope whose type mentions a refined variable, and what a written `T` means inside it. The store is untouched, so a constraint the arm places on anything else is ordinary and permanent, and neither a type nor an effect leaks out. See [GADT Refinement](GADT%20Refinement.md).
+
 **Comparison operators are ordinary entries.** Their result type comes from the entry rather than being fixed to `bool` — see [Elaboration](Elaboration.md).
 
 **`var x;` with no initializer is `unit`.** There is no null, so a declaration without a value cannot leave a hole to be filled in later. A record in particular can never be absent, which is the headache this avoids.
@@ -209,5 +227,6 @@ Only functions. A `var` is a statement, and its initializer runs where it is wri
 ## Related work
 
 - [Elaboration](Elaboration.md) — operators, indexing, and literals resolved from these types.
-- [Effects](effects.md) — the row carried on every function type.
+- [Effects](Algebraic%20Effects.md) — the row carried on every function type.
 - [Comptime Params](Comptime%20Params.md) — what `Generic` becomes once monomorphization exists.
+- [GADT Refinement](GADT%20Refinement.md) — how a match arm learns what a constructor says, and why it is not yet sound.

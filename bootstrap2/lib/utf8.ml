@@ -1,7 +1,6 @@
-(* A string is a sequence of scalar values; UTF-8 is how it is written down and
-   how it leaves the process. Both directions are total: bytes that are not
-   valid UTF-8 decode to U+FFFD rather than failing, because a string may hold
-   anything a file or a literal contained. *)
+(* Both directions are total: bytes that are not valid UTF-8 decode to U+FFFD
+   rather than failing, because a string may hold anything a file or a literal
+   contained. *)
 
 let decode (bytes : string) : Uchar.t array =
   let scalars = ref [] in
