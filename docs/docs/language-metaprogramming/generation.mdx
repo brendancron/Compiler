@@ -107,7 +107,7 @@ The reason `gen` exists is for generating *many* declarations from data. Here's 
 meta {
     var names = ["alice", "bob", "charlie"];
     for (name in names) {
-        var fn_name = "greet_" + name;
+        var fn_name = ("greet_" + name).as_name();
         gen fn fn_name() {
             print("Hello " + name);
         }
@@ -150,6 +150,8 @@ Run with `--dump-runtime-code` and you'll see the three function declarations si
 
 A subtle point worth lingering on: `fn_name` is being used in the *identifier position* — it's not a name being looked up at runtime, it's a name being *constructed* at compile time and spliced into the function declaration. When you see a meta-scope variable used where a function name or variable name would normally go, that's the splice happening.
 
+`.as_name()` is what makes the splice legal. A `string` is data; a `Name` is an identifier, and only a `Name` may stand where one is written. The conversion checks that the text could be an identifier at all, so `"greet-alice".as_name()` is rejected where `"greet_alice".as_name()` is not.
+
 ## Try it
 
 Adapt the greeting pattern to a different domain. Generate three functions — `speak_cat`, `speak_dog`, `speak_fox` — each of which prints `"<animal> says hi"`. Drive it from a single list, just like the greeting example.
@@ -160,7 +162,7 @@ A working answer:
 meta {
     var animals = ["cat", "dog", "fox"];
     for (a in animals) {
-        var fn_name = "speak_" + a;
+        var fn_name = ("speak_" + a).as_name();
         gen fn fn_name() {
             print(a + " says hi");
         }

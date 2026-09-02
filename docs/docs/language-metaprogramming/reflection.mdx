@@ -10,7 +10,7 @@ Most languages answer that question at runtime. Cronyx answers it at compile tim
 
 ## How most languages do reflection
 
-In Java, C#, Python, JavaScript, and many others, reflection happens *while the program runs*. To make that possible, every value carries type information with it: a hidden tag, a class pointer, a metaclass, a `__dict__`. When you ask `typeof(x)`, the runtime walks that metadata and gives you an answer.
+In Java, C#, Python, JavaScript, and many others, reflection happens *while the program runs*. To make that possible, every value carries type information with it: a hidden tag, a class pointer, a metaclass, a `__dict__`. When you ask `typeof(x).name`, the runtime walks that metadata and gives you an answer.
 
 That capability has a price:
 
@@ -32,9 +32,9 @@ var x = 42;
 var b = true;
 var s = "hello";
 
-print(typeof(x));
-print(typeof(b));
-print(typeof(s));
+print(typeof(x).name);
+print(typeof(b).name);
+print(typeof(s).name);
 ```
 
 ```
@@ -43,7 +43,7 @@ bool
 string
 ```
 
-`typeof(value)` returns a string describing the value's type. It runs at compile time — by the time the program executes, the call is gone:
+`typeof(value).name` returns a string describing the value's type. It runs at compile time — by the time the program executes, the call is gone:
 
 ```cronyx title="runtime_code.cx"
 var x = 42;
@@ -59,7 +59,7 @@ The runtime program prints three string literals. There's no metadata, no dispat
 
 ## What `typeof` returns
 
-`typeof` works on every kind of value Cronyx has. The string it returns is a human-readable rendering of the type:
+`typeof(x)` is a `Type`, which exists only while compiling — a program asks it for something rather than printing it. `.name` is the human-readable rendering; `.shape` is what a deriver matches on. Asking for the `Type` itself is an error, because nothing could hold one once the compiler is gone.
 
 ```cronyx
 var nums   = [1, 2, 3];
@@ -69,26 +69,26 @@ var point  = { x: 1, y: 2 };
 ```
 
 ```cronyx
-print(typeof(nums));    // [int]
-print(typeof(pair));    // (int, string)
-print(typeof(nested));  // ((int, int), string)
-print(typeof(point));   // { x: int, y: int }
+print(typeof(nums).name);    // Array<int>
+print(typeof(pair).name);    // (int, string)
+print(typeof(nested).name);  // ((int, int), string)
+print(typeof(point).name);   // { x: int, y: int }
 ```
 
 Enums report their declared name:
 
 ```cronyx
-enum Color { Red, Green, Blue }
-enum Shape { Circle(int), Rectangle(int, int) }
+type Color { Red, Green, Blue }
+type Shape { Circle(int), Rectangle(int, int) }
 
-var c = Color::Red;
-var s = Shape::Circle(5);
+var c = new Color::Red;
+var s = new Shape::Circle(5);
 
-print(typeof(c));  // Color
-print(typeof(s));  // Shape
+print(typeof(c).name);  // Color
+print(typeof(s).name);  // Shape
 ```
 
-(Notice that `typeof(Shape::Circle(5))` returns `Shape`, not `Shape::Circle` — `typeof` reports the type, and a variant isn't its own type.)
+(Notice that `typeof(new Shape::Circle(5)).name` returns `Shape`, not `Shape::Circle` — `typeof` reports the type, and a variant isn't its own type.)
 
 Functions report their signature:
 
@@ -96,11 +96,11 @@ Functions report their signature:
 fn double(n) { return n * 2; }
 fn greet(name) { return "hello " + name; }
 
-print(typeof(double));  // (int) -> int
-print(typeof(greet));   // (string) -> string
+print(typeof(double).name);  // (int) -> int
+print(typeof(greet).name);   // (string) -> string
 ```
 
-(One small quirk: the rendering uses arrow-style `(int) -> int` rather than the `fn(int): int` syntax you'd type in a parameter annotation. They mean the same thing — the arrow form is how `typeof` chooses to display function types. Don't read anything deeper into the discrepancy.)
+The rendering is the same arrow form you would write in an annotation.
 
 ## Why this design unlocks more, not less
 
@@ -108,7 +108,7 @@ A surprising consequence of doing reflection at compile time is that you can do 
 
 - **Read a value's type and emit specialized runtime code based on it.** Combined with `gen` from the previous chapter, you can write a single meta function that consumes a type description and produces a tailored serializer, parser, or validator — and the runtime program contains only the specialized version, with zero generic machinery left over.
 - **Reject invalid types at compile time.** If your reflection meta function is given a type it doesn't know how to handle, the error fires during compilation, not three months into production.
-- **Be inlined and constant-folded freely.** Because `typeof` evaluates to a literal string, anything built on top of it composes with the rest of the meta system. You can pass type strings through `meta fn`s, build them up, compare them, or use them to construct identifiers for `gen`-emitted declarations.
+- **Be inlined and constant-folded freely.** Because `typeof(x).name` evaluates to a literal string, anything built on top of it composes with the rest of the meta system. You can pass type strings through `meta fn`s, build them up, compare them, or use them to construct identifiers for `gen`-emitted declarations.
 
 The runtime-reflection languages can't do any of this without giving up their performance story. Cronyx gets it for free, because the reflection ran *before* the performance story started.
 
@@ -124,12 +124,12 @@ var coords = (1, 2, 3);
 var ages   = [10, 20, 30];
 var record = { x: 5, y: 10 };
 
-print(typeof(n));
-print(typeof(name));
-print(typeof(ready));
-print(typeof(coords));
-print(typeof(ages));
-print(typeof(record));
+print(typeof(n).name);
+print(typeof(name).name);
+print(typeof(ready).name);
+print(typeof(coords).name);
+print(typeof(ages).name);
+print(typeof(record).name);
 ```
 
 Expected output:
