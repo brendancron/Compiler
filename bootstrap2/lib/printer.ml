@@ -14,6 +14,7 @@ let rec string_of_type_expr (t : Ast.type_expr) : string =
   match t.Ast.it with
   | Ast.Ty_name name -> name
   | Ast.Ty_assoc (owner, member) -> string_of_type_expr owner ^ "." ^ member
+  | Ast.Ty_bind (bound, t) -> bound ^ " = " ^ string_of_type_expr t
   | Ast.Ty_variadic t -> "..." ^ string_of_type_expr t
   | Ast.Ty_app (name, args) ->
     Printf.sprintf "%s<%s>" name (String.concat ", " (List.map string_of_type_expr args))

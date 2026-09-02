@@ -44,10 +44,18 @@ and kind =
   (* A trait and what it was named at: `TryFrom<string>` rather than `TryFrom`.
      A method call resolves through the trait's declared signature, so the
      owner need not be known. *)
-  | Bound of (string * infer_ty list) list
+  | Bound of bound list
   (* `T.Item` before `T` is known. The owner is carried rather than the answer,
      so the binding is looked up once the owner unifies with something named. *)
   | Projection of infer_ty * string
+
+(* A trait, what it was named at, and what the impl it reaches must have bound
+   its associated names to — `Add<T, Output = T>`. *)
+and bound =
+  { bd_trait : string
+  ; bd_args : infer_ty list
+  ; bd_bindings : (string * infer_ty) list
+  }
 
 and tv =
   | Unbound of int * kind
@@ -207,7 +215,7 @@ let is_array (t : ty) =
 let string_of_kind = function
   | Any -> "any"
   | Collection _ -> "a collection"
-  | Bound traits -> String.concat " and " (List.map fst traits)
+  | Bound traits -> String.concat " and " (List.map (fun b -> b.bd_trait) traits)
   | Projection (_, member) -> Printf.sprintf "an associated '%s'" member
   | Addable -> "int, float or string"
   | Numeric -> "int or float"
@@ -415,21 +423,34 @@ let project (owner : infer_ty) (member : string) : infer_ty =
   | Some bound -> bound
   | None -> fresh_with (Projection (owner, member))
 
-(* A projection whose owner has become known stands for what the impl bound,
-   so it stops being a variable. Called wherever a type is inspected, since the
-   owner may be settled long after the projection was built. *)
+(* A projection whose owner has become known stands for what the impl bound, so
+   it stops being a variable. Called wherever a type is inspected, since the
+   owner may be settled long after the projection was built.
+
+   [settling] guards the self-reference `T: Add<T, Output = T>` builds, where a
+   variable owns its own projection: asking what it stands for would ask for
+   itself. Nothing is known until the owner is concrete, and by then the answer
+   no longer runs through this cell. *)
+let settling : tv ref list ref = ref []
+
 let rec settle (t : infer_ty) : infer_ty =
   match repr t with
+  | IVar ({ contents = Unbound (_, Projection _) } as cell) as self
+    when List.memq cell !settling -> self
   | IVar ({ contents = Unbound (_, Projection (owner, member)) } as cell) as self ->
-    (match infer_type_name (settle owner) with
-     | None -> self
-     | Some name ->
-       (match !assoc_binding name member with
+    settling := cell :: !settling;
+    Fun.protect
+      ~finally:(fun () -> settling := List.tl !settling)
+      (fun () ->
+        match infer_type_name (settle owner) with
         | None -> self
-        | Some bound ->
-          note cell;
-          cell := Link bound;
-          repr bound))
+        | Some name ->
+          (match !assoc_binding name member with
+           | None -> self
+           | Some bound ->
+             note cell;
+             cell := Link bound;
+             repr bound))
   | other -> other
 
 (* Finding the label is also agreeing on what it was instantiated at, so the
@@ -548,14 +569,14 @@ and strongest a b =
   | Any, Bound _ -> b
   | Collection _, other | other, Collection _ ->
     error "A collection is not %s." (string_of_kind other)
-  | Bound _, other | other, Bound _ ->
-    error "A bounded type parameter is not %s." (string_of_kind other)
   (* Yielding to [Any] would drop the owner, and with it the only route back to
      what the projection stands for. A real constraint still wins: by the time
      one applies, what the projection resolves to has to satisfy it anyway. *)
   | Projection _, Any -> a
   | Any, Projection _ -> b
   | Projection _, other | other, Projection _ -> other
+  | Bound _, other | other, Bound _ ->
+    error "A bounded type parameter is not %s." (string_of_kind other)
   | Numeric, _ | _, Numeric -> Numeric
   | Addable, _ | _, Addable -> Addable
   | Any, Any -> Any
@@ -725,6 +746,16 @@ let generalize ~env_vars ~env_rows ~env_fields body =
       free_field_vars body |> List.filter (fun id -> not (List.mem id env_fields))
   ; body
   }
+
+(* Narrows a variable already in scope. A parameter's own bound may mention it —
+   `T: Add<T, Output = T>` — so the variable has to exist before its kind is
+   known. *)
+let constrain (t : infer_ty) (kind : kind) : unit =
+  match repr t with
+  | IVar ({ contents = Unbound (id, existing) } as cell) ->
+    note cell;
+    cell := Unbound (id, strongest existing kind)
+  | _ -> ()
 
 let instantiate ?(bound = []) (s : scheme) : infer_ty =
   if s.quantified = [] && s.quantified_rows = [] && s.quantified_fields = []

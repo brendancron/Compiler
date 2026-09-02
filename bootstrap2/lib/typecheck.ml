@@ -311,10 +311,12 @@ let receiver_of span registry (receiver : (_, Types.infer_ty) Ast.node) name ele
        (* The bound may name several traits and each may require others, so the
           one that answers is the one declaring the method rather than the one
           written first. *)
-       let reachable = List.concat_map (fun (trait, _) -> trait_closure trait) traits in
+       let reachable =
+         List.concat_map (fun (b : Types.bound) -> trait_closure b.Types.bd_trait) traits
+       in
        (match List.find_opt (fun trait -> declares trait name) reachable, traits with
         | Some trait, _ -> Via_trait trait
-        | None, (trait, _) :: _ -> Via_trait trait
+        | None, first :: _ -> Via_trait first.Types.bd_trait
         | None, [] ->
           fail span "Cannot call '%s': the receiver's type is not known here." name)
      | Types.IVar { contents = Types.Unbound (_, Types.Collection elem) } ->
@@ -451,6 +453,9 @@ let rec infer_ty_of_annotation (t : Ast.type_expr) : Types.infer_ty =
      lookup succeeds there. *)
   | Ast.Ty_assoc (owner, member) ->
     Types.project (infer_ty_of_annotation owner) member
+  (* Only meaningful among a bound's arguments, where [type_params_of] reads it
+     off before the rest are turned into types. *)
+  | Ast.Ty_bind (bound, _) -> fail t.Ast.span "'%s = ...' is only allowed in a bound." bound
   | Ast.Ty_fn (params, ret, row) ->
     Types.IFn
       ( List.map infer_ty_of_annotation params
@@ -521,37 +526,63 @@ let type_params_of span (comptime : Ast.comptime_param list) =
       touched
   in
   Fun.protect ~finally:restore (fun () ->
-  List.map
-    (fun (p : Ast.comptime_param) ->
-      let remember var =
-        Hashtbl.replace ctx_type_params p.Ast.cp_name var;
-        p.Ast.cp_name, var
-      in
-      match p.Ast.cp_ty with
-      | None ->
-        let var = Types.fresh () in
-        Types.declare_param var;
-        remember var
-      (* An annotation naming a declared trait is a bound on a type parameter;
-         anything else would be a value parameter. *)
-      | Some { Ast.it = Ast.Ty_name trait; _ } when Hashtbl.mem ctx_traits trait ->
-        let var = Types.fresh_with (Types.Bound [ trait, [] ]) in
-        Types.declare_param var;
-        remember var
-      (* `T: TryFrom<S>` — the arguments are part of which impl the bound
-         reaches, so they are read here rather than dropped. *)
-      | Some { Ast.it = Ast.Ty_app (trait, args); _ } when Hashtbl.mem ctx_traits trait ->
-        let var =
-          Types.fresh_with (Types.Bound [ trait, List.map infer_ty_of_annotation args ])
-        in
-        Types.declare_param var;
-        remember var
-      | Some _ ->
-        fail
-          span
-          "Comptime value parameter '%s' is not supported yet."
-          p.Ast.cp_name)
-    comptime)
+    (* Every parameter is in scope before any bound is read, since a bound may
+       name the parameter it constrains — `T: Add<T, Output = T>`. *)
+    let declared =
+      List.map
+        (fun (p : Ast.comptime_param) ->
+          match p.Ast.cp_ty with
+          | None | Some { Ast.it = Ast.Ty_name _ | Ast.Ty_app _; _ } ->
+            let var = Types.fresh () in
+            Types.declare_param var;
+            Hashtbl.replace ctx_type_params p.Ast.cp_name var;
+            p, var
+          | Some _ ->
+            fail span "Comptime value parameter '%s' is not supported yet." p.Ast.cp_name)
+        comptime
+    in
+    List.iter
+      (fun ((p : Ast.comptime_param), var) ->
+        match p.Ast.cp_ty with
+        | None -> ()
+        (* An annotation naming a declared trait is a bound on a type parameter;
+           anything else would be a value parameter. *)
+        | Some { Ast.it = Ast.Ty_name trait; _ } when Hashtbl.mem ctx_traits trait ->
+          Types.constrain
+            var
+            (Types.Bound [ { Types.bd_trait = trait; bd_args = []; bd_bindings = [] } ])
+        (* `T: TryFrom<S>` — the arguments are part of which impl the bound
+           reaches, so they are read here rather than dropped. A `Output = T`
+           among them says what that impl must have bound. *)
+        | Some { Ast.it = Ast.Ty_app (trait, args); _ } when Hashtbl.mem ctx_traits trait ->
+          let bindings, args =
+            List.partition_map
+              (fun (a : Ast.type_expr) ->
+                match a.Ast.it with
+                | Ast.Ty_bind (name, bound) -> Either.Left (name, bound)
+                | _ -> Either.Right a)
+              args
+          in
+          let bd_args = List.map infer_ty_of_annotation args
+          and bd_bindings = List.map (fun (m, b) -> m, infer_ty_of_annotation b) bindings in
+          (* `T: Add<T>` would put the parameter inside its own kind, which the
+             walkers that inspect a kind are not written to survive. *)
+          if List.exists
+               (fun t -> Types.repr t == Types.repr var)
+               (bd_args @ List.map snd bd_bindings)
+          then
+            fail
+              span
+              "A bound on '%s' cannot mention '%s' itself yet."
+              p.Ast.cp_name
+              p.Ast.cp_name;
+          Types.constrain
+            var
+            (Types.Bound [ { Types.bd_trait = trait; bd_args; bd_bindings } ])
+        | Some _ ->
+          fail span "Comptime value parameter '%s' is not supported yet." p.Ast.cp_name)
+      declared;
+    List.map (fun ((p : Ast.comptime_param), var) -> p.Ast.cp_name, var) declared)
 
 let annotated_or_fresh = function
   | Some t -> infer_ty_of_annotation t
@@ -980,7 +1011,11 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
        let bound_args =
          match Types.repr receiver.Ast.ann with
          | Types.IVar { contents = Types.Unbound (_, Types.Bound traits) } ->
-           Option.value (List.assoc_opt trait traits) ~default:[]
+           (match
+              List.find_opt (fun (b : Types.bound) -> String.equal b.Types.bd_trait trait) traits
+            with
+            | Some found -> found.Types.bd_args
+            | None -> [])
          | _ -> []
        in
        (* An associated name stands for whatever the impl bound it to, which is
@@ -2421,17 +2456,30 @@ let admits registry kind (t : Types.infer_ty) =
     (match Types.infer_type_name t with
      | Some name ->
        List.for_all
-         (fun (trait, args) ->
+         (fun (b : Types.bound) ->
            List.exists
              (fun declared ->
-               List.length declared = List.length args
+               List.length declared = List.length b.Types.bd_args
                &&
                try
-                 List.iter2 Types.unify args declared;
+                 List.iter2 Types.unify b.Types.bd_args declared;
                  true
                with
                | Types.Type_error _ -> false)
-             (Hashtbl.find_all ctx_impls (name, trait)))
+             (Hashtbl.find_all ctx_impls (name, b.Types.bd_trait))
+           (* `Add<T, Output = T>` — the impl reached has to have bound the
+              associated name to what the bound said it would. *)
+           && List.for_all
+                (fun (member, expected) ->
+                  match Hashtbl.find_opt ctx_assoc (name, member) with
+                  | None -> false
+                  | Some found ->
+                    (try
+                       Types.unify found expected;
+                       true
+                     with
+                     | Types.Type_error _ -> false))
+                b.Types.bd_bindings)
          traits
      | None -> false)
   | Types.Any -> true

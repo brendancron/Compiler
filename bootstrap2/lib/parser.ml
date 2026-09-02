@@ -18,6 +18,11 @@ type state =
 exception Parse_error
 
 let peek s = s.tokens.(s.current)
+
+let peek_at s ahead =
+  let at = s.current + ahead in
+  if at < Array.length s.tokens then s.tokens.(at) else s.tokens.(Array.length s.tokens - 1)
+
 let previous s = s.tokens.(s.current - 1)
 let is_at_end s = (peek s).Token.token_type = Token.Eof
 
@@ -110,7 +115,7 @@ let rec type_expr s : Ast.type_expr =
       if check s Token.Less
       then (
         ignore (advance s);
-        let args = comma_separated s type_expr in
+        let args = comma_separated s type_argument in
         ignore (consume s Token.Greater "Expected '>' after type arguments.");
         Ast.at sp (Ast.Ty_app (name, args)))
       else Ast.at sp (Ast.Ty_name name)
@@ -136,6 +141,18 @@ let rec type_expr s : Ast.type_expr =
       Ast.at sp (Ast.Ty_fn (items, type_expr s, row)))
     else Ast.at sp (Ast.Ty_tuple items)
   | _ -> raise (error s tok "Expected a type.")
+
+(* `Output = T` says what the impl a bound reaches must have bound; anything
+   else is an ordinary argument. *)
+and type_argument s : Ast.type_expr =
+  let tok = peek s in
+  match tok.Token.token_type, (peek_at s 1).Token.token_type with
+  | Token.Identifier bound, Token.Equal ->
+    let sp = Ast.span_of_token tok in
+    ignore (advance s);
+    ignore (advance s);
+    Ast.at sp (Ast.Ty_bind (bound, type_expr s))
+  | _ -> type_expr s
 
 and typed_field s =
   let label = consume_identifier s "Expected a field name." in
@@ -677,7 +694,7 @@ and type_arguments s : Ast.type_expr list =
   match matches s [ Token.Less ] with
   | None -> []
   | Some _ ->
-    let args = comma_separated s type_expr in
+    let args = comma_separated s type_argument in
     ignore (consume s Token.Greater "Expected '>' after type arguments.");
     args
 

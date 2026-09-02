@@ -63,6 +63,7 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
       | Ast.Ty_variadic t -> Ast.Ty_variadic (type_expr t)
       | Ast.Ty_name n -> Ast.Ty_name (named n)
       | Ast.Ty_assoc (owner, member) -> Ast.Ty_assoc (type_expr owner, member)
+      | Ast.Ty_bind (bound, t) -> Ast.Ty_bind (bound, type_expr t)
       | Ast.Ty_app (n, args) -> Ast.Ty_app (named n, List.map type_expr args)
       | Ast.Ty_tuple items -> Ast.Ty_tuple (List.map type_expr items)
       | Ast.Ty_record fields ->

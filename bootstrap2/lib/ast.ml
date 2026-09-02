@@ -60,6 +60,9 @@ and type_expr_kind =
   (* `T.Item`: the type an impl bound to the trait's associated name. Which
      impl is not known until the owner is, so this resolves late. *)
   | Ty_assoc of type_expr * string
+  (* `Output = T` inside a bound's arguments. It says what the impl the bound
+     reaches must have bound, rather than naming a type of its own. *)
+  | Ty_bind of string * type_expr
 
 type param =
   { name : string

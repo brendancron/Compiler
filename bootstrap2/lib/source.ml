@@ -32,6 +32,7 @@ let rec type_expr (t : Ast.type_expr) =
   match t.Ast.it with
   | Ast.Ty_name name -> name
   | Ast.Ty_assoc (owner, member) -> type_expr owner ^ "." ^ member
+  | Ast.Ty_bind (bound, t) -> bound ^ " = " ^ type_expr t
   | Ast.Ty_variadic inner -> "..." ^ type_expr inner
   | Ast.Ty_app (name, args) ->
     Printf.sprintf "%s<%s>" name (String.concat ", " (List.map type_expr args))
