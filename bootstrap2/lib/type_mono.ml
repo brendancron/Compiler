@@ -51,6 +51,12 @@ let rec type_directed_expr self (e : Ast.typed_expr) =
     List.exists (fun (_, v) -> type_directed_expr v) fields
   | `New_variant (_, _, payload) ->
     List.exists (fun (_, v) -> type_directed_expr v) (Ast.payload_fields payload)
+  | `Run_expr (body, _, clause) ->
+    Option.fold ~none:false ~some:type_directed_expr body.Ast.vb_value
+    || Option.fold
+         ~none:false
+         ~some:(fun c -> Option.fold ~none:false ~some:type_directed_expr c.Ast.rc_body.Ast.vb_value)
+         clause
   | #Ast.lit | `Var _ -> false
 
 and type_directed self (s : Ast.typed_stmt) =
@@ -102,6 +108,13 @@ let rec subst_expr mapping (e : Ast.typed_expr) : Ast.typed_expr =
     | #Ast.reflect as r -> (Ast.map_reflect (subst_expr mapping) r :> Ast.typed_expr_kind)
     | `Lambda (params, signature, body) ->
       `Lambda (params, signature, List.map (subst_stmt mapping) body)
+    | #Ast.run_expr as r ->
+      (Ast.map_run_expr
+         (subst_expr mapping)
+         (subst_stmt mapping)
+         (Ast.map_handler (subst_stmt mapping))
+         r
+       :> Ast.typed_expr_kind)
   in
   { e with Ast.it; ann = Types.subst_generic mapping e.Ast.ann }
 
@@ -210,6 +223,13 @@ let rec rewrite state (e : Ast.typed_expr) : Ast.typed_expr =
     | #Ast.collection as c ->
       (Ast.map_collection (rewrite state) c :> Ast.typed_expr_kind)
     | #Ast.reflect as r -> (Ast.map_reflect (rewrite state) r :> Ast.typed_expr_kind)
+    | #Ast.run_expr as r ->
+      (Ast.map_run_expr
+         (rewrite state)
+         (rewrite_stmt state)
+         (Ast.map_handler (rewrite_stmt state))
+         r
+       :> Ast.typed_expr_kind)
   in
   { e with Ast.it }
 

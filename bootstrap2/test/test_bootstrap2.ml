@@ -58,6 +58,11 @@ let cases =
   ; "tests/effects/recover/recover"
   ; "tests/effects/handler/handler"
   ; "tests/effects/stream/stream"
+  ; "tests/effects/run_value/value"
+  ; "tests/effects/run_value/return_clause"
+  ; "tests/effects/run_value/unit_body"
+  ; "tests/effects/run_value/arm_answers"
+  ; "tests/effects/run_value/two_in_one_expr"
   ; "tests/core/arrays/basics"
   ; "tests/core/arrays/identity"
   ; "tests/core/arrays/methods"
@@ -373,7 +378,8 @@ let expected_failing : (string * blocker) list =
     (* An unwind destroys any handler frame it passes, including a `ctl` arm
        with statements left after its `resume`. Delivering it through the
        continuation is the monadic-yield shape we depart from. *)
-  [ "tests/effects/abort_under_conversion", Waiting "an abort that spares an arm's sequel"
+  [ "tests/effects/return_from_arm", Waiting "a return in an arm leaving the enclosing function"
+  ; "tests/effects/abort_under_conversion", Waiting "an abort that spares an arm's sequel"
     (* Unplanned *)
     (* Parked — native compilation, deliberately out of scope *)
   ; "tests/compile/m0/m0", Parked

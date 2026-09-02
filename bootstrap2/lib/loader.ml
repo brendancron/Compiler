@@ -248,6 +248,13 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
       | #Ast.collection as c -> (Ast.map_collection go c :> Ast.expr_kind)
       | #Ast.comptime_call as c -> (Ast.map_comptime_call go c :> Ast.expr_kind)
       | #Ast.reflect as r -> (Ast.map_reflect go r :> Ast.expr_kind)
+      | #Ast.run_expr as r ->
+        let clause (c : Ast.stmt Ast.handler_clause) =
+          match c with
+          | Ast.Inline h -> Ast.Inline (Ast.map_handler (stmt locals) h)
+          | Ast.Named name -> Ast.Named name
+        in
+        (Ast.map_run_expr go (stmt locals) clause r :> Ast.expr_kind)
     in
     { e with Ast.it }
   and stmt locals (s : Ast.stmt) : Ast.stmt =

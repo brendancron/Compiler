@@ -138,6 +138,31 @@ let rec expr (e : Ast.expr) : string =
       (String.concat ", " (List.map param params))
       (signature sg)
       (String.concat " " (List.map (stmt 0) body))
+  | `Run_expr (body, handlers, clause) ->
+    Printf.sprintf
+      "run { %s }%s%s"
+      (valued_block body)
+      (String.concat
+         ""
+         (List.map
+            (function
+              | Ast.Named name -> Printf.sprintf " with %s;" name
+              | Ast.Inline h ->
+                Printf.sprintf
+                  " handle %s { %s}"
+                  h.Ast.handled
+                  (String.concat "" (List.map (arm 0) h.Ast.arms)))
+            handlers))
+      (match clause with
+       | None -> ""
+       | Some c ->
+         Printf.sprintf " return (%s) { %s }" c.Ast.rc_param (valued_block c.Ast.rc_body))
+
+and valued_block (b : (Ast.expr, Ast.stmt) Ast.valued_block) =
+  String.concat " " (List.map (stmt 0) b.Ast.vb_stmts)
+  ^ (match b.Ast.vb_value with
+     | None -> ""
+     | Some v -> expr v)
 
 and arguments items = String.concat ", " (List.map expr items)
 
@@ -158,6 +183,9 @@ and stmt depth (s : Ast.stmt) : string =
   let line = line depth in
   let braced head body = line (Printf.sprintf "%s {" head) ^ block (depth + 1) body ^ line "}" in
   match s.Ast.it with
+  (* Printed back as it was written, rather than as the expression it is. *)
+  | `Expr { Ast.it = `Run_expr (body, handlers, None); _ } when body.Ast.vb_value = None ->
+    line "run {" ^ block (depth + 1) body.Ast.vb_stmts ^ handlers_of depth handlers
   | `Expr e -> line (expr e ^ ";")
   | `Var_tuple (names, init) ->
     line (Printf.sprintf "var (%s) = %s;" (String.concat ", " names) (expr init))

@@ -1,0 +1,9 @@
+effect Ask { ctl ask(): int; }
+
+fn doubled() -> <Ask> int { return ask() * 2; }
+
+var total = run { doubled() } handle Ask {
+    ctl ask() { resume 21; }
+};
+
+print(total);

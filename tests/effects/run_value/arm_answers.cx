@@ -1,0 +1,15 @@
+// An arm that answers instead of resuming supplies the block's value directly.
+// The `return` clause is only for a body that runs to the end, so it is skipped.
+effect Yield { ctl yield(v: int): unit; }
+
+fn each() -> <Yield> unit {
+    yield(1);
+    yield(2);
+    yield(3);
+}
+
+var first = run { each() } handle Yield {
+    ctl yield(v) { return v; }
+} return (nothing) { 0 };
+
+print(first);

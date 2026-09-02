@@ -1,0 +1,22 @@
+// A `return` written inside an arm belongs to the function the arm is written
+// in, not to the arm. The handler is how the value gets out of the `run`.
+effect Yield { ctl yield(v: int): unit; }
+
+fn each() -> <Yield> unit {
+    yield(1);
+    yield(2);
+    yield(3);
+    print("UNREACHABLE");
+}
+
+fn first_even() -> int {
+    run { each(); } handle Yield {
+        ctl yield(v) {
+            if (v % 2 == 0) { return v; }
+            resume;
+        }
+    }
+    return 0;
+}
+
+print(first_even());

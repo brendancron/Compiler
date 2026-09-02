@@ -106,6 +106,9 @@ let rec subst_expr env (e : desugared_expr) : desugared_expr =
         , List.map (subst_expr env) args )
     | #method_call as m -> (map_method_call (subst_expr env) m :> desugared_expr_kind)
     | #reflect as r -> (map_reflect (subst_expr env) r :> desugared_expr_kind)
+    | #run_expr as r ->
+      (map_run_expr (subst_expr env) (subst_stmt env) (map_handler (subst_stmt env)) r
+       :> desugared_expr_kind)
   in
   { e with it }
 
@@ -230,6 +233,9 @@ let rec expr state (e : desugared_expr) : desugared_expr =
     | #collection as c -> (map_collection (expr state) c :> desugared_expr_kind)
     | #method_call as m -> (map_method_call (expr state) m :> desugared_expr_kind)
     | #reflect as r -> (map_reflect (expr state) r :> desugared_expr_kind)
+    | #run_expr as r ->
+      (map_run_expr (expr state) (stmt state) (map_handler (stmt state)) r
+       :> desugared_expr_kind)
   in
   { e with it }
 

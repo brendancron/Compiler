@@ -69,6 +69,7 @@ let rec expr (e : expr) : desugared_expr =
     | #comptime_call as c -> (map_comptime_call expr c :> desugared_expr_kind)
     | #method_call as m -> (map_method_call expr m :> desugared_expr_kind)
     | `Lambda (params, signature, body) -> `Lambda (params, signature, List.map stmt body)
+    | #run_expr as r -> (map_run_expr expr stmt (clause sp) r :> desugared_expr_kind)
     | #reflect as r -> (map_reflect expr r :> desugared_expr_kind)
     (* One arriving here stood where no meta program would have run it. *)
     | `Code _ ->

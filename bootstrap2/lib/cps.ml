@@ -336,7 +336,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
        let value =
          match value with
          | Some v -> v
-         | None -> { Ast.it = `Bool false; span; ann = Types.Unit }
+         | None -> { Ast.it = `Bool false; span; ann = Types.Bool }
        in
        (match extract info value with
         | Some (c, rebuild) -> sequence info span c (fun name ->

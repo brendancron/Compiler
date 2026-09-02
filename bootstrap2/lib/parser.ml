@@ -550,6 +550,9 @@ and primary s : Ast.expr =
   | Token.Identifier name ->
     ignore (advance s);
     Ast.at sp (`Var name)
+  | Token.Run ->
+    ignore (advance s);
+    run_expr s sp
   | Token.Typeof ->
     ignore (advance s);
     ignore (consume s Token.Left_paren "Expected '(' after 'typeof'.");
@@ -1200,9 +1203,7 @@ and handler s : Ast.stmt Ast.handler =
   ignore (consume s Token.Right_brace "Expected '}' after handler.");
   { Ast.handled; arms }
 
-and run_stmt s sp : Ast.stmt =
-  ignore (consume s Token.Left_brace "Expected '{' after 'run'.");
-  let body = block s in
+and handler_clauses s : Ast.stmt Ast.handler_clause list =
   let rec loop acc =
     match (peek s).Token.token_type with
     | Token.Handle ->
@@ -1216,9 +1217,58 @@ and run_stmt s sp : Ast.stmt =
   let handlers = loop [] in
   if handlers = []
   then ignore (error s (peek s) "Expected 'handle' or 'with' after a run block.");
+  handlers
+
+(* The same construct as one standing where a value is wanted, so an arm's
+   `return` means the same thing here; nothing reads the answer. *)
+and run_stmt s sp : Ast.stmt =
+  let it = run_expr s sp in
   (* `with` takes a terminator; `handle` closes with its own brace. *)
   ignore (matches s [ Token.Semicolon ]);
-  Ast.at sp (`Run (body, handlers))
+  Ast.at sp (`Expr it)
+
+(* The opening brace is already consumed. *)
+and valued_block s : (Ast.expr, Ast.stmt) Ast.valued_block =
+  let mark = s.current
+  and errors = s.errors in
+  let restore () =
+    s.current <- mark;
+    s.errors <- errors;
+    { Ast.vb_stmts = block s; vb_value = None }
+  in
+  match expression s with
+  | value when check s Token.Right_brace ->
+    ignore (advance s);
+    { Ast.vb_stmts = []; vb_value = Some value }
+  | _ -> restore ()
+  | exception Parse_error -> restore ()
+
+and run_expr s sp : Ast.expr =
+  ignore (consume s Token.Left_brace "Expected '{' after 'run'.");
+  let body = valued_block s in
+  let handlers = handler_clauses s in
+  (* The whole shape, or a `return` statement on the next line is eaten. *)
+  let is_clause =
+    check s Token.Return
+    && (peek_at s 1).Token.token_type = Token.Left_paren
+    && (match (peek_at s 2).Token.token_type with
+        | Token.Identifier _ -> true
+        | _ -> false)
+    && (peek_at s 3).Token.token_type = Token.Right_paren
+    && (peek_at s 4).Token.token_type = Token.Left_brace
+  in
+  let clause =
+    if not is_clause
+    then None
+    else (
+      ignore (advance s);
+      ignore (advance s);
+      let param = consume_identifier s "Expected a name for the block's value." in
+      ignore (advance s);
+      ignore (advance s);
+      Some { Ast.rc_param = param; rc_body = valued_block s })
+  in
+  Ast.at sp (`Run_expr (body, handlers, clause))
 
 and resume_stmt s sp : Ast.stmt =
   let value = if check s Token.Semicolon then None else Some (expression s) in

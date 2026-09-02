@@ -85,6 +85,16 @@ let rec string_of_expr (e : Ast.expr) : string =
   | `Code e -> Printf.sprintf "(code %s)" (string_of_expr e)
   | `Lambda (params, _, _) ->
     Printf.sprintf "(fn (%s) ...)" (String.concat " " (List.map string_of_param params))
+  | `Run_expr (_, handlers, _) ->
+    Printf.sprintf
+      "(run ...%s)"
+      (String.concat
+         ""
+         (List.map
+            (function
+              | Ast.Inline h -> " handle " ^ h.Ast.handled
+              | Ast.Named name -> " with " ^ name)
+            handlers))
   | `Name n -> n
   | `Collection_lit items ->
     Printf.sprintf "[%s]" (String.concat " " (List.map string_of_expr items))
@@ -264,6 +274,12 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
     | `Bytes b -> Printf.sprintf "(bytes %d)" (String.length b)
     | `Lambda (params, _, _) ->
       Printf.sprintf "(fn (%s) ...)" (String.concat " " (List.map string_of_param params))
+    | `Run_expr (_, handlers, _) ->
+      Printf.sprintf
+        "(run ...%s)"
+        (String.concat
+           ""
+           (List.map (fun (h : Ast.typed_stmt Ast.handler) -> " handle " ^ h.Ast.handled) handlers))
     | `Name n -> n
     | `Float n -> Token.float_to_string n
     | `Str s -> Printf.sprintf "%S" (Utf8.encode s)

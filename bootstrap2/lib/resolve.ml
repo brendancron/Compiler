@@ -69,6 +69,16 @@ let ordering_test (op : Ast.binop) =
 
 let ordering_result = Types.Sum ("Option", [ Types.Sum ("Ordering", []) ])
 
+(* Where a `run` in expression position leaves the statements it lowers to, for
+   the statement being resolved to splice in front of itself. *)
+let hoisted : Ast.resolved_stmt list ref = ref []
+
+let counter = ref 0
+
+let fresh () =
+  incr counter;
+  Ast.generated [ "answer"; string_of_int !counter ]
+
 let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
   let span = e.Ast.span
   and ann = e.Ast.ann in
@@ -202,6 +212,59 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
       (Ast.map_record (expr registry) r :> Ast.resolved_expr_kind)
     | `Lambda (params, signature, body) ->
       `Lambda (params, signature, List.concat_map (stmt registry) body)
+    | `Run_expr (body, handlers, clause) ->
+      let answer = fresh () in
+      let at (n : Ast.resolved_expr) it : Ast.resolved_stmt =
+        { Ast.it; span = n.Ast.span; ann = n.Ast.ann }
+      in
+      let answered (value : Ast.resolved_expr) =
+        [ at value (`Expr { value with Ast.it = `Assign (answer, value) }) ]
+      in
+      let body_stmts, body_value = valued registry body in
+      let tail =
+        match clause with
+        | None -> Option.fold ~none:[] ~some:answered body_value
+        | Some c ->
+          let stmts, value = valued registry c.Ast.rc_body in
+          [ { Ast.it =
+                `Block
+                  (({ Ast.it = `Var_decl (c.Ast.rc_param, None, body_value)
+                    ; span
+                    ; ann = Option.fold ~none:Types.Unit ~some:(fun v -> v.Ast.ann) body_value
+                    }
+                    :: stmts)
+                   @ Option.fold ~none:[] ~some:answered value)
+            ; span
+            ; ann
+            }
+          ]
+      in
+      let run : Ast.resolved_stmt =
+        { Ast.it =
+            `Run
+              ( body_stmts @ tail
+              , List.map
+                  (fun h ->
+                    let h = handler registry h in
+                    { h with
+                      Ast.arms =
+                        List.map
+                          (fun (a : Ast.resolved_stmt Ast.arm) ->
+                            match a.Ast.arm_kind with
+                            | Ast.Op_fn -> a
+                            | Ast.Op_ctl | Ast.Op_final ->
+                              { a with
+                                Ast.arm_body = List.map (answering answer) a.Ast.arm_body
+                              })
+                          h.Ast.arms
+                    })
+                  handlers )
+        ; span
+        ; ann
+        }
+      in
+      hoisted := run :: { Ast.it = `Var_decl (answer, None, None); span; ann } :: !hoisted;
+      `Var answer
     | #Ast.reflect as r ->
       (Ast.map_reflect (expr registry) r :> Ast.resolved_expr_kind)
   in
@@ -212,6 +275,43 @@ let rec expr registry (e : Ast.typed_expr) : Ast.resolved_expr =
     | _ -> ann
   in
   { Ast.it; span; ann }
+
+(* Whatever the value expression hoists belongs inside the block, in front of it. *)
+and valued registry (b : (Ast.typed_expr, Ast.typed_stmt) Ast.valued_block) =
+  let stmts = block registry b.Ast.vb_stmts in
+  match b.Ast.vb_value with
+  | None -> stmts, None
+  | Some v ->
+    let saved = !hoisted in
+    hoisted := [];
+    let v = expr registry v in
+    let before = List.rev !hoisted in
+    hoisted := saved;
+    stmts @ before, Some v
+
+(* A `return` in an arm is the answer for the whole block. A nested function's
+   is its own, and a nested `run`'s arms already answered for theirs. *)
+and answering answer (s : Ast.resolved_stmt) : Ast.resolved_stmt =
+  let same it = { s with Ast.it = it } in
+  let inner = answering answer in
+  match s.Ast.it with
+  | `Return (Some v) ->
+    same
+      (`Block
+        [ { Ast.it = `Expr { v with Ast.it = `Assign (answer, v) }
+          ; span = v.Ast.span
+          ; ann = v.Ast.ann
+          }
+        ; same (`Return None)
+        ])
+  | `Block body -> same (`Block (List.map inner body))
+  | `If (cond, t, e) -> same (`If (cond, inner t, Option.map inner e))
+  | `While (cond, body) -> same (`While (cond, inner body))
+  | `Defer body -> same (`Defer (inner body))
+  | `Match (scrutinee, cases) ->
+    same (`Match (scrutinee, List.map (fun (p, body) -> p, List.map inner body) cases))
+  | `Run (body, handlers) -> same (`Run (List.map inner body, handlers))
+  | _ -> s
 
 and fn_ref span name args result : Ast.resolved_expr =
   { Ast.it = `Var name
@@ -224,16 +324,32 @@ and fn_ref span name args result : Ast.resolved_expr =
   }
 
 and stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =
+  let saved = !hoisted in
+  hoisted := [];
+  let produced = stmt_of registry s in
+  let before = List.rev !hoisted in
+  hoisted := saved;
+  before @ produced
+
+(* Every statement list here goes through [block], never [one]: wrapping a
+   declaration in a block would scope its name away from what follows. *)
+and stmt_of registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =
   let span = s.Ast.span
   and ann = s.Ast.ann in
   let node it : Ast.resolved_stmt = { Ast.it; span; ann } in
   match s.Ast.it with
+  (* Its answer goes nowhere, so it needs no name to go by. *)
+  | `Expr ({ Ast.it = `Run_expr _; _ } as inner) ->
+    ignore (expr registry inner);
+    []
   (* [`Block] and [`Fn] hold statement lists, where an expansion can land. *)
   | `Block body -> [ node (`Block (block registry body)) ]
   | `Fn (name, params, signature, body) ->
     [ node (`Fn (name, params, signature, block registry body)) ]
   | #Ast.stmts as st ->
     [ node (Ast.map_stmts (expr registry) (one registry) st :> Ast.resolved_stmt_kind) ]
+  | `Run (body, handlers) ->
+    [ node (`Run (block registry body, List.map (handler registry) handlers)) ]
   | #Ast.effects as e ->
     [ node
         (Ast.map_effects (expr registry) (one registry) (Ast.map_handler (one registry)) e
@@ -255,8 +371,25 @@ and stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =
       impl.Ast.ib_methods
   | `Trait_decl _ -> []
   | #Ast.type_defs as t -> [ node t ]
-  | #Ast.matching as m ->
-    [ node (Ast.map_matching (expr registry) (one registry) m :> Ast.resolved_stmt_kind) ]
+  | `Match (scrutinee, cases) ->
+    [ node
+        (`Match
+          ( expr registry scrutinee
+          , List.map (fun (pattern, body) -> pattern, block registry body) cases ))
+    ]
+
+and handler registry (h : Ast.typed_stmt Ast.handler) : Ast.resolved_stmt Ast.handler =
+  { Ast.handled = h.Ast.handled
+  ; arms =
+      List.map
+        (fun (a : Ast.typed_stmt Ast.arm) ->
+          { Ast.arm_name = a.Ast.arm_name
+          ; arm_kind = a.Ast.arm_kind
+          ; arm_params = a.Ast.arm_params
+          ; arm_body = block registry a.Ast.arm_body
+          })
+        h.Ast.arms
+  }
 
 and block registry body = List.concat_map (stmt registry) body
 
