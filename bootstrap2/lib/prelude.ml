@@ -487,17 +487,22 @@ impl Index<Range> for string {
 (* Not a path: a diagnostic pointing at a file the user does not have would be
    worse than one that says where it came from. *)
 let file = "<prelude>"
+let source_file = Source_map.File.create ~path:file ~text:source
 
 (* Asked for once per meta block and call site rather than once per program.
    Sharing one tree is safe because nothing after this mutates it. *)
 let parsed =
   lazy
-    (match Scanner.scan_tokens ~file source with
+    (match Scanner.scan_tokens source_file with
   | Error _ -> failwith "the prelude does not scan"
   | Ok tokens ->
     (match Parser.parse tokens with
      | Error (e :: _) ->
-       failwith (Printf.sprintf "the prelude does not parse [%d:%d] %s" e.Parser.line e.Parser.col e.Parser.message)
+       failwith
+         (Printf.sprintf
+            "the prelude does not parse %s %s"
+            (Ast.locate ~entry:file e.Parser.span)
+            e.Parser.message)
      | Error [] -> failwith "the prelude does not parse"
      | Ok program -> program))
 

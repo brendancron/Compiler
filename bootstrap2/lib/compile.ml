@@ -24,7 +24,7 @@ let program ?(on_types = fun _ -> ()) (source : Ast.program)
     match Typecheck.check ~registry desugared with
     | Ok typed -> Ok typed
     | Error [] ->
-      Diagnostic.one Diagnostic.Type { Ast.file = ""; line = 1; col = 1 } "This does not check."
+      Diagnostic.one Diagnostic.Type Source_map.Span.nowhere "This does not check."
     | Error errors ->
       Error
         (List.map

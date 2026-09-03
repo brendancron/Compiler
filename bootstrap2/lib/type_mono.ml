@@ -334,7 +334,7 @@ let program ~registry (p : Ast.typed_stmt list) : Ast.typed_stmt list =
         let span =
           match Option.bind deepest (Hashtbl.find_opt state.generic) with
           | Some (d : Ast.typed_stmt) -> d.Ast.span
-          | None -> { Ast.file = ""; line = 1; col = 1 }
+          | None -> Source_map.Span.nowhere
         in
         raise
           (Diverged

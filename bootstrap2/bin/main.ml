@@ -64,20 +64,13 @@ let parse_args argv =
     ; dump_code = !dump_code
     }
 
-let read_file path =
-  match open_in_bin path with
-  | exception Sys_error message -> die message
-  | ic -> Fun.protect ~finally:(fun () -> close_in ic) (fun () -> really_input_string ic (in_channel_length ic))
-
-let report ~entry (e : Diagnostic.error) =
-  Printf.eprintf
-    "%s %s error: %s\n"
-    (Ast.locate ~entry e.Diagnostic.span)
-    (Diagnostic.stage_name e.Diagnostic.stage)
-    e.Diagnostic.message
+let read_source path =
+  match Source_map.File.load path with
+  | Ok file -> file
+  | Error message -> die message
 
 let die_at ~entry errors =
-  List.iter (report ~entry) errors;
+  Render.emit ~entry errors;
   match errors with
   | [] -> exit 70
   | e :: _ -> exit (Diagnostic.exit_code e.Diagnostic.stage)
@@ -85,23 +78,21 @@ let die_at ~entry errors =
 (* [Loader] scans and parses the entry file again. It happens here first so that
    a mistake in the file the user named is reported as a scan or a parse error
    rather than as a failure to load a module. *)
-let dump_front ~entry opts source =
+let dump_front ~entry opts file =
+  let source = Source_map.File.text file in
   if opts.dump_source
   then (
     print_endline "-- source --";
     print_string source;
     if not (String.length source > 0 && source.[String.length source - 1] = '\n')
     then print_newline ());
-  let located stage (file, line, col) message =
-    Diagnostic.at stage { Ast.file; line; col } message
-  in
-  match Scanner.scan_tokens source with
+  match Scanner.scan_tokens file with
   | Error errors ->
     die_at
       ~entry
       (List.map
          (fun (e : Scanner.error) ->
-           located Diagnostic.Scan (e.file, e.line, e.col) e.message)
+           Diagnostic.at Diagnostic.Scan e.Scanner.span e.Scanner.message)
          errors)
   | Ok tokens ->
     if opts.dump_tokens
@@ -114,7 +105,7 @@ let dump_front ~entry opts source =
          ~entry
          (List.map
             (fun (e : Parser.error) ->
-              located Diagnostic.Parse (e.file, e.line, e.col) e.message)
+              Diagnostic.at Diagnostic.Parse e.Parser.span e.Parser.message)
             errors)
      | Ok program ->
        if opts.dump_ast
@@ -125,7 +116,7 @@ let dump_front ~entry opts source =
 let () =
   let opts = parse_args Sys.argv in
   let entry = opts.path in
-  dump_front ~entry opts (read_file entry);
+  dump_front ~entry opts (read_source entry);
   let on_code processed =
     if opts.dump_code
     then (

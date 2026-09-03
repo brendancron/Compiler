@@ -300,7 +300,7 @@ let emit_into { table; current; _ } span args =
    `code` calls. *)
 let run ~out ~codes ~emit ~capture (program : Ast.program) =
   match Compile.program program with
-  | Error [] -> fail { Ast.file = ""; line = 1; col = 1 } "The meta block does not check."
+  | Error [] -> fail Source_map.Span.nowhere "The meta block does not check."
   | Error (e :: _) -> fail e.Diagnostic.span "%s" e.Diagnostic.message
   | Ok converted ->
     let env = Builtins.env ~out in

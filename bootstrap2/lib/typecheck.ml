@@ -1427,7 +1427,9 @@ and declare_traits (body : Ast.desugared_stmt list) =
       | `Trait_decl (name, params, trait_body) ->
         (* A program's own declaration replaces the prelude's; two of its own
            are still a mistake. *)
-        let from_prelude (span : Ast.span) = String.equal span.Ast.file Prelude.file in
+        let from_prelude (span : Ast.span) =
+          String.equal (Source_map.Span.path span) Prelude.file
+        in
         (match Hashtbl.find_opt ctx_trait_spans name with
          | Some declared when from_prelude declared && not (from_prelude s.Ast.span) -> ()
          | Some _ -> fail s.Ast.span "Trait '%s' is already declared." name
@@ -1681,7 +1683,9 @@ and declare_types (body : Ast.desugared_stmt list) =
       | `Type_decl (name, params, body) ->
         (* A program declaring a type the prelude also declares gets its own,
            the way it does for a trait. Two of its own are still a mistake. *)
-        let from_prelude (at : Ast.span) = String.equal at.Ast.file Prelude.file in
+        let from_prelude (at : Ast.span) =
+          String.equal (Source_map.Span.path at) Prelude.file
+        in
         (match Hashtbl.find_opt ctx_type_spans name with
          | Some declared when from_prelude declared && not (from_prelude s.Ast.span) -> ()
          | Some _ -> fail s.Ast.span "Type '%s' is already declared." name
@@ -2604,7 +2608,7 @@ let check ~registry (program : Ast.desugared_stmt list)
     match Types.resolve_row ctx.row with
     | [] -> !errors
     | labels ->
-      { span = { Ast.file = ""; line = 1; col = 1 }
+      { span = Source_map.Span.nowhere
       ; message =
           Printf.sprintf
             "Unhandled effect(s): %s."
