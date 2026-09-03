@@ -107,6 +107,12 @@ let fn_decl span name params body =
       , { Ast.ret = None; row = None; comptime = [] }
       , body ))
 
+let cont_decl span name params body =
+  node
+    span
+    (`Cont
+      (name, List.map (fun p -> { Ast.name = p; ty = None; implicit = false }) params, body))
+
 (* ---- tail-resumptive detection ---- *)
 
 let rec count pick (body : Ast.reflected_stmt list) =
@@ -496,7 +502,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
           let tmp = fresh "v" in
           let body = build tmp in
           let next = fresh "k" in
-          fn_decl span next [ !bound ] (delimited span body) :: invoke info span next c
+          cont_decl span next [ !bound ] (delimited span body) :: invoke info span next c
         | None -> unsupported span "This effect cannot be sequenced yet.")
      | `If (cond, then_branch, else_branch) when suspends_stmt info s || holds_return s ->
        let join = fresh "join" in
@@ -526,7 +532,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
             ])
      | `Block body when suspends_stmt info s || holds_return s ->
        let next = fresh "k" in
-       [ fn_decl span next [ fresh "x" ] (delimited span (cps info ret k ~at:span rest))
+       [ cont_decl span next [ fresh "x" ] (delimited span (cps info ret k ~at:span rest))
        ; node span (`Block (cps info ret next ~at:span body))
        ]
      (* The body's "what runs next" is the loop itself, so resuming carries
@@ -582,7 +588,7 @@ and controlled_by info span (cond : Ast.reflected_expr) build =
 and sequence info span c build =
   let name = fresh "v" in
   let next = fresh "k" in
-  fn_decl span next [ name ] (delimited span (build name)) :: invoke info span next c
+  cont_decl span next [ name ] (delimited span (build name)) :: invoke info span next c
 
 and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
   match c.Ast.it with

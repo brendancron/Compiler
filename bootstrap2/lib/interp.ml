@@ -183,10 +183,9 @@ and under missing k =
        List.iter (exec senv) on_abort;
        Unit)
 
-and closure env name params body =
+and closure ?(is_continuation = false) env name params body =
   let names = List.map (fun (p : Ast.param) -> p.Ast.name) params in
   let captured = !active_scopes in
-  let is_continuation = Ast.is_continuation_name name in
   Fn
     { name
     ; arity = Some (List.length names)
@@ -255,7 +254,7 @@ and run_block env body =
   List.iter
     (fun (s : Ast.cps_stmt) ->
       match s.Ast.it with
-      | `Fn _ -> exec env s
+      | `Fn _ | `Cont _ -> exec env s
       | _ -> ())
     body;
   let deferred = ref [] in
@@ -265,7 +264,7 @@ and run_block env body =
     | { Ast.it = `Defer inner; _ } :: rest ->
       deferred := (env, inner) :: !deferred;
       walk rest
-    | { Ast.it = `Fn _; _ } :: rest -> walk rest
+    | { Ast.it = `Fn _ | `Cont _; _ } :: rest -> walk rest
     | s :: rest ->
       exec env s;
       walk rest
@@ -327,6 +326,8 @@ and exec env (s : Ast.cps_stmt) : unit =
   (* The closure captures the table the name lands in, so recursion works
      without a separate binding step. *)
   | `Fn (name, params, _, body) -> define env name (closure env name params body)
+  | `Cont (name, params, body) ->
+    define env name (closure ~is_continuation:true env name params body)
   | `Return e ->
     let v =
       match e with

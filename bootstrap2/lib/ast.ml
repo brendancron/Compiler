@@ -497,6 +497,10 @@ and cps_stmt_kind =
   [ (cps_expr, cps_stmt) stmts
   | (cps_expr, cps_stmt) matching
   | cps_stmt aborts
+  (* A function holding the rest of a computation. Apart from `Fn` because
+     invoking one is being inside the scopes it was captured under again, even
+     where those are still entered, which is true of nothing else. *)
+  | `Cont of string * param list * cps_stmt list
   ]
 
 let map_vars (f : 'a -> 'b) (e : 'a vars) : 'b vars =
@@ -551,15 +555,6 @@ let map_nominal (f : 'a -> 'b) (e : 'a nominal) : 'b nominal =
 
 (* `#` is in no identifier the scanner can produce. Two parts or more, or the
    separator would not appear. *)
-(* [Cps] names every continuation it builds with this, and [Interp] has to tell
-   one from an ordinary closure: only a continuation re-enters scopes that are
-   still live. *)
-let continuation_prefix = "k"
-
-let is_continuation_name name =
-  String.length name > String.length continuation_prefix
-  && String.starts_with ~prefix:(continuation_prefix ^ "#") name
-
 let generated parts =
   match parts with
   | [] | [ _ ] -> invalid_arg "Ast.generated: a generated name needs two parts"
