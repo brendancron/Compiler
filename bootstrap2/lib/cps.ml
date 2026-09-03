@@ -344,12 +344,6 @@ and extract_list info items rebuild =
   in
   loop [] items
 
-(* Scopes entered on the way to the statement being converted, innermost first.
-   A continuation is the rest of a computation that was inside them, so invoking
-   one has to be inside them again — and structurally, where the scope covered
-   what it covered, rather than around the whole body. *)
-let open_scopes : (string * Ast.cps_stmt list) list ref = ref []
-
 (* Deferred statements armed on the way here. Leaving disarms them, so a pass
    that resumes past one would find nothing armed and release nothing. *)
 let open_defers : string list ref = ref []
@@ -377,10 +371,7 @@ let delimited span body =
       (armed @ body)
       !open_unwinds
   in
-  List.fold_left
-    (fun acc (scope, on_abort) -> [ node span (`Scope (scope, acc, on_abort)) ])
-    guarded
-    !open_scopes
+  guarded
 
 (* ---- continuation-passing form ---- *)
 
@@ -570,16 +561,9 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
        let scope = fresh "scope" in
        (* An abort skipped the body's own continuation. *)
        let on_abort = [ call span after [ ignored span ] ] in
-       let outer = !open_scopes in
-       let converted =
-         open_scopes := (scope, on_abort) :: outer;
-         Fun.protect
-           ~finally:(fun () -> open_scopes := outer)
-           (fun () -> cps info ret after ~at:span body)
-       in
        fn_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
        :: (direct_arms info span ~scope handlers
-           @ [ node span (`Scope (scope, converted, on_abort)) ])
+           @ [ node span (`Scope (scope, cps info ret after ~at:span body, on_abort)) ])
      | _ ->
        (match stmt info s with
         | Some s -> s :: cps info ret k ~at:span rest
