@@ -175,7 +175,7 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
       then
         unsupported
           e.Ast.span
-          "A function value cannot perform an effect whose handler resumes yet."
+          "A function value cannot perform an effect whose handler needs a continuation yet."
       else (
         let evidence =
           evidence_of_row info row
@@ -354,7 +354,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
             unsupported
               span
               "A 'return' out of a 'run' block is not supported yet when its \
-               handler resumes."
+               handler needs a continuation."
           else [ call span ret [ expr info value ] ])
      (* The arm keeps running afterwards: multi-shot falls out. *)
      | `Resume value ->
@@ -608,7 +608,7 @@ and stmt info (s : Ast.reflected_stmt) : Ast.cps_stmt option =
   | `Run (body, handlers) when not (handlers_are_tail_resumptive handlers) ->
     unsupported
       s.Ast.span
-      "A 'run' whose handler resumes is not supported yet in this position."
+      "A 'run' whose handler needs a continuation is not supported yet in this position."
   | `Run (body, handlers) ->
     let scope = fresh "scope" in
     keep

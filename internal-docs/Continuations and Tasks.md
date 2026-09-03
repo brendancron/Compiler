@@ -44,7 +44,7 @@ The shape that does not work is the one that puts tasks and continuations in the
 
 ## What is still not expressible
 
-Spawning an arbitrary task. `start` above is fixed to `counter`; handing it a computation chosen by the caller means passing a value whose row contains an effect needing a continuation, which `Cps` refuses at the lambda case with *"a function value cannot perform an effect whose handler resumes yet"*.
+Spawning an arbitrary task. `start` above is fixed to `counter`; handing it a computation chosen by the caller means passing a value whose row contains an effect needing a continuation, which `Cps` refuses at the lambda case with *"a function value cannot perform an effect whose handler needs a continuation yet"*.
 
 Nothing in the suite waits on this. It is worth writing down only because it looks like the same problem as the scheduler and is not.
 
@@ -53,7 +53,3 @@ Supporting it means making a closure carry what a converted named function alrea
 A closure has no name and travels, so its type is the only record of its arity. `widen` would have to describe the continuation before a lambda could be converted at all, and that changes the type of every delimited named function, so it wants the suite run on it alone before anything is built on top.
 
 One trap if that is ever attempted: `continuation` is a single generated constant, so a conversion nested inside another shadows it. A closure written inside a `ctl` arm has a continuation of its own while the `resume` it captures belongs to the arm. With one name the capture binds to the wrong one, and the result is a wrong program rather than an error.
-
-## A message that says the wrong thing
-
-The refusal reads *"an effect whose handler resumes"*, but a plain `ctl` arm that never resumes delimits its effect just as much — only `final ctl` and `fn` arms need no continuation. A handler that only aborts triggers this message while doing the opposite of what it describes.
