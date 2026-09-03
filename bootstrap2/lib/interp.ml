@@ -183,7 +183,10 @@ and under missing k =
        List.iter (exec senv) on_abort;
        Unit)
 
-and closure ?(is_continuation = false) env name params body =
+(* [returns] is false for a function the CPS pass cut out of another: a
+   `return` reaching it belongs to the source function it came from, so it is
+   let through rather than answered here. *)
+and closure ?(is_continuation = false) ?(returns = true) env name params body =
   let names = List.map (fun (p : Ast.param) -> p.Ast.name) params in
   let captured = !active_scopes in
   Fn
@@ -222,7 +225,7 @@ and closure ?(is_continuation = false) env name params body =
                     run_block frame body;
                     Unit
                   with
-                  | Return_value (v, _) -> v)))
+                  | Return_value (v, _) when returns -> v)))
     }
 
 and eval_all env = function
@@ -254,7 +257,7 @@ and run_block env body =
   List.iter
     (fun (s : Ast.cps_stmt) ->
       match s.Ast.it with
-      | `Fn _ | `Cont _ -> exec env s
+      | `Fn _ | `Cont _ | `Frame _ -> exec env s
       | _ -> ())
     body;
   let deferred = ref [] in
@@ -264,7 +267,7 @@ and run_block env body =
     | { Ast.it = `Defer inner; _ } :: rest ->
       deferred := (env, inner) :: !deferred;
       walk rest
-    | { Ast.it = `Fn _ | `Cont _; _ } :: rest -> walk rest
+    | { Ast.it = `Fn _ | `Cont _ | `Frame _; _ } :: rest -> walk rest
     | s :: rest ->
       exec env s;
       walk rest
@@ -327,7 +330,9 @@ and exec env (s : Ast.cps_stmt) : unit =
      without a separate binding step. *)
   | `Fn (name, params, _, body) -> define env name (closure env name params body)
   | `Cont (name, params, body) ->
-    define env name (closure ~is_continuation:true env name params body)
+    define env name (closure ~is_continuation:true ~returns:false env name params body)
+  | `Frame (name, params, body) ->
+    define env name (closure ~returns:false env name params body)
   | `Return e ->
     let v =
       match e with

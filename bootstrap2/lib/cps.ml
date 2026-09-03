@@ -20,9 +20,9 @@ type effects =
 
 let evidence_name op = Ast.generated [ "ev"; op ]
 
-(* Returning out of one travels back through the handler that resumed into it,
-   which only a continuation can do — and handling the effect discharged the
-   enclosing function's row. *)
+(* Converted code whose enclosing function was left unconverted, because
+   handling the effect discharged its row. A `return` there has no continuation
+   to call and leaves the frames the pass made instead. *)
 let no_return = Ast.generated [ "cps"; "no-return" ]
 let continuation = Ast.generated [ "cps"; "k" ]
 let counter = ref 0
@@ -98,7 +98,19 @@ let call ?(result = Types.Unit) span callee args =
     span
     (`Expr { Ast.it = `Call (var span callee_ty callee, args); span; ann = result })
 
-let fn_decl span name params body =
+(* The pass's own functions: pieces of a converted body, not functions the
+   source wrote. *)
+let frame_decl span name params body =
+  node
+    span
+    (`Frame
+      ( name
+      , List.map (fun p -> { Ast.name = p; ty = None; implicit = false }) params
+      , body ))
+
+(* An arm reached without a continuation is an ordinary function, and a
+   `return` written in it returns from the arm. *)
+let arm_decl span name params body =
   node
     span
     (`Fn
@@ -287,14 +299,30 @@ let rec suspends_stmt info (s : Ast.reflected_stmt) =
   | `Defer inner -> suspends_stmt info inner
   | _ -> false
 
-let rec extract info (e : Ast.reflected_expr)
+(* A call whose own arguments are already settled, so the operation it performs
+   is the next thing that happens. *)
+let ready_call info (e : Ast.reflected_expr) =
+  match e.Ast.it with
+  | `Call (_, args) -> suspends info e && not (List.exists (suspends info) args)
+  | _ -> false
+
+let suspending_logic info (e : Ast.reflected_expr) =
+  match e.Ast.it with
+  | `And _ | `Or _ -> suspends info e
+  | _ -> false
+
+(* [select] names the subexpression to pull out; everything before it in
+   evaluation order stays where it is. *)
+let rec extract_with select info (e : Ast.reflected_expr)
   : (Ast.reflected_expr * (string -> Ast.reflected_expr)) option
   =
   let rebuild it : Ast.reflected_expr = { e with Ast.it = it } in
+  let extract_list = extract_list select in
+  let extract info = extract_with select info in
   match e.Ast.it with
-  | #Ast.lit | `Var _ | `Lambda _ -> None
-  | `Call (_, args) when suspends info e && not (List.exists (suspends info) args) ->
+  | _ when select info e ->
     Some (e, fun name -> { Ast.it = `Var name; span = e.Ast.span; ann = e.Ast.ann })
+  | #Ast.lit | `Var _ | `Lambda _ -> None
   | `Call (callee, args) -> extract_list info args (fun args -> rebuild (`Call (callee, args)))
   | `Tuple items -> extract_list info items (fun items -> rebuild (`Tuple items))
   | `Array_lit items -> extract_list info items (fun items -> rebuild (`Array_lit items))
@@ -322,10 +350,14 @@ let rec extract info (e : Ast.reflected_expr)
     extract info t |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Tuple_get (f n, i)))
   | `Field (t, label) ->
     extract info t |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Field (f n, label)))
-  | `Record_lit _ | `Field_assign _ | `Variant _ ->
-    if suspends info e
-    then unsupported e.Ast.span "An effect inside a record is not supported yet."
-    else None
+  | `Record_lit fields ->
+    extract_fields select info fields (fun fields -> rebuild (`Record_lit fields))
+  | `Variant (name, fields) ->
+    extract_fields select info fields (fun fields -> rebuild (`Variant (name, fields)))
+  | `Field_assign (target, label, v) ->
+    extract_list info [ target; v ] (function
+      | [ target; v ] -> rebuild (`Field_assign (target, label, v))
+      | _ -> assert false)
   | `Assign (name, v) ->
     extract info v |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Assign (name, f n)))
   | `Unop (op, v) ->
@@ -334,21 +366,53 @@ let rec extract info (e : Ast.reflected_expr)
     extract_list info [ a; b ] (function
       | [ a; b ] -> rebuild (`Binop (op, a, b))
       | _ -> assert false)
-  (* Hoisting out of `and`/`or` would evaluate the right side unconditionally. *)
-  | `And (a, b) | `Or (a, b) ->
-    if suspends info a || suspends info b
-    then unsupported e.Ast.span "An effect inside 'and'/'or' is not supported yet."
-    else None
+  (* Only the left operand is reached unconditionally, so only it can be
+     hoisted; a suspension on the right is split into an `if` first. *)
+  | `And (a, b) ->
+    extract info a |> Option.map (fun (c, f) -> c, fun n -> rebuild (`And (f n, b)))
+  | `Or (a, b) ->
+    extract info a |> Option.map (fun (c, f) -> c, fun n -> rebuild (`Or (f n, b)))
 
-and extract_list info items rebuild =
+and extract_list select info items rebuild =
   let rec loop before = function
     | [] -> None
     | item :: after ->
-      (match extract info item with
+      (match extract_with select info item with
        | Some (c, f) -> Some (c, fun name -> rebuild (List.rev before @ [ f name ] @ after))
        | None -> loop (item :: before) after)
   in
   loop [] items
+
+and extract_fields select info fields rebuild =
+  extract_list select info (List.map snd fields) (fun values ->
+    rebuild (List.map2 (fun (label, _) v -> label, v) fields values))
+
+let extract info = extract_with ready_call info
+let extract_logic info = extract_with suspending_logic info
+
+(* The expression a statement evaluates first. A control statement is missing
+   here on purpose: its condition already reaches [controlled_by], which is
+   where it is evaluated once per iteration rather than once. *)
+let leading_expr (s : Ast.reflected_stmt)
+  : (Ast.reflected_expr * (Ast.reflected_expr -> Ast.reflected_stmt_kind)) option
+  =
+  match s.Ast.it with
+  | `Expr e -> Some (e, fun e -> `Expr e)
+  | `Var_decl (name, ty, Some e) -> Some (e, fun e -> `Var_decl (name, ty, Some e))
+  | `Return (Some e) -> Some (e, fun e -> `Return (Some e))
+  | _ -> None
+
+(* The `and`/`or` a statement evaluates first, paired with the statement put
+   back together around the answer it produced. *)
+let leading_logic info (s : Ast.reflected_stmt) =
+  match leading_expr s with
+  | None -> None
+  | Some (e, rebuild_stmt) ->
+    extract_logic info e
+    |> Option.map (fun (logic, rebuild_expr) ->
+      logic, fun held -> { s with Ast.it = rebuild_stmt (rebuild_expr held) })
+
+let splits_logic info s = Option.is_some (leading_logic info s)
 
 (* Deferred statements armed on the way here. Leaving disarms them, so a pass
    that resumes past one would find nothing armed and release nothing. *)
@@ -387,6 +451,9 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
   match stmts with
   (* Reported against the construct that held them rather than nowhere. *)
   | [] -> [ call at k [ ignored at ] ]
+  | s :: rest when splits_logic info s ->
+    let logic, rebuilt = Option.get (leading_logic info s) in
+    split_logic info s.Ast.span logic (fun held -> cps info ret k ~at (rebuilt held :: rest))
   | s :: rest ->
     let span = s.Ast.span in
     (match s.Ast.it with
@@ -400,12 +467,11 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
         | Some (c, rebuild) -> sequence info span c (fun name ->
             cps info ret k ~at:span [ { s with Ast.it = `Return (Some (rebuild name)) } ])
         | None ->
+          (* No continuation to hand it to: the enclosing function was left
+             unconverted because handling the effect discharged its row. The
+             statement leaves every frame between here and it. *)
           if String.equal ret no_return
-          then
-            unsupported
-              span
-              "A 'return' out of a 'run' block is not supported yet when its \
-               handler needs a continuation."
+          then [ node span (`Return (Some (expr info value))) ]
           else [ call span ret [ expr info value ] ])
      (* The arm keeps running afterwards: multi-shot falls out. *)
      | `Resume value ->
@@ -434,16 +500,17 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
          then Option.to_list (stmt info inner) @ [ call span finish [ handed ] ]
          else (
            let after = fresh "resumed" in
-           fn_decl span after [ fresh "x" ] [ call span finish [ handed ] ]
+           frame_decl span after [ fresh "x" ] [ call span finish [ handed ] ]
            :: cps info no_return after ~at:span [ inner ])
        in
        let wrapper finish =
          let name = fresh "leave" in
          let value = fresh "x" in
-         name, fn_decl span name [ value ] (disarm :: leaving finish (var span Types.Unit value))
+         name, frame_decl span name [ value ] (disarm :: leaving finish (var span Types.Unit value))
        in
        let ret', wrapped_ret =
-         (* Nothing to wrap: a `return` here is already rejected. *)
+         (* Nothing to wrap: a `return` there is a statement, and the unwind it
+            raises passes through the cleanup below. *)
          if String.equal ret no_return
          then no_return, []
          else (
@@ -507,7 +574,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
      | `If (cond, then_branch, else_branch) when suspends_stmt info s || holds_return s ->
        let join = fresh "join" in
        let branch b = node span (`Block (cps info ret join ~at:span [ b ])) in
-       fn_decl span join [ fresh "x" ] (cps info ret k ~at:span rest)
+       frame_decl span join [ fresh "x" ] (cps info ret k ~at:span rest)
        :: controlled_by info span cond (fun cond ->
             [ node
                 span
@@ -522,7 +589,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
             ])
      | `Match (scrutinee, cases) when suspends_stmt info s || holds_return s ->
        let join = fresh "join" in
-       fn_decl span join [ fresh "x" ] (cps info ret k ~at:span rest)
+       frame_decl span join [ fresh "x" ] (cps info ret k ~at:span rest)
        :: controlled_by info span scrutinee (fun scrutinee ->
             [ node
                 span
@@ -540,10 +607,10 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
      | `While (cond, body) when suspends_stmt info s ->
        let again = fresh "loop"
        and after = fresh "after" in
-       [ fn_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
+       [ frame_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
        ; (* Once per iteration, so extracting it goes inside the continuation
             the loop re-enters. *)
-         fn_decl
+         frame_decl
            span
            again
            [ fresh "x" ]
@@ -567,7 +634,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
        let scope = fresh "scope" in
        (* An abort skipped the body's own continuation. *)
        let on_abort = [ call span after [ ignored span ] ] in
-       fn_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
+       frame_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
        :: (direct_arms info span ~scope handlers
            @ [ node span (`Scope (scope, cps info ret after ~at:span body, on_abort)) ])
      | _ ->
@@ -580,10 +647,45 @@ and controlled_by info span (cond : Ast.reflected_expr) build =
   if not (suspends info cond)
   then build (expr info cond)
   else (
-    match extract info cond with
-    | Some (c, rebuild) ->
-      sequence info span c (fun name -> build (expr info (rebuild name)))
-    | None -> unsupported span "This effect cannot be sequenced yet.")
+    match extract_logic info cond with
+    | Some (logic, rebuild) ->
+      split_logic info span logic (fun held ->
+        controlled_by info span (rebuild held) build)
+    | None ->
+      (match extract info cond with
+       | Some (c, rebuild) ->
+         sequence info span c (fun name -> build (expr info (rebuild name)))
+       | None -> unsupported span "This effect cannot be sequenced yet."))
+
+(* `and`/`or` reaches its right operand on one branch only, so an operation
+   there cannot be sequenced with the rest of the expression: the operand
+   becomes a branch, and what held the operator is entered once from each with
+   the answer as its argument. A `while` condition is why the answer is passed
+   rather than assigned to a temporary: the temporary would have to be declared
+   outside the loop and re-assigned inside it, which is the condition written
+   twice. *)
+and split_logic info span (logic : Ast.reflected_expr) build =
+  let held = fresh "v" in
+  let join = fresh "join" in
+  let settled value : Ast.cps_stmt list =
+    let answer : Ast.cps_expr =
+      { Ast.it = (if value then `Bool true else `Bool false); span; ann = Types.Bool }
+    in
+    [ call span join [ answer ] ]
+  in
+  let evaluated operand =
+    controlled_by info span operand (fun operand -> [ call span join [ operand ] ])
+  in
+  let block stmts = node span (`Block stmts) in
+  let left, taken, skipped =
+    match logic.Ast.it with
+    | `And (left, right) -> left, evaluated right, settled false
+    | `Or (left, right) -> left, settled true, evaluated right
+    | _ -> assert false
+  in
+  frame_decl span join [ held ] (build held)
+  :: controlled_by info span left (fun left ->
+       [ node span (`If (left, block taken, Some (block skipped))) ])
 
 and sequence info span c build =
   let name = fresh "v" in
@@ -629,14 +731,14 @@ and run info ret span k handlers body rest : Ast.cps_stmt list =
               | Ast.Op_ctl | Ast.Op_final ->
                 cps info finished finished ~at:span a.Ast.arm_body
             in
-            fn_decl span (evidence_name a.Ast.arm_name) (a.Ast.arm_params @ [ continuation ]) arm_body)
+            frame_decl span (evidence_name a.Ast.arm_name) (a.Ast.arm_params @ [ continuation ]) arm_body)
           h.Ast.arms)
       handlers
   in
   (* What follows the block runs once after the handler is done, not once
      per resumption. *)
-  (fn_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
-   :: fn_decl span finished [ fresh "x" ] []
+  (frame_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
+   :: frame_decl span finished [ fresh "x" ] []
    :: arms)
   @ cps info ret finished ~at:span body
   @ [ call span after [ ignored span ] ]
@@ -698,7 +800,7 @@ and direct_arms info span ~scope handlers =
             (* Whatever it did, it does not go back. *)
             | Ast.Op_final -> sequence_body info a.Ast.arm_body @ [ node span (`Abort scope) ]
           in
-          fn_decl span (evidence_name a.Ast.arm_name) a.Ast.arm_params converted)
+          arm_decl span (evidence_name a.Ast.arm_name) a.Ast.arm_params converted)
         h.Ast.arms)
     handlers
 
@@ -714,14 +816,14 @@ and sequence_body info (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
   | { Ast.it = `Run (body, handlers); span; _ } :: rest
     when not (handlers_are_tail_resumptive handlers) ->
     let nothing = fresh "nothing" in
-    (fn_decl span nothing [ fresh "x" ] []
+    (frame_decl span nothing [ fresh "x" ] []
      :: run info no_return span nothing handlers body [])
     @ sequence_body info rest
   (* A `run` deeper down — in a branch, a loop or an arm — needs a
      continuation just the same. *)
   | s :: rest when suspends_stmt info s ->
     let nothing = fresh "nothing" in
-    (fn_decl s.Ast.span nothing [ fresh "x" ] []
+    (frame_decl s.Ast.span nothing [ fresh "x" ] []
      :: cps info no_return nothing ~at:s.Ast.span [ s ])
     @ sequence_body info rest
   | s :: rest ->
