@@ -3,7 +3,13 @@ open Value
 exception Return_value of value * Ast.span
 
 (* Caught by the `Scope` its own `run` became, passed through any between. *)
-exception Aborted of string
+(* Carries where it left from, so one that finds no scope can still say where. *)
+exception Aborted of string * Ast.span
+
+(* A scope is a frame on the interpreter's own stack as well as OCaml's, because
+   a continuation invoked after its `run` block returned has to put back what
+   entering it installed. Innermost first. *)
+let active_scopes : (string * Ast.cps_stmt list * Value.env) list ref = ref []
 
 let compare_ordered op x y =
   match op with
@@ -161,8 +167,25 @@ let rec eval env (e : Ast.cps_expr) : value =
      | Tuple items -> List.nth items index
      | v -> fail span "Cannot take a field of %s." (type_name v))
 (* OCaml's argument order is unspecified, and right to left in practice. *)
-and closure env name params body =
+(* Outermost first, so an inner scope's catcher sits inside its outer one.
+
+   Catching answers for the whole body rather than for the part the scope
+   covered, which is enough because a scope's [on_abort] calls the continuation
+   that follows it: what came after is reached through the catcher rather than
+   left behind it. *)
+and under missing k =
+  match missing with
+  | [] -> k ()
+  | (name, on_abort, senv) :: inner ->
+    (match under inner k with
+     | v -> v
+     | exception Aborted (caught, _) when String.equal caught name ->
+       List.iter (exec senv) on_abort;
+       Unit)
+
+and closure ?(is_continuation = false) env name params body =
   let names = List.map (fun (p : Ast.param) -> p.Ast.name) params in
+  let captured = !active_scopes in
   Fn
     { name
     ; arity = Some (List.length names)
@@ -170,11 +193,36 @@ and closure env name params body =
         (fun _ args ->
           let frame = new_env (Some env) in
           List.iter2 (define frame) names args;
-          (try
-             run_block frame body;
-             Unit
-           with
-           | Return_value (v, _) -> v))
+          (* What it was made under and is no longer inside. Re-entering only
+             those leaves an ordinary call, made where it was written, alone. *)
+          let current = !active_scopes in
+          (* A continuation is the rest of a computation that was inside those
+             frames, so it is inside them again even where they are still live:
+             the arm resuming it is outside them, and an abort must land in the
+             continuation rather than unwind through the arm. Any other closure
+             re-enters only what is gone. *)
+          let missing =
+            if is_continuation
+            then captured
+            else
+              List.filter
+                (fun (n, _, _) ->
+                  not (List.exists (fun (m, _, _) -> String.equal m n) current))
+                captured
+          in
+          let saved = current in
+          active_scopes := missing @ current;
+          Fun.protect
+            ~finally:(fun () -> active_scopes := saved)
+            (fun () ->
+              under
+                (List.rev missing)
+                (fun () ->
+                  try
+                    run_block frame body;
+                    Unit
+                  with
+                  | Return_value (v, _) -> v)))
     }
 
 and eval_all env = function
@@ -206,7 +254,7 @@ and run_block env body =
   List.iter
     (fun (s : Ast.cps_stmt) ->
       match s.Ast.it with
-      | `Fn _ -> exec env s
+      | `Fn _ | `Cont _ -> exec env s
       | _ -> ())
     body;
   let deferred = ref [] in
@@ -216,7 +264,7 @@ and run_block env body =
     | { Ast.it = `Defer inner; _ } :: rest ->
       deferred := (env, inner) :: !deferred;
       walk rest
-    | { Ast.it = `Fn _; _ } :: rest -> walk rest
+    | { Ast.it = `Fn _ | `Cont _; _ } :: rest -> walk rest
     | s :: rest ->
       exec env s;
       walk rest
@@ -239,11 +287,15 @@ and exec env (s : Ast.cps_stmt) : unit =
   (* Nothing catches this in between: a function's own handler is for
      `return`. *)
   | `Scope (scope, body, on_abort) ->
-    (match List.iter (exec env) body with
+    let saved = !active_scopes in
+    active_scopes := (scope, on_abort, env) :: saved;
+    (match Fun.protect ~finally:(fun () -> active_scopes := saved) (fun () ->
+             List.iter (exec env) body)
+     with
      | () -> ()
-     | exception Aborted caught when String.equal caught scope ->
+     | exception Aborted (caught, _) when String.equal caught scope ->
        List.iter (exec env) on_abort)
-  | `Abort scope -> raise (Aborted scope)
+  | `Abort scope -> raise (Aborted (scope, s.Ast.span))
   | `On_unwind (body, cleanup) ->
     (try List.iter (exec env) body with
      | e ->
@@ -274,6 +326,8 @@ and exec env (s : Ast.cps_stmt) : unit =
   (* The closure captures the table the name lands in, so recursion works
      without a separate binding step. *)
   | `Fn (name, params, _, body) -> define env name (closure env name params body)
+  | `Cont (name, params, body) ->
+    define env name (closure ~is_continuation:true env name params body)
   | `Return e ->
     let v =
       match e with
@@ -313,3 +367,7 @@ let run env (program : Ast.cps_stmt list) : (unit, error) result =
   with
   | Runtime_error e -> Error e
   | Return_value (_, span) -> Error { span; message = "'return' outside of a function." }
+  (* The scope it named is gone: a continuation re-entered it without putting it
+     back. A diagnostic rather than an escaping exception. *)
+  | Aborted (_, span) ->
+    Error { span; message = "An unwind found no scope left to stop at." }

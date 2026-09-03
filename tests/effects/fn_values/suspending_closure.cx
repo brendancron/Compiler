@@ -1,0 +1,20 @@
+effect E { ctl op(): unit; }
+
+fn work() -> <E> unit {
+    print("before");
+    op();
+    print("after");
+}
+
+var pending: List<() -> unit> = [];
+
+run {
+    var task = () => { work(); };
+    task();
+} handle E {
+    ctl op() { pending.push { resume; }; }
+}
+
+print("run finished");
+pending[0]();
+print("done");

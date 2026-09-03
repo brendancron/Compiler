@@ -1,0 +1,26 @@
+effect Error { final ctl throw(msg: string); }
+effect E { ctl op(): unit; }
+
+fn work() -> <Error, E> unit {
+    print("w1");
+    op();
+    throw("boom");
+    print("UNREACHABLE");
+}
+
+var pending: List<() -> unit> = [];
+
+run {
+    run {
+        work();
+        print("UNREACHABLE TOO");
+    } handle E {
+        ctl op() { pending.push { resume; }; }
+    }
+} handle Error {
+    final ctl throw(msg) { print("caught: " + msg); }
+}
+
+print("drain");
+pending[0]();
+print("done");

@@ -1,0 +1,29 @@
+effect sched {
+    ctl tick(): unit;
+}
+
+var queue: List<() -> unit> = [];
+
+fn counter(name: string) -> <sched> unit {
+    for (var i = 0; i < 3; i += 1) {
+        print(name + ": " + str(i));
+        tick();
+    }
+}
+
+fn spawn(task: () -> <sched> unit) {
+    run {
+        task();
+    } handle sched {
+        ctl tick() { queue.push { resume; }; }
+    }
+}
+
+spawn(() => { counter("A"); });
+spawn(() => { counter("B"); });
+
+while (queue.len() > 0) {
+    var next = queue[0];
+    queue = queue[1:];
+    next();
+}

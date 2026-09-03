@@ -1,0 +1,32 @@
+effect sched {
+    ctl tick(): unit;
+    ctl spawn(t: () -> <sched> unit): unit;
+}
+
+var queue: List<() -> unit> = [];
+
+fn run_one(task: () -> <sched> unit) {
+    run {
+        task();
+    } handle sched {
+        ctl tick() { queue.push { resume; }; }
+        ctl spawn(t) { queue.push { run_one(t); }; resume; }
+    }
+}
+
+fn child() -> <sched> unit { print("child a"); tick(); print("child b"); }
+
+fn parent() -> <sched> unit {
+    print("parent a");
+    spawn(child);
+    tick();
+    print("parent b");
+}
+
+run_one(parent);
+
+while (queue.len() > 0) {
+    var next = queue[0];
+    queue = queue[1:];
+    next();
+}

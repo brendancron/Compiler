@@ -497,6 +497,10 @@ and cps_stmt_kind =
   [ (cps_expr, cps_stmt) stmts
   | (cps_expr, cps_stmt) matching
   | cps_stmt aborts
+  (* A function holding the rest of a computation. Apart from `Fn` because
+     invoking one is being inside the scopes it was captured under again, even
+     where those are still entered, which is true of nothing else. *)
+  | `Cont of string * param list * cps_stmt list
   ]
 
 let map_vars (f : 'a -> 'b) (e : 'a vars) : 'b vars =

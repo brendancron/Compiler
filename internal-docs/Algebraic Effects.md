@@ -276,6 +276,20 @@ Statements after a block stay where they were written rather than being wrapped 
 
 **A `return` out of the block itself is rejected.** Once an operation suspends, the rest of the body is a continuation function, and returning from *that* is not returning from the enclosing function. Travelling back out through the handler that resumed into it is what a continuation is for, and the enclosing function has none — handling the effect discharged its row, so nothing converted it. Saying so beats the alternative, which was answering with whatever the code after the block returned.
 
+## A continuation puts back the frames it was inside
+
+A `run` block and a `defer` are frames on the interpreter's stack. A continuation is the rest of a computation that was inside them, so invoking one has to be inside them again — otherwise an abort raised in it finds nothing to stop at, and a `defer` it passes finds nothing armed.
+
+**It re-enters every frame it captured, whether or not that frame is still live.** The live ones are the case that matters. When an arm resumes, the block it is handling for is still on the stack, because the arm is nested inside it — and that is exactly why an abort was unwinding *through* the arm and taking the statements after its `resume` with it. The arm is outside the delimited computation; the continuation is inside it. Re-entering a live frame puts a catcher between them, so the abort lands in the continuation and the arm gets control back. An ordinary closure re-enters only frames that are gone: one called where it was written must not start catching an abort meant for further out.
+
+Catching there answers for the whole closure body rather than for the part the scope covered, which is enough, because a scope's `on_abort` calls the continuation that follows it. What came after arrives through the catcher rather than being left behind it.
+
+**The capture is dynamic and cannot be lexical.** The suspension is usually inside a function the `run` block called, so no scope encloses it in the source for a pass to find. `Cps` wrapping continuation bodies in the scopes open around them compiles and does nothing. So `Interp` keeps the frames itself and a closure records them, while `Cps` only names the continuations it builds — `Ast.is_continuation_name` is how one is told from an ordinary closure, which is a naming convention doing a marker's job and worth replacing when the AST can carry one.
+
+A `defer` wants that and one thing more. Its guard is a frame like any other and is rebuilt the same way, but its flag is also cleared on the way out and set only where the `defer` was written, which a resumption never reaches. Continuations arm it again, so each pass releases what that pass acquired.
+
+`effects/abort_under_conversion`, `effects/abort_after_resumption` and `core/defer/defer_multishot_abort` are the three shapes, and all three waited on this together.
+
 ## Pipeline placement
 
 CPS runs late, after everything that could introduce a call — see [Architecture](Architecture.md) for the full order.

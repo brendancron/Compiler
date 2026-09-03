@@ -67,6 +67,15 @@ let cases =
   ; "tests/effects/async/async"
   ; "tests/effects/fn_values/in_list"
   ; "tests/effects/fn_values/in_tuple"
+  ; "tests/effects/fn_values/named_as_value"
+  ; "tests/effects/fn_values/suspending_closure"
+  ; "tests/effects/fn_values/closure_in_arm"
+  ; "tests/effects/fn_values/through_index"
+  ; "tests/effects/fn_values/spawn"
+  ; "tests/effects/fn_values/multishot_closure"
+  ; "tests/effects/fn_values/nested_spawn"
+  ; "tests/effects/abort_after_resumption"
+  ; "tests/effects/abort_under_conversion"
   ; "tests/core/arrays/basics"
   ; "tests/core/arrays/identity"
   ; "tests/core/arrays/methods"
@@ -248,6 +257,7 @@ let cases =
   ; "tests/meta/codegen/shadowed_local"
   ; "tests/core/defer/defer_in_converted_fn"
   ; "tests/core/defer/defer_multishot"
+  ; "tests/core/defer/defer_multishot_abort"
   ; "tests/core/defer/defer_performs_effect"
   ]
 
@@ -386,20 +396,8 @@ type blocker =
 (* The suite asserts each still fails, so one that starts working is reported
    rather than sitting unnoticed. *)
 let expected_failing : (string * blocker) list =
-    (* One bug, twice. A continuation re-enters the scopes it was captured
-       inside without re-establishing what entering them installed: the abort
-       catcher here, the armed `defer` below.
-
-       The catcher is on the stack, but beneath the arm that resumed, so the
-       unwind passes through the arm and takes whatever followed its `resume`
-       with it. Wrapping continuations in their enclosing scopes does not fix
-       it — the suspension is inside a function the `run` block called, so the
-       scope encloses it dynamically and nothing lexical can see it. The fix is
-       for a continuation to capture the active scope stack and restore it when
-       invoked, which is a change to how [Interp] represents one. *)
-  [ "tests/effects/abort_under_conversion", Waiting "a continuation that restores its scopes"
     (* Parked — native compilation, deliberately out of scope *)
-  ; "tests/compile/m0/m0", Parked
+  [ "tests/compile/m0/m0", Parked
   ; "tests/compile/m1/fib", Parked
   ; "tests/compile/m2/struct", Parked
   ; "tests/compile/m3/fact", Parked
@@ -408,11 +406,6 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m6/apply", Parked
   ; "tests/compile/m7/safe_div", Parked
   ; "tests/compile/m8/gadt", Parked
-    (* The same missing re-entry, and a semantics to settle before fixing it:
-       a resumption re-runs only what followed the suspension, so a `defer`
-       paired with an acquisition that ran once would release it per pass. *)
-  ; ( "tests/core/defer/defer_multishot_abort"
-    , Waiting "a continuation that restores its scopes" )
     (* Operators resolved through an impl instead of the operator registry. *)
     (* A tuple has no declaration to derive from. *)
   ]

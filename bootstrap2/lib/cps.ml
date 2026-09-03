@@ -54,13 +54,26 @@ let evidence_ty info op =
   | Some t -> t
   | None -> Types.Unit
 
+let is_delimited info (row : Types.row) =
+  List.exists (fun (label, _) -> Hashtbl.mem info.delimited label) row
+
 (* The type gains the evidence parameters too, or it describes the wrong
    arity. *)
 let rec widen info (t : Types.ty) =
   match t with
   | Types.Fn (params, ret, row) ->
+    (* A converted function takes its continuation last: handed the result, and
+       answering with nothing, since a converted call is a statement. Not the
+       block's own type — that reaches its `run` by another route. *)
+    let continuation =
+      if is_delimited info row
+      then [ Types.Fn ([ widen info ret ], Types.Unit, []) ]
+      else []
+    in
     Types.Fn
-      ( List.map (widen info) params @ List.map (evidence_ty info) (evidence_of_row info row)
+      ( (List.map (widen info) params
+         @ List.map (evidence_ty info) (evidence_of_row info row))
+        @ continuation
       , widen info ret
       , row )
   | Types.Tuple items -> Types.Tuple (List.map (widen info) items)
@@ -71,9 +84,6 @@ let rec widen info (t : Types.ty) =
   | other -> other
 
 and widen_fields info fields = List.map (fun (label, t) -> label, widen info t) fields
-
-let is_delimited info (row : Types.row) =
-  List.exists (fun (label, _) -> Hashtbl.mem info.delimited label) row
 
 let node span it : Ast.cps_stmt = { Ast.it; span; ann = Types.Unit }
 let var span ty name : Ast.cps_expr = { Ast.it = `Var name; span; ann = ty }
@@ -96,6 +106,12 @@ let fn_decl span name params body =
       , List.map (fun p -> { Ast.name = p; ty = None; implicit = false }) params
       , { Ast.ret = None; row = None; comptime = [] }
       , body ))
+
+let cont_decl span name params body =
+  node
+    span
+    (`Cont
+      (name, List.map (fun p -> { Ast.name = p; ty = None; implicit = false }) params, body))
 
 (* ---- tail-resumptive detection ---- *)
 
@@ -163,6 +179,12 @@ let handlers_are_tail_resumptive handlers =
 let convert_body : (effects -> Ast.reflected_stmt list -> Ast.cps_stmt list) ref =
   ref (fun _ _ -> [])
 
+(* [cps] is written below [expr], and a lambda that suspends needs it. *)
+let convert_cps
+  : (effects -> string -> Ast.span -> Ast.reflected_stmt list -> Ast.cps_stmt list) ref
+  =
+  ref (fun _ _ _ _ -> [])
+
 let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
   let widened = ref (widen info e.Ast.ann) in
   let it : Ast.cps_expr_kind =
@@ -171,24 +193,24 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
     (* A call site passes the same arguments whichever it reached. *)
     | `Lambda (params, signature, body) ->
       let row = row_of e.Ast.ann in
+      let evidence =
+        evidence_of_row info row
+        |> List.map (fun op -> { Ast.name = evidence_name op; ty = None; implicit = false })
+      in
+      widened := widen info e.Ast.ann;
       if is_delimited info row
-      then
-        unsupported
-          e.Ast.span
-          "A function value cannot perform an effect whose handler needs a continuation yet."
-      else (
-        let evidence =
-          evidence_of_row info row
-          |> List.map (fun op -> { Ast.name = evidence_name op; ty = None; implicit = false })
-        in
-        widened := widen info e.Ast.ann;
-        `Lambda (params @ evidence, signature, !convert_body info body))
+      then (
+        (* Its own name, so a `resume` written here still reaches the arm's. *)
+        let own = fresh "k" in
+        `Lambda
+          ( params @ evidence @ [ { Ast.name = own; ty = None; implicit = false } ]
+          , signature
+          , !convert_cps info own e.Ast.span body ))
+      else `Lambda (params @ evidence, signature, !convert_body info body)
     | `Var name ->
       (* A bare reference would escape with the wrong arity. *)
-      if is_effectful info e.Ast.ann
-      then
-        unsupported e.Ast.span "'%s' performs effects and cannot be used as a value yet." name
-      else `Var name
+      widened := widen info e.Ast.ann;
+      `Var name
     | `Call (callee, args) ->
       let args = List.map (expr info) args in
       (match callee.Ast.it with
@@ -328,6 +350,35 @@ and extract_list info items rebuild =
   in
   loop [] items
 
+(* Deferred statements armed on the way here. Leaving disarms them, so a pass
+   that resumes past one would find nothing armed and release nothing. *)
+let open_defers : string list ref = ref []
+
+(* And the cleanups guarding them. An unwind reaching a later pass would pass
+   through nothing, since the frame it went through belonged to the first. *)
+let open_unwinds : Ast.cps_stmt list list ref = ref []
+
+let delimited span body =
+  let armed =
+    List.map
+      (fun flag ->
+        node
+          span
+          (`Expr
+            { Ast.it = `Assign (flag, { Ast.it = `Bool true; span; ann = Types.Bool })
+            ; span
+            ; ann = Types.Bool
+            }))
+      !open_defers
+  in
+  let guarded =
+    List.fold_left
+      (fun acc cleanup -> [ node span (`On_unwind (acc, cleanup)) ])
+      (armed @ body)
+      !open_unwinds
+  in
+  guarded
+
 (* ---- continuation-passing form ---- *)
 
 (* [ret] is what a `return` calls, [k] what the next statement runs under. They
@@ -400,25 +451,33 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
            name, [ declaration ])
        in
        let k', wrapped_k = wrapper k in
+       (* No continuation here, so one performing an effect cannot run. *)
+       let cleanup =
+         if suspends_stmt info inner
+         then []
+         else
+           [ node
+               span
+               (`If
+                 ( var span Types.Bool armed
+                 , node span (`Block (disarm :: Option.to_list (stmt info inner)))
+                 , None ))
+           ]
+       in
+       let outer_defers = !open_defers
+       and outer_unwinds = !open_unwinds in
+       let converted_rest =
+         open_defers := armed :: outer_defers;
+         open_unwinds := cleanup :: outer_unwinds;
+         Fun.protect
+           ~finally:(fun () ->
+             open_defers := outer_defers;
+             open_unwinds := outer_unwinds)
+           (fun () -> cps info ret' k' ~at:span rest)
+       in
        (node span (`Var_decl (armed, None, Some (flag true)))
         :: wrapped_ret)
-       @ [ wrapped_k
-         ; node
-             span
-             (`On_unwind
-               ( cps info ret' k' ~at:span rest
-                 (* No continuation here, so one performing an effect cannot run. *)
-               , (if suspends_stmt info inner
-                  then []
-                  else
-                    [ node
-                        span
-                        (`If
-                          ( var span Types.Bool armed
-                          , node span (`Block (disarm :: Option.to_list (stmt info inner)))
-                          , None ))
-                    ]) ))
-         ]
+       @ [ wrapped_k; node span (`On_unwind (converted_rest, cleanup)) ]
      | `Expr e when suspends info e ->
        (match extract info e with
         | Some (c, rebuild) ->
@@ -443,7 +502,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
           let tmp = fresh "v" in
           let body = build tmp in
           let next = fresh "k" in
-          fn_decl span next [ !bound ] body :: invoke info span next c
+          cont_decl span next [ !bound ] (delimited span body) :: invoke info span next c
         | None -> unsupported span "This effect cannot be sequenced yet.")
      | `If (cond, then_branch, else_branch) when suspends_stmt info s || holds_return s ->
        let join = fresh "join" in
@@ -473,7 +532,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
             ])
      | `Block body when suspends_stmt info s || holds_return s ->
        let next = fresh "k" in
-       [ fn_decl span next [ fresh "x" ] (cps info ret k ~at:span rest)
+       [ cont_decl span next [ fresh "x" ] (delimited span (cps info ret k ~at:span rest))
        ; node span (`Block (cps info ret next ~at:span body))
        ]
      (* The body's "what runs next" is the loop itself, so resuming carries
@@ -506,15 +565,11 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
        when List.exists (fun b -> suspends_stmt info b || holds_return b) body ->
        let after = fresh "after" in
        let scope = fresh "scope" in
+       (* An abort skipped the body's own continuation. *)
+       let on_abort = [ call span after [ ignored span ] ] in
        fn_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
        :: (direct_arms info span ~scope handlers
-           @ [ node
-                 span
-                 (`Scope
-                   ( scope
-                   , cps info ret after ~at:span body
-                   (* An abort skipped the body's own continuation. *)
-                   , [ call span after [ ignored span ] ] )) ])
+           @ [ node span (`Scope (scope, cps info ret after ~at:span body, on_abort)) ])
      | _ ->
        (match stmt info s with
         | Some s -> s :: cps info ret k ~at:span rest
@@ -533,22 +588,29 @@ and controlled_by info span (cond : Ast.reflected_expr) build =
 and sequence info span c build =
   let name = fresh "v" in
   let next = fresh "k" in
-  fn_decl span next [ name ] (build name) :: invoke info span next c
+  cont_decl span next [ name ] (delimited span (build name)) :: invoke info span next c
 
 and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
   match c.Ast.it with
   | `Call (callee, args) ->
     let args = List.map (expr info) args in
-    let target, evidence =
-      match callee.Ast.it with
-      | `Var name when Hashtbl.mem info.owner name -> evidence_name name, []
-      | `Var name ->
-        ( name
-        , evidence_of_row info (row_of callee.Ast.ann)
-          |> List.map (fun op -> var span (evidence_ty info op) (evidence_name op)) )
-      | _ -> unsupported span "Only a named function may perform an effect here."
+    let evidence_for ty =
+      evidence_of_row info (row_of ty)
+      |> List.map (fun op -> var span (evidence_ty info op) (evidence_name op))
     in
-    [ call span target (args @ evidence @ [ var span Types.Unit next ]) ]
+    let before, target, evidence =
+      match callee.Ast.it with
+      | `Var name when Hashtbl.mem info.owner name -> [], evidence_name name, []
+      | `Var name -> [], name, evidence_for callee.Ast.ann
+      (* Anything else is bound first, since the call is emitted by name. *)
+      | _ ->
+        let held = fresh "callee" in
+        ( [ node span (`Var_decl (held, None, Some (expr info callee))) ]
+        , held
+        , evidence_for callee.Ast.ann )
+    in
+    let answering = Types.Fn ([ widen info c.Ast.ann ], Types.Unit, []) in
+    before @ [ call span target (args @ evidence @ [ var span answering next ]) ]
   | _ -> unsupported span "This effect cannot be sequenced yet."
 
 (* An arm that never calls it abandons the rest of the body: abort. *)
@@ -597,13 +659,17 @@ and stmt info (s : Ast.reflected_stmt) : Ast.cps_stmt option =
       evidence_of_row info row |> List.map (fun op -> { Ast.name = evidence_name op; ty = None; implicit = false })
     in
     if is_delimited info row
-    then
+    then (
+      (* Its own, rather than the shared name: a converted body nested inside an
+         arm would otherwise bind the arm's continuation, which is what `resume`
+         reaches for. *)
+      let own = fresh "k" in
       keep
         (`Fn
           ( name
-          , params @ evidence @ [ { Ast.name = continuation; ty = None; implicit = false } ]
+          , params @ evidence @ [ { Ast.name = own; ty = None; implicit = false } ]
           , signature
-          , cps info continuation continuation ~at:s.Ast.span body ))
+          , cps info own own ~at:s.Ast.span body )))
     else keep (`Fn (name, params @ evidence, signature, sequence_body info body))
   | `Run (body, handlers) when not (handlers_are_tail_resumptive handlers) ->
     unsupported
@@ -666,6 +732,7 @@ and sequence_body info (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list =
 (* ---- entry point ---- *)
 
 let () = convert_body := sequence_body
+let () = convert_cps := fun info k span body -> cps info k k ~at:span body
 
 let collect (p : Ast.reflected_stmt list) =
   let info =

@@ -1,0 +1,18 @@
+effect E { ctl op(): unit; }
+
+fn work() -> <E> unit { print("w1"); op(); print("w2"); }
+
+var more: List<() -> <E> unit> = [];
+var pending: List<() -> unit> = [];
+
+run {
+    work();
+} handle E {
+    ctl op() {
+        more.push(() => { work(); });
+        pending.push { resume; };
+    }
+}
+
+print("drain, queued extra: " + str(more.len()));
+pending[0]();
