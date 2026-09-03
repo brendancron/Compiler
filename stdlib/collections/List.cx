@@ -1,11 +1,11 @@
 
-fn map<T, U>(items: List<T>, f: (T) -> U) -> List<U> {
+fn map<T, U, E>(items: List<T>, f: (T) -> <E> U) -> <E> List<U> {
     var out: List<U> = [];
     for (item in items) { out.push(f(item)); }
     return out;
 }
 
-fn filter<T>(items: List<T>, f: (T) -> bool) -> List<T> {
+fn filter<T, E>(items: List<T>, f: (T) -> <E> bool) -> <E> List<T> {
     var out: List<T> = [];
     for (item in items) {
         if (f(item)) { out.push(item); }
@@ -13,20 +13,20 @@ fn filter<T>(items: List<T>, f: (T) -> bool) -> List<T> {
     return out;
 }
 
-fn fold<T, A>(items: List<T>, start: A, f: (A, T) -> A) -> A {
+fn fold<T, A, E>(items: List<T>, start: A, f: (A, T) -> <E> A) -> <E> A {
     var acc = start;
     for (item in items) { acc = f(acc, item); }
     return acc;
 }
 
-fn any<T>(items: List<T>, f: (T) -> bool) -> bool {
+fn any<T, E>(items: List<T>, f: (T) -> <E> bool) -> <E> bool {
     for (item in items) {
         if (f(item)) { return true; }
     }
     return false;
 }
 
-fn all<T>(items: List<T>, f: (T) -> bool) -> bool {
+fn all<T, E>(items: List<T>, f: (T) -> <E> bool) -> <E> bool {
     for (item in items) {
         if (f(item)) {} else { return false; }
     }

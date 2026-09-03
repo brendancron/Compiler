@@ -6,7 +6,7 @@ effect ask {
     fn base(): int;
 }
 
-fn traced<T, E>(label: string, f: () -> <E> T) -> <log | E> T {
+fn traced<T, E>(label: string, f: () -> <E> T) -> <log, E> T {
     emit("enter " + label);
     var result = f();
     emit("leave " + label);

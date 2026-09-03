@@ -7,7 +7,7 @@ let declared_rows : (string, Types.row) Hashtbl.t = Hashtbl.create 16
 let row_of (t : Types.ty) =
   match t with
   | Types.Fn (_, _, row) -> row
-  | _ -> []
+  | _ -> Types.closed_row []
 
 let rec record (s : Ast.typed_stmt) =
   match s.Ast.it with
@@ -320,7 +320,7 @@ and fn_ref span name args result : Ast.resolved_expr =
       Types.Fn
         ( List.map (fun (a : Ast.resolved_expr) -> a.Ast.ann) args
         , result
-        , Option.value ~default:[] (Hashtbl.find_opt declared_rows name) )
+        , Option.value ~default:(Types.closed_row []) (Hashtbl.find_opt declared_rows name) )
   }
 
 and stmt registry (s : Ast.typed_stmt) : Ast.resolved_stmt list =

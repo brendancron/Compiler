@@ -105,18 +105,35 @@ let instantiation vars declared =
 let ctx_fn_params : (string, (string * Types.infer_ty) list) Hashtbl.t =
   Hashtbl.create 16
 
+(* A parameter standing in a row is a row variable rather than an effect named
+   after it, so each also gets one. Which of the two a mention is follows from
+   where it stands, as it does in Koka. *)
+let ctx_row_params : (string, Types.infer_row) Hashtbl.t = Hashtbl.create 8
+
 let with_type_params assoc f =
   let saved =
-    List.map (fun (name, _) -> name, Hashtbl.find_opt ctx_type_params name) assoc
+    List.map
+      (fun (name, _) ->
+        name, Hashtbl.find_opt ctx_type_params name, Hashtbl.find_opt ctx_row_params name)
+      assoc
   in
-  List.iter (fun (name, var) -> Hashtbl.replace ctx_type_params name var) assoc;
+  List.iter
+    (fun (name, var) ->
+      Hashtbl.replace ctx_type_params name var;
+      let row = Types.fresh_row () in
+      Types.declare_row row;
+      Hashtbl.replace ctx_row_params name row)
+    assoc;
   Fun.protect
     ~finally:(fun () ->
       List.iter
-        (fun (name, previous) ->
-          match previous with
-          | Some var -> Hashtbl.replace ctx_type_params name var
-          | None -> Hashtbl.remove ctx_type_params name)
+        (fun (name, previous, previous_row) ->
+          (match previous with
+           | Some var -> Hashtbl.replace ctx_type_params name var
+           | None -> Hashtbl.remove ctx_type_params name);
+          match previous_row with
+          | Some row -> Hashtbl.replace ctx_row_params name row
+          | None -> Hashtbl.remove ctx_row_params name)
         saved)
     f
 
@@ -371,6 +388,8 @@ let receiver_of span registry (receiver : (_, Types.infer_ty) Ast.node) name ele
    sharing a row variable with its own definition. Only the second ties. *)
 let admits_row (callee : Types.scheme option) row (caller : Types.infer_row) =
   let pending =
+    (not (Types.row_is_declared row))
+    &&
     match Types.repr_row row, callee with
     | Types.RVar _, Some { Types.quantified_rows = []; _ } -> true
     | Types.RVar _, None -> true
@@ -489,14 +508,23 @@ and named_type span name args =
 
 (* Each entry takes fresh arguments; a use is what settles them. *)
 and row_of_labels labels =
+  let tail =
+    match List.filter_map (Hashtbl.find_opt ctx_row_params) labels with
+    | [] -> Types.REmpty
+    | [ row ] -> row
+    | _ -> Types.error "A row may be open in one variable, not several."
+  in
   List.fold_right
     (fun label rest ->
-      let arity =
-        List.length (Option.value ~default:[] (Hashtbl.find_opt ctx_effect_params label))
-      in
-      Types.RCons (label, List.init arity (fun _ -> Types.fresh ()), rest))
+      if Hashtbl.mem ctx_row_params label
+      then rest
+      else (
+        let arity =
+          List.length (Option.value ~default:[] (Hashtbl.find_opt ctx_effect_params label))
+        in
+        Types.RCons (label, List.init arity (fun _ -> Types.fresh ()), rest)))
     labels
-    Types.REmpty
+    tail
 
 (* What is registered here is undone before returning; the caller installs the
    whole list. *)
@@ -2632,7 +2660,7 @@ let check ~registry (program : Ast.desugared_stmt list)
       program
   in
   let errors =
-    match Types.resolve_row ctx.row with
+    match (Types.resolve_row ctx.row).Types.labels with
     | [] -> !errors
     | labels ->
       { span = Source_map.Span.nowhere
