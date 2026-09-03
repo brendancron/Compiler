@@ -167,7 +167,14 @@ let rec eval env (e : Ast.cps_expr) : value =
      | Tuple items -> List.nth items index
      | v -> fail span "Cannot take a field of %s." (type_name v))
 (* OCaml's argument order is unspecified, and right to left in practice. *)
-(* Outermost first, so an inner scope's catcher sits inside its outer one. *)
+(* Outermost first, so an inner scope's catcher sits inside its outer one.
+
+   This wraps the whole body, which is only the same thing as re-entering the
+   scope when what the scope contained ran to the closure's end. A continuation
+   holding statements after the scope loses them here — the catcher answers for
+   the whole body rather than for the part the scope covered, which is why
+   `effects/abort_under_conversion` still fails. Putting the frame back where it
+   belongs is [Cps]'s to do, not something this can fake. *)
 and under missing k =
   match missing with
   | [] -> k ()
