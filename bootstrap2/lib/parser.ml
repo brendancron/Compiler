@@ -406,12 +406,19 @@ and callable (e : Ast.expr) =
 and trailing_params s : Ast.param list option =
   let rec names acc at =
     match (peek_at s at).Token.token_type with
-    (* The arrow is what names parameters, so it needs one. A lambda taking none
-       is written without it. *)
-    | Token.Arrow when acc = [] ->
-      ignore (error s (peek_at s at) "Expected a parameter name before '->'.");
-      Some []
-    | Token.Arrow -> Some (List.rev acc)
+    (* The arrow is what names parameters, so it needs one, and a comma promises
+       another. A lambda taking none is written without either. Reaching an arrow
+       here means one of the two was broken: nothing has been read yet, or a
+       comma was. *)
+    | Token.Arrow ->
+      ignore
+        (error
+           s
+           (peek_at s at)
+           (if acc = []
+            then "Expected a parameter name before '->'."
+            else "Expected a parameter name after ','."));
+      Some (List.rev acc)
     | Token.Identifier name ->
       (match (peek_at s (at + 1)).Token.token_type with
        | Token.Arrow -> Some (List.rev ({ Ast.name; ty = None; implicit = false } :: acc))
