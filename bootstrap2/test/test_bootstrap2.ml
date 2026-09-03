@@ -391,7 +391,7 @@ let expected_failing : (string * blocker) list =
        invoked, which is a change to how [Interp] represents one. *)
   [ "tests/effects/abort_under_conversion", Waiting "a continuation that restores its scopes"
   ; ( "tests/effects/async/async"
-    , Waiting "a function value that performs a resumed effect" )
+    , Waiting "a function value that suspends" )
     (* Parked — native compilation, deliberately out of scope *)
   ; "tests/compile/m0/m0", Parked
   ; "tests/compile/m1/fib", Parked
