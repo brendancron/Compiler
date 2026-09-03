@@ -65,6 +65,8 @@ let cases =
   ; "tests/effects/run_value/two_in_one_expr"
   ; "tests/effects/deferred/deferred"
   ; "tests/effects/async/async"
+  ; "tests/effects/async/promise"
+  ; "tests/effects/async/interleaved"
   ; "tests/effects/fn_values/in_list"
   ; "tests/effects/fn_values/in_tuple"
   ; "tests/effects/fn_values/named_as_value"
@@ -279,6 +281,7 @@ let error_cases =
   ; "tests/core/embed/errors/missing"
   ; "tests/effects/generic/errors/one_type"
   ; "tests/effects/final/errors/resumes"
+  ; "tests/effects/errors/arm_settles_op_param"
   ; "tests/core/ufcs/errors/arity"
   ; "tests/meta/derive/errors/no_deriver"
   ; "tests/meta/derive/errors/two_derivers"
@@ -414,6 +417,13 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m6/apply", Parked
   ; "tests/compile/m7/safe_div", Parked
   ; "tests/compile/m8/gadt", Parked
+    (* Row polymorphism. Inference already generalizes over rows; what is
+       missing is per-instantiation evidence arity in `Cps`, and a way to write
+       a row variable in an arrow. *)
+  ; "tests/effects/rows/inferred_polymorphic", Waiting "evidence arity per instantiation"
+  ; "tests/effects/rows/row_variable", Waiting "a row variable in an arrow type"
+  ; "tests/effects/rows/map_over_effects", Waiting "a row variable in an arrow type"
+  ; "tests/effects/rows/row_extension", Waiting "row extension in an annotation"
   ]
 
 (* Ought to be rejected and are not, paired with the `.err` they should

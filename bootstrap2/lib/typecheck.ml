@@ -2175,22 +2175,25 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
          | _ -> ());
         Hashtbl.replace ctx_op_owner o.Ast.op_name name;
         Hashtbl.replace ctx_effects.ops o.Ast.op_name o;
-        let params =
-          List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) o.Ast.op_params
+        let own = List.map (fun p -> p, Types.fresh ()) o.Ast.op_tparams in
+        let params, ret =
+          with_type_params own (fun () ->
+            ( List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) o.Ast.op_params
+            , annotated_or_fresh o.Ast.op_ret ))
         in
-        let ret = annotated_or_fresh o.Ast.op_ret in
         let op_type =
           Types.IFn (params, ret, Types.RCons (name, List.map snd bound, Types.fresh_row ()))
         in
         (* It never hands anything back, so quantifying its result is sound. *)
-        let effect_vars =
+        let ids_of assoc =
           List.filter_map
             (fun (_, v) ->
               match Types.repr v with
               | Types.IVar { contents = Types.Unbound (id, _) } -> Some id
               | _ -> None)
-            bound
+            assoc
         in
+        let effect_vars = ids_of bound @ ids_of own in
         let quantified =
           effect_vars
           @
@@ -2325,6 +2328,17 @@ and infer_handler env ctx assigned ~answer ~args (h : Ast.desugared_stmt Ast.han
   =
   let arm (a : Ast.desugared_stmt Ast.arm) : checked_stmt Ast.arm =
     let op = Hashtbl.find ctx_effects.ops a.Ast.arm_name in
+    (* One arm serves every instantiation, so the operation's own parameters
+       stay variables its body is not allowed to settle. *)
+    let own =
+      List.map
+        (fun name ->
+          let var = Types.fresh () in
+          Types.declare_param var;
+          name, var)
+        op.Ast.op_tparams
+    in
+    with_type_params own (fun () ->
     let param_types =
       List.map (fun (p : Ast.param) -> annotated_or_fresh p.Ast.ty) op.Ast.op_params
     in
@@ -2365,11 +2379,23 @@ and infer_handler env ctx assigned ~answer ~args (h : Ast.desugared_stmt Ast.han
              then Types.unify answer Types.IUnit);
           body)
     in
+    List.iter
+      (fun (name, var) ->
+        match Types.repr var with
+        | Types.IVar { contents = Types.Unbound _ } -> ()
+        | settled ->
+          Types.error
+            "This handler settles '%s' at %s, but '%s' is handled once for every \
+             type its call sites use."
+            name
+            (Types.string_of_infer_ty settled)
+            a.Ast.arm_name)
+      own;
     { Ast.arm_name = a.Ast.arm_name
     ; arm_kind = a.Ast.arm_kind
     ; arm_params = a.Ast.arm_params
     ; arm_body = body
-    }
+    })
   in
   let names =
     List.map fst (Option.value ~default:[] (Hashtbl.find_opt ctx_effect_params h.Ast.handled))

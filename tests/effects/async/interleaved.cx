@@ -1,0 +1,89 @@
+effect async {
+    ctl suspend<T>(setup: ((T) -> unit) -> unit): T;
+}
+
+effect fail {
+    final ctl deadlock(msg: string);
+}
+
+type PromiseState<T> {
+    Resolved(T),
+    Awaiting(List<(T) -> unit>)
+}
+
+type Promise<T> {
+    state: PromiseState<T>
+}
+
+fn promise<T>() -> Promise<T> {
+    return new Promise { state: new PromiseState::Awaiting([]) };
+}
+
+fn resolve<T>(p: Promise<T>, value: T) {
+    match (p.state) {
+        PromiseState::Awaiting(listeners) => {
+            p.state = new PromiseState::Resolved(value);
+            for (wake in listeners) { wake(value); }
+        }
+        PromiseState::Resolved(_) => { }
+    }
+}
+
+fn settled<T>(p: Promise<T>) -> <fail> T {
+    match (p.state) {
+        PromiseState::Resolved(value) => { return value; }
+        PromiseState::Awaiting(_) => { return deadlock("a strand never finished"); }
+    }
+}
+
+fn pause() -> <async> int {
+    return suspend((wake) => { wake(0); });
+}
+
+fn interleaved<T>(actions: List<() -> <async> T>) -> <fail> List<T> {
+    var ready: List<() -> unit> = [];
+    var slots: List<Promise<T>> = [];
+
+    fn strand(action: () -> <async> T, slot: Promise<T>) {
+        run {
+            resolve(slot, action());
+        } handle async {
+            ctl suspend(setup) { setup((value) => { ready.push { resume value; }; }); }
+        }
+    }
+
+    for (action in actions) {
+        var slot: Promise<T> = promise();
+        slots.push(slot);
+        ready.push { strand(action, slot); };
+    }
+
+    while (ready.len() > 0) {
+        var next = ready[0];
+        ready = ready[1:];
+        next();
+    }
+
+    var out: List<T> = [];
+    for (slot in slots) { out.push(settled(slot)); }
+    return out;
+}
+
+fn counter(name: string, rounds: int) -> <async> int {
+    for (var i = 0; i < rounds; i += 1) {
+        print(name + ": " + str(i));
+        pause();
+    }
+    return rounds * 10;
+}
+
+run {
+    var counts = interleaved([
+        () => { return counter("A", 3); },
+        () => { return counter("B", 2); }
+    ]);
+    print("A -> " + str(counts[0]));
+    print("B -> " + str(counts[1]));
+} handle fail {
+    final ctl deadlock(msg) { print("deadlock: " + msg); }
+}

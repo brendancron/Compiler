@@ -1,0 +1,80 @@
+effect async {
+    ctl suspend<T>(setup: ((T) -> unit) -> unit): T;
+}
+
+type PromiseState<T> {
+    Resolved(T),
+    Awaiting(List<(T) -> unit>)
+}
+
+type Promise<T> {
+    state: PromiseState<T>
+}
+
+fn promise<T>() -> Promise<T> {
+    return new Promise { state: new PromiseState::Awaiting([]) };
+}
+
+fn await<T>(p: Promise<T>) -> <async> T {
+    match (p.state) {
+        PromiseState::Resolved(value) => { return value; }
+        PromiseState::Awaiting(_) => {
+            return suspend((wake) => {
+                match (p.state) {
+                    PromiseState::Awaiting(listeners) => {
+                        listeners.push(wake);
+                        p.state = new PromiseState::Awaiting(listeners);
+                    }
+                    PromiseState::Resolved(value) => { wake(value); }
+                }
+            });
+        }
+    }
+}
+
+fn resolve<T>(p: Promise<T>, value: T) {
+    match (p.state) {
+        PromiseState::Awaiting(listeners) => {
+            p.state = new PromiseState::Resolved(value);
+            for (wake in listeners) { wake(value); }
+        }
+        PromiseState::Resolved(_) => { }
+    }
+}
+
+var ready: List<() -> unit> = [];
+
+fn schedule(work: () -> unit) {
+    ready.push(work);
+}
+
+fn drive(main: () -> <async> unit) {
+    run {
+        main();
+    } handle async {
+        ctl suspend(setup) { setup((value) => { ready.push { resume value; }; }); }
+    }
+    while (ready.len() > 0) {
+        var next = ready[0];
+        ready = ready[1:];
+        next();
+    }
+}
+
+fn main() -> <async> unit {
+    var eager: Promise<int> = promise();
+    resolve(eager, 1);
+    print("eager " + str(await(eager)));
+
+    var later: Promise<int> = promise();
+    schedule(() => { resolve(later, 2); });
+    print("later " + str(await(later)));
+
+    var word: Promise<string> = promise();
+    schedule(() => { resolve(word, "hi"); });
+    print("word " + await(word));
+
+    print("done");
+}
+
+drive(main);

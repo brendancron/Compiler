@@ -1,0 +1,4 @@
+2
+log: saw 0
+log: saw 1
+2
