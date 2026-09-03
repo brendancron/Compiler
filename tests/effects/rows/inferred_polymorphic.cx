@@ -1,0 +1,26 @@
+effect log {
+    fn emit(msg: string): unit;
+}
+
+fn twice(f, x) {
+    return [f(x), f(x)];
+}
+
+fn bump(x: int) -> int {
+    return x + 1;
+}
+
+fn shout(x: int) -> <log> int {
+    emit("saw " + str(x));
+    return x * 2;
+}
+
+var quiet = twice(bump, 3);
+print(str(quiet[0]) + " " + str(quiet[1]));
+
+run {
+    var noisy = twice(shout, 5);
+    print(str(noisy[0]) + " " + str(noisy[1]));
+} handle log {
+    fn emit(msg) { print("log: " + msg); }
+}

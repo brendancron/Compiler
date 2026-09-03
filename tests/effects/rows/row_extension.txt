@@ -1,0 +1,6 @@
+log: enter quiet
+log: leave quiet
+7
+log: enter asks
+log: leave asks
+42

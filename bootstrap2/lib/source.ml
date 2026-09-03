@@ -76,6 +76,7 @@ let signature (sg : Ast.signature) =
 
 let rec expr (e : Ast.expr) : string =
   match e.Ast.it with
+  | `Unit -> "()"
   | `Int n -> string_of_int n
   | `Float n -> Token.float_to_string n
   | `Str s -> Printf.sprintf "\"%s\"" (escape (Utf8.encode s))
@@ -425,13 +426,16 @@ and effect_decl depth name params ops =
       (List.map
          (fun (o : Ast.op_decl) ->
            Printf.sprintf
-             "%s%s %s(%s)%s;\n"
+             "%s%s %s%s(%s)%s;\n"
              (pad (depth + 1))
              (match o.Ast.op_kind with
               | Ast.Op_fn -> "fn"
               | Ast.Op_ctl -> "ctl"
               | Ast.Op_final -> "final ctl")
              o.Ast.op_name
+             (match o.Ast.op_tparams with
+              | [] -> ""
+              | ps -> Printf.sprintf "<%s>" (String.concat ", " ps))
              (String.concat ", " (List.map param o.Ast.op_params))
              (match o.Ast.op_ret with
               | None -> ""

@@ -1,0 +1,9 @@
+2 4 6
+log: saw 1
+log: saw 2
+log: saw 3
+2 3 4
+log: shifting 1
+log: shifting 2
+log: shifting 3
+11 12 13

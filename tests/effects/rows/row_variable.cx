@@ -1,0 +1,24 @@
+effect log {
+    fn emit(msg: string): unit;
+}
+
+fn apply_twice<T, E>(f: (T) -> <E> T, x: T) -> <E> T {
+    return f(f(x));
+}
+
+fn bump(x: int) -> int {
+    return x + 1;
+}
+
+fn shout(x: int) -> <log> int {
+    emit("saw " + str(x));
+    return x + 1;
+}
+
+print(str(apply_twice(bump, 0)));
+
+run {
+    print(str(apply_twice(shout, 0)));
+} handle log {
+    fn emit(msg) { print("log: " + msg); }
+}

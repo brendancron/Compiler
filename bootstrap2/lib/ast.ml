@@ -93,6 +93,10 @@ type op_kind =
 type op_decl =
   { op_name : string
   ; op_kind : op_kind
+  (* The operation's own, on top of its effect's. Sound because a call site
+     settles them through the arguments, so a handler is never owed a value of
+     a type it did not receive one at. *)
+  ; op_tparams : string list
   ; op_params : param list
   ; op_ret : type_expr option
   }
@@ -110,7 +114,8 @@ and 's arm =
   }
 
 type lit =
-  [ `Int of int
+  [ `Unit
+  | `Int of int
   | `Float of float
   | `Str of Uchar.t array
   | `Char of Uchar.t

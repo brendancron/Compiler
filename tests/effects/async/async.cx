@@ -1,29 +1,45 @@
-effect sched {
-    ctl tick(): unit;
+effect async {
+    ctl suspend<T>(setup: ((T) -> unit) -> unit): T;
 }
 
-var pending: List<() -> unit> = [];
+fn pause() -> <async> unit {
+    return suspend { it(()) };
+}
 
-fn counter(name: string) -> <sched> unit {
+fn interleaved(actions: List<() -> <async> unit>) {
+    var ready: List<() -> unit> = [];
+
+    fn strand(action: () -> <async> unit) {
+        run {
+            action();
+        } handle async {
+            ctl suspend(setup) {
+                setup {
+                    ready.push { resume it; };
+                };
+            }
+        }
+    }
+
+    for (action in actions) {
+        ready.push { strand(action); };
+    }
+
+    while (ready.len() > 0) {
+        var next = ready[0];
+        ready = ready[1:];
+        next();
+    }
+}
+
+fn counter(name: string) -> <async> unit {
     for (var i = 0; i < 10; i += 1) {
         print(name + ": " + str(i));
-        tick();
+        pause();
     }
 }
 
-fn start(name: string) {
-    run {
-        counter(name);
-    } handle sched {
-        ctl tick() { pending.push { resume; }; }
-    }
-}
-
-start("A");
-start("B");
-
-while (pending.len() > 0) {
-    var next = pending[0];
-    pending = pending[1:];
-    next();
-}
+interleaved([
+    () => { counter("A"); },
+    () => { counter("B"); }
+]);

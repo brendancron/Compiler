@@ -623,6 +623,11 @@ and primary s : Ast.expr =
     ignore (consume s Token.Right_bracket "Expected ']' after collection items.");
     Ast.at sp (`Collection_lit items)
   | Token.Left_paren when starts_lambda s -> lambda s sp
+  (* After [starts_lambda], so `() => ...` is still a lambda. *)
+  | Token.Left_paren when (peek_at s 1).Token.token_type = Token.Right_paren ->
+    ignore (advance s);
+    ignore (advance s);
+    Ast.at sp `Unit
   | Token.Left_paren ->
     ignore (advance s);
     let saved = s.no_brace in
@@ -1005,6 +1010,7 @@ and effect_decl s sp : Ast.stmt =
     else (
       let kind = op_kind s in
       let op_name = consume_identifier s "Expected operation name." in
+      let op_tparams = type_params s in
       ignore (consume s Token.Left_paren "Expected '(' after operation name.");
       let params =
         listed_until s Token.Right_paren (fun s ->
@@ -1018,7 +1024,7 @@ and effect_decl s sp : Ast.stmt =
         | None -> None
       in
       ignore (consume s Token.Semicolon "Expected ';' after operation.");
-      loop ({ Ast.op_name; op_kind = kind; op_params = params; op_ret } :: acc))
+      loop ({ Ast.op_name; op_kind = kind; op_tparams; op_params = params; op_ret } :: acc))
   in
   let ops = loop [] in
   ignore (consume s Token.Right_brace "Expected '}' after effect operations.");

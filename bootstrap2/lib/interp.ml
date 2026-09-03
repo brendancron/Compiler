@@ -88,6 +88,7 @@ let rec eval env (e : Ast.cps_expr) : value =
   | `Bytes b -> Array (Array.init (String.length b) (fun i -> Byte b.[i]))
   | `Char c -> Chr c
   | `Bool b -> Bool b
+  | `Unit -> Unit
   | `Var name ->
     (match lookup env name with
      | Some r -> !r
