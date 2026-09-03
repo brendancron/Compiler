@@ -1,8 +1,8 @@
 effect async {
-    ctl suspend<T>(setup: ((T) -> unit) -> unit): T;
+    ctl suspend<T>(register: ((T) -> unit) -> unit): T;
 }
 
-fn pause(): <async> unit {
+fn pause() {
     return suspend { it(()) };
 }
 
@@ -13,8 +13,8 @@ fn interleaved(actions: List<() -> <async> unit>) {
         run {
             action();
         } handle async {
-            ctl suspend(setup) {
-                setup {
+            ctl suspend(register) {
+                register {
                     ready.push { resume it; };
                 };
             }
@@ -32,11 +32,15 @@ fn interleaved(actions: List<() -> <async> unit>) {
     }
 }
 
-fn counter(name: string): <async> unit {
+fn counter(name) {
     for (var i = 0; i < 10; i += 1) {
-        print(name + ": " + str(i));
-        pause();
+        print_item(name, i);
     }
+}
+
+fn print_item(name, idx) {
+    print(name + ": " + str(idx));
+    pause();
 }
 
 interleaved([

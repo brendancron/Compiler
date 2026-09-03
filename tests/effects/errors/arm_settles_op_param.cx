@@ -1,5 +1,5 @@
 effect async {
-    ctl suspend<T>(setup: ((T) -> unit) -> unit): T;
+    ctl suspend<T>(register: ((T) -> unit) -> unit): T;
 }
 
 var ready: List<() -> unit> = [];
@@ -14,5 +14,5 @@ fn main(): <async> unit {
 run {
     main();
 } handle async {
-    ctl suspend(setup) { setup((value) => { print(str(value + 0)); resume value; }); }
+    ctl suspend(register) { register((value) => { print(str(value + 0)); resume value; }); }
 }
