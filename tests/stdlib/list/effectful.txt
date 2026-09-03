@@ -1,0 +1,9 @@
+log: doubling 1
+log: doubling 2
+log: doubling 3
+2 4 6
+log: testing 1
+log: testing 2
+log: testing 3
+1
+6

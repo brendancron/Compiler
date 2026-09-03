@@ -49,6 +49,10 @@ let cases =
   ; "tests/reflection/typeof_fn"
   ; "tests/effects/rows/inferred_rows"
   ; "tests/effects/rows/builtin_in_effectful_fn"
+  ; "tests/effects/rows/inferred_polymorphic"
+  ; "tests/effects/rows/row_variable"
+  ; "tests/effects/rows/map_over_effects"
+  ; "tests/effects/rows/row_extension"
   ; "tests/effects/log/log"
   ; "tests/effects/ask/ask"
   ; "tests/effects/multi_handle/multi_handle"
@@ -108,6 +112,7 @@ let cases =
   ; "tests/reflection/shape_scalar"
   ; "tests/core/math/modulus"
   ; "tests/stdlib/list/list"
+  ; "tests/stdlib/list/effectful"
   ; "tests/core/lambdas/basics"
   ; "tests/core/lambdas/trailing"
   ; "tests/core/lambdas/trailing_no_parens"
@@ -419,10 +424,6 @@ let expected_failing : (string * blocker) list =
     (* Row polymorphism. Inference already generalizes over rows; what is
        missing is per-instantiation evidence arity in `Cps`, and a way to write
        a row variable in an arrow. *)
-  ; "tests/effects/rows/inferred_polymorphic", Waiting "evidence arity per instantiation"
-  ; "tests/effects/rows/row_variable", Waiting "a row variable in an arrow type"
-  ; "tests/effects/rows/map_over_effects", Waiting "a row variable in an arrow type"
-  ; "tests/effects/rows/row_extension", Waiting "row extension in an annotation"
   ]
 
 (* Ought to be rejected and are not, paired with the `.err` they should

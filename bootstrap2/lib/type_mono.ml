@@ -87,7 +87,9 @@ and type_directed self (s : Ast.typed_stmt) =
       impl.Ast.ib_methods
   | _ -> false
 
-let rec subst_expr mapping (e : Ast.typed_expr) : Ast.typed_expr =
+let rec subst_expr ?(rows = []) mapping (e : Ast.typed_expr) : Ast.typed_expr =
+  let subst_expr mapping e = subst_expr ~rows mapping e in
+  let subst_stmt mapping s = subst_stmt ~rows mapping s in
   let it : Ast.typed_expr_kind =
     match e.Ast.it with
     | #Ast.lit as l -> l
@@ -116,9 +118,11 @@ let rec subst_expr mapping (e : Ast.typed_expr) : Ast.typed_expr =
          r
        :> Ast.typed_expr_kind)
   in
-  { e with Ast.it; ann = Types.subst_generic mapping e.Ast.ann }
+  { e with Ast.it; ann = Types.subst_generic ~rows mapping e.Ast.ann }
 
-and subst_stmt mapping (s : Ast.typed_stmt) : Ast.typed_stmt =
+and subst_stmt ?(rows = []) mapping (s : Ast.typed_stmt) : Ast.typed_stmt =
+  let subst_expr mapping e = subst_expr ~rows mapping e in
+  let subst_stmt mapping s = subst_stmt ~rows mapping s in
   let it : Ast.typed_stmt_kind =
     match s.Ast.it with
     | #Ast.stmts as st ->
@@ -133,13 +137,13 @@ and subst_stmt mapping (s : Ast.typed_stmt) : Ast.typed_stmt =
        :> Ast.typed_stmt_kind)
     | #Ast.type_defs as t -> t
     | #Ast.method_defs as m ->
-      (Ast.map_method_defs (subst_stmt mapping) (Types.subst_generic mapping) m
+      (Ast.map_method_defs (subst_stmt mapping) (Types.subst_generic ~rows mapping) m
        :> Ast.typed_stmt_kind)
     | #Ast.matching as m ->
       (Ast.map_matching (subst_expr mapping) (subst_stmt mapping) m
        :> Ast.typed_stmt_kind)
   in
-  { s with Ast.it; ann = Types.subst_generic mapping s.Ast.ann }
+  { s with Ast.it; ann = Types.subst_generic ~rows mapping s.Ast.ann }
 
 (* Keyed by the type, not its printing: two types can render alike. *)
 let copy_for state name (at : Types.ty) =
@@ -154,8 +158,12 @@ let copy_for state name (at : Types.ty) =
     (match declaration.Ast.it with
      | `Fn (_, params, signature, body) ->
        let mapping = Types.match_generic declaration.Ast.ann at [] in
+       let rows = Types.match_rows declaration.Ast.ann at [] in
        let specialized =
-         subst_stmt mapping { declaration with Ast.it = `Fn (copy, params, signature, body) }
+         subst_stmt
+           ~rows
+           mapping
+           { declaration with Ast.it = `Fn (copy, params, signature, body) }
        in
        state.emitted <- specialized :: state.emitted;
        state.changed <- true
@@ -167,7 +175,7 @@ let method_call_type state name (receiver : Ast.typed_expr) args result =
   let row =
     match Hashtbl.find_opt state.generic name with
     | Some { Ast.ann = Types.Fn (_, _, row); _ } -> row
-    | _ -> []
+    | _ -> Types.closed_row []
   in
   Types.Fn
     ( receiver.Ast.ann :: List.map (fun (a : Ast.typed_expr) -> a.Ast.ann) args
@@ -256,7 +264,8 @@ and rewrite_stmt state (s : Ast.typed_stmt) : Ast.typed_stmt =
 let rec collect state (s : Ast.typed_stmt) =
   match s.Ast.it with
   | `Fn (name, _, _, body) ->
-    if Types.has_generic s.Ast.ann && type_directed name s
+    if (Types.has_generic s.Ast.ann && type_directed name s)
+       || Types.row_polymorphic s.Ast.ann
     then Hashtbl.replace state.generic name s;
     List.iter (collect state) body
     | `Impl_decl (trait, type_name, _, impl) ->

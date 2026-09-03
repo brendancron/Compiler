@@ -1,8 +1,13 @@
 
 type fields = (string * ty) list
 
-(* `Yield<int>` and `Yield<string>` are different entries. *)
-and row = (string * ty list) list
+(* `Yield<int>` and `Yield<string>` are different entries. [tail] is the
+   variable a call site settles: `Cps` reads evidence arity off a definition, so
+   a row that is still open here is one `Type_mono` owes a copy per row. *)
+and row =
+  { labels : (string * ty list) list
+  ; tail : int option
+  }
 
 and ty =
   | Int
@@ -102,9 +107,14 @@ let fresh_fields () =
 (* Never defaulted: the author said the function is generic in T. *)
 let declared_params : (int, unit) Hashtbl.t = Hashtbl.create 8
 
+(* A row the author opened, as against one inference has not settled yet. A
+   call through the first is contained; through the second it is tied. *)
+let declared_row_params : (int, unit) Hashtbl.t = Hashtbl.create 8
+
 let reset () =
   counter := 0;
-  Hashtbl.reset declared_params
+  Hashtbl.reset declared_params;
+  Hashtbl.reset declared_row_params
 
 (* An equation holding only inside a match arm is taken back when the arm ends.
    Recording is off unless asked for, so every other unification pays nothing. *)
@@ -200,6 +210,8 @@ let string_of_kind = function
   | Bound traits -> String.concat " and " (List.map (fun b -> b.bd_trait) traits)
   | Projection (_, member) -> Printf.sprintf "an associated '%s'" member
 
+let closed_row labels = { labels; tail = None }
+
 let rec labels_of_infer_row (r : infer_row) : (string * infer_ty list) list * bool =
   match repr_row r with
   | REmpty -> [], false
@@ -207,6 +219,22 @@ let rec labels_of_infer_row (r : infer_row) : (string * infer_ty list) list * bo
   | RCons (label, args, rest) ->
     let labels, open_ = labels_of_infer_row rest in
     (label, args) :: labels, open_
+
+let rec row_tail (r : infer_row) : int option =
+  match repr_row r with
+  | REmpty | RVar { contents = RLink _ } -> None
+  | RVar { contents = RUnbound id } -> Some id
+  | RCons (_, _, rest) -> row_tail rest
+
+let declare_row (r : infer_row) =
+  match row_tail r with
+  | Some id -> Hashtbl.replace declared_row_params id ()
+  | None -> ()
+
+let row_is_declared (r : infer_row) =
+  match row_tail r with
+  | Some id -> Hashtbl.mem declared_row_params id
+  | None -> false
 
 let entry render (label, args) =
   match args with
@@ -263,8 +291,10 @@ let rec string_of_args (args : ty list) =
   | [] -> ""
   | args -> Printf.sprintf "<%s>" (String.concat ", " (List.map string_of_ty args))
 
+(* The tail is not printed: what a row is open in says nothing about what the
+   function performs. *)
 and string_of_row (r : row) =
-  match r with
+  match r.labels with
   | [] -> ""
   | labels ->
     Printf.sprintf " <%s>" (String.concat ", " (List.map (entry string_of_ty) labels))
@@ -307,7 +337,19 @@ let type_name (t : ty) : string option =
   | Named (name, _, _) | Sum (name, _) -> Some name
   | Tuple _ | Record _ | Fn _ | Generic _ -> None
 
-let rec subst_generic mapping (t : ty) : ty =
+(* A row whose tail is bound gains what the call site settled it to. Its own
+   labels stay: `<log | E>` at `E = <ask>` is `<ask, log>`. *)
+let subst_row rows (r : row) : row =
+  match r.tail with
+  | None -> r
+  | Some id ->
+    (match List.assoc_opt id rows with
+     | None -> r
+     | Some bound ->
+       { labels = List.sort compare (r.labels @ bound.labels); tail = bound.tail })
+
+let rec subst_generic ?(rows = []) mapping (t : ty) : ty =
+  let subst_generic mapping t = subst_generic ~rows mapping t in
   match t with
   | Generic id ->
     (match List.assoc_opt id mapping with
@@ -322,7 +364,10 @@ let rec subst_generic mapping (t : ty) : ty =
       , List.map (fun (l, t) -> l, subst_generic mapping t) fields )
   | Sum (name, args) -> Sum (name, List.map (subst_generic mapping) args)
   | Fn (params, ret, row) ->
-    Fn (List.map (subst_generic mapping) params, subst_generic mapping ret, row)
+    Fn
+      ( List.map (subst_generic mapping) params
+      , subst_generic mapping ret
+      , subst_row rows row )
   | scalar -> scalar
 
 let rec match_generic_fields a b acc =
@@ -348,6 +393,43 @@ and match_generic (general : ty) (concrete : ty) acc =
   | Fn (pa, ra, _), Fn (pb, rb, _) when List.length pa = List.length pb ->
     match_generic ra rb (List.fold_left2 (fun acc a b -> match_generic a b acc) acc pa pb)
   | _ -> acc
+
+(* What the template left open, read off an instantiation of it. Any difference
+   between the two rows must come from a variable: a row the definition closed
+   is one unification would already have rejected at the call site. *)
+let rec match_rows (general : ty) (concrete : ty) acc =
+  match general, concrete with
+  | Tuple a, Tuple b when List.length a = List.length b ->
+    List.fold_left2 (fun acc a b -> match_rows a b acc) acc a b
+  | Named (_, a, _), Named (_, b, _) | Sum (_, a), Sum (_, b) when List.length a = List.length b ->
+    List.fold_left2 (fun acc a b -> match_rows a b acc) acc a b
+  | Fn (pa, ra, rowa), Fn (pb, rb, rowb) when List.length pa = List.length pb ->
+    let acc = List.fold_left2 (fun acc a b -> match_rows a b acc) acc pa pb in
+    let acc = match_rows ra rb acc in
+    (match rowa.tail with
+     | Some id when not (List.mem_assoc id acc) ->
+       let named = List.map fst rowa.labels in
+       let rest = List.filter (fun (l, _) -> not (List.mem l named)) rowb.labels in
+       (id, { labels = rest; tail = rowb.tail }) :: acc
+     | _ -> acc)
+  | _ -> acc
+
+(* Evidence arity follows the row a definition declares, so a copy per row is
+   owed only when a parameter is what brings that row in. A function merely
+   left open — which is most of them — needs none. *)
+let row_polymorphic (t : ty) =
+  match t with
+  | Fn (params, _, { tail = Some id; _ }) ->
+    let rec mentions t =
+      match t with
+      | Fn (ps, ret, row) -> row.tail = Some id || List.exists mentions ps || mentions ret
+      | Tuple items -> List.exists mentions items
+      | Record fields | Named (_, _, fields) -> List.exists (fun (_, t) -> mentions t) fields
+      | Sum (_, args) -> List.exists mentions args
+      | _ -> false
+    in
+    List.exists mentions params
+  | _ -> false
 
 let rec has_generic (t : ty) =
   match t with
@@ -456,6 +538,16 @@ and unify_row (a : infer_row) (b : infer_row) : unit =
   match repr_row a, repr_row b with
   | REmpty, REmpty -> ()
   | RVar v1, RVar v2 when v1 == v2 -> ()
+  (* The declared one survives, so a later call through it is contained rather
+     than tied — which is what stops `<log | E>` looking recursive to itself. *)
+  | RVar ({ contents = RUnbound id1 } as v1), RVar ({ contents = RUnbound id2 } as v2) ->
+    let keep, dropped =
+      if Hashtbl.mem declared_row_params id1 && not (Hashtbl.mem declared_row_params id2)
+      then v1, v2
+      else v2, v1
+    in
+    note dropped;
+    dropped := RLink (RVar keep)
   | RVar ({ contents = RUnbound id } as v), other
   | other, RVar ({ contents = RUnbound id } as v) ->
     if row_occurs id other then error "This effect row is recursive.";
@@ -1000,7 +1092,7 @@ and concrete (t : infer_ty) : ty option =
           Option.map (fun args -> label, args) (each [] args))
         (fst (labels_of_infer_row row))
     in
-    Some (Fn (params, ret, List.sort compare entries))
+    Some (Fn (params, ret, { labels = List.sort compare entries; tail = row_tail row }))
   | IVar _ -> None
 
 let rec of_ty (t : ty) : infer_ty =
@@ -1028,8 +1120,10 @@ let rec of_ty (t : ty) : infer_ty =
       , of_ty ret
       , List.fold_right
           (fun (l, args) rest -> RCons (l, List.map of_ty args, rest))
-          row
-          REmpty )
+          row.labels
+          (match row.tail with
+           | None -> REmpty
+           | Some _ -> fresh_row ()) )
   | Generic _ -> fresh ()
 
 (* ---- resolve ---- *)
@@ -1037,7 +1131,9 @@ let rec of_ty (t : ty) : infer_ty =
 (* Unbound numeric variables default to int; the rest stay polymorphic. *)
 let rec resolve_row (r : infer_row) : row =
   let labels, _ = labels_of_infer_row r in
-  List.sort compare (List.map (fun (l, args) -> l, List.map resolve args) labels)
+  { labels = List.sort compare (List.map (fun (l, args) -> l, List.map resolve args) labels)
+  ; tail = row_tail r
+  }
 
 and resolve (t : infer_ty) : ty =
   match settle t with

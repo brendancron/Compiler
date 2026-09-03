@@ -33,7 +33,7 @@ let fresh prefix =
 
 (* Sorted, so caller and callee agree without communicating. *)
 let evidence_of_row info (row : Types.row) =
-  row
+  row.Types.labels
   |> List.map fst
   |> List.sort_uniq String.compare
   |> List.concat_map (fun label ->
@@ -45,7 +45,7 @@ let evidence_of_row info (row : Types.row) =
 let row_of (t : Types.ty) =
   match t with
   | Types.Fn (_, _, row) -> row
-  | _ -> []
+  | _ -> Types.closed_row []
 
 let is_effectful info (t : Types.ty) = evidence_of_row info (row_of t) <> []
 
@@ -55,7 +55,7 @@ let evidence_ty info op =
   | None -> Types.Unit
 
 let is_delimited info (row : Types.row) =
-  List.exists (fun (label, _) -> Hashtbl.mem info.delimited label) row
+  List.exists (fun (label, _) -> Hashtbl.mem info.delimited label) row.Types.labels
 
 (* The type gains the evidence parameters too, or it describes the wrong
    arity. *)
@@ -67,7 +67,7 @@ let rec widen info (t : Types.ty) =
        block's own type — that reaches its `run` by another route. *)
     let continuation =
       if is_delimited info row
-      then [ Types.Fn ([ widen info ret ], Types.Unit, []) ]
+      then [ Types.Fn ([ widen info ret ], Types.Unit, Types.closed_row []) ]
       else []
     in
     Types.Fn
@@ -92,7 +92,7 @@ let ignored span : Ast.cps_expr = { Ast.it = `Bool false; span; ann = Types.Bool
 
 let call ?(result = Types.Unit) span callee args =
   let callee_ty =
-    Types.Fn (List.map (fun (a : Ast.cps_expr) -> a.Ast.ann) args, result, [])
+    Types.Fn (List.map (fun (a : Ast.cps_expr) -> a.Ast.ann) args, result, Types.closed_row [])
   in
   node
     span
@@ -229,7 +229,7 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
        | `Var name when Hashtbl.mem info.owner name ->
          let ty =
            Types.Fn
-             (List.map (fun (a : Ast.cps_expr) -> a.Ast.ann) args, e.Ast.ann, [])
+             (List.map (fun (a : Ast.cps_expr) -> a.Ast.ann) args, e.Ast.ann, Types.closed_row [])
          in
          `Call (var callee.Ast.span ty (evidence_name name), args)
        | _ ->
@@ -711,7 +711,7 @@ and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
         , held
         , evidence_for callee.Ast.ann )
     in
-    let answering = Types.Fn ([ widen info c.Ast.ann ], Types.Unit, []) in
+    let answering = Types.Fn ([ widen info c.Ast.ann ], Types.Unit, Types.closed_row []) in
     before @ [ call span target (args @ evidence @ [ var span answering next ]) ]
   | _ -> unsupported span "This effect cannot be sequenced yet."
 
