@@ -1,7 +1,5 @@
 type error =
-  { file : string
-  ; line : int
-  ; col : int
+  { span : Source_map.Span.t
   ; message : string
   }
 
@@ -36,7 +34,7 @@ let matches s token_types =
   if List.exists (check s) token_types then Some (advance s) else None
 
 let error s (tok : Token.token) message =
-  s.errors <- { file = tok.Token.file; line = tok.line; col = tok.col; message } :: s.errors;
+  s.errors <- { span = tok.Token.span; message } :: s.errors;
   Parse_error
 
 let consume s token_type message =

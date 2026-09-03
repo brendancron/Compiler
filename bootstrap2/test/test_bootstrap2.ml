@@ -511,12 +511,17 @@ let run_runtime_case root name =
 let run_round_trip root name =
   let path = Filename.concat root (name ^ ".cx") in
   let parse where text =
-    match Scanner.scan_tokens ~file:path text with
+    match Scanner.scan_tokens (Source_map.File.create ~path ~text) with
     | Error _ -> Error (Printf.sprintf "%s does not scan" where)
     | Ok tokens ->
       (match Parser.parse tokens with
        | Error (e :: _) ->
-         Error (Printf.sprintf "%s does not parse [%d:%d] %s" where e.Parser.line e.Parser.col e.Parser.message)
+         Error
+           (Printf.sprintf
+              "%s does not parse %s %s"
+              where
+              (Ast.locate ~entry:path e.Parser.span)
+              e.Parser.message)
        | Error [] -> Error (Printf.sprintf "%s does not parse" where)
        | Ok program -> Ok program)
   in
@@ -625,6 +630,98 @@ let run_partition root =
       (String.concat "\n" (List.map (fun name -> "  " ^ name) missing));
     false
 
+(* The fixture suite compares `[line:col] message`, so nothing there would
+   notice a frame that renders without its source line or without its closing
+   rule -- the two ways the Rust compiler's diagnostics used to come out
+   broken. *)
+let rendered stage ~entry ~path ~text ~lo ~hi message =
+  let span =
+    match text with
+    | None -> Source_map.Span.nowhere
+    | Some text -> Source_map.Span.of_range (Source_map.File.create ~path ~text) ~lo ~hi
+  in
+  Render.error ~entry (Diagnostic.at stage span message)
+
+let renderings =
+  [ ( "a span inside a line"
+    , rendered
+        Diagnostic.Type
+        ~entry:"alpha.cx"
+        ~path:"alpha.cx"
+        ~text:(Some "fn main() {\n  var x: int = \"hi\";\n}\n")
+        ~lo:27
+        ~hi:31
+        "expected int, found string"
+    , "× Type error: expected int, found string\n\
+      \  ┌─ alpha.cx:2:16\n\
+      \  │\n\
+       2 │   var x: int = \"hi\";\n\
+      \  │                ~~~~\n\
+      \  └─\n" )
+    (* The gutter widens with the line number, so the rules stay under it. *)
+  ; ( "a two-digit line number"
+    , rendered
+        Diagnostic.Verify
+        ~entry:"beta.cx"
+        ~path:"beta.cx"
+        ~text:(Some (String.concat "" (List.init 11 (fun _ -> "//\n")) ^ "var zz = 1;\n"))
+        ~lo:37
+        ~hi:39
+        "not in scope"
+    , "× Verify error: not in scope\n\
+      \   ┌─ beta.cx:12:5\n\
+      \   │\n\
+       12 │ var zz = 1;\n\
+      \   │     ~~\n\
+      \   └─\n" )
+    (* A tab is eight columns and the emoji is two, in the line and in the
+       underline alike. *)
+  ; ( "a line with a tab and a wide character"
+    , rendered
+        Diagnostic.Verify
+        ~entry:"wide.cx"
+        ~path:"wide.cx"
+        ~text:(Some "\tvar wide = \"\xf0\x9f\x8e\x89\"; var bad = 1;\n")
+        ~lo:24
+        ~hi:27
+        "not in scope"
+    , "\xc3\x97 Verify error: not in scope\n\
+      \  \xe2\x94\x8c\xe2\x94\x80 wide.cx:1:25\n\
+      \  \xe2\x94\x82\n\
+       1 \xe2\x94\x82         var wide = \"\xf0\x9f\x8e\x89\"; var bad = 1;\n\
+      \  \xe2\x94\x82                              ~~~\n\
+      \  \xe2\x94\x94\xe2\x94\x80\n" )
+    (* No location is a case the frame answers for, not one it skips. *)
+  ; ( "a span with no source behind it"
+    , rendered
+        Diagnostic.Type
+        ~entry:"gamma.cx"
+        ~path:""
+        ~text:None
+        ~lo:0
+        ~hi:0
+        "Unhandled effect(s): Log."
+    , "× Type error: Unhandled effect(s): Log.\n\
+      \  ┌─ (no source location)\n\
+      \  └─\n" )
+  ]
+
+let run_rendering () =
+  List.for_all
+    (fun (what, actual, expected) ->
+      if String.equal actual expected
+      then (
+        Printf.printf "ok   renders %s\n" what;
+        true)
+      else (
+        Printf.printf
+          "FAIL renders %s\n  --- expected ---\n%s  --- actual ---\n%s"
+          what
+          expected
+          actual;
+        false))
+    renderings
+
 let () =
   match repo_root () with
   | None ->
@@ -638,7 +735,7 @@ let () =
       @ List.map (run_round_trip root) cases
       @ List.map (run_expected_failing root) expected_failing
       @ List.map (run_known_unsound root) known_unsound
-      @ [ run_partition root ]
+      @ [ run_partition root; run_rendering () ]
     in
     let failed = List.length (List.filter not results) in
     Printf.printf "\n%d/%d passed\n" (List.length results - failed) (List.length results);

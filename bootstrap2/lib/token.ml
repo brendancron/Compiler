@@ -78,12 +78,10 @@ type token_type =
 type token =
   { token_type : token_type
   ; lexeme : string
-  ; file : string
-  ; line : int (* 1-based *)
-  ; col : int (* 1-based, counted from the start of `line` *)
+  ; span : Source_map.Span.t
   }
 
-let make token_type ~lexeme ~file ~line ~col = { token_type; lexeme; file; line; col }
+let make token_type ~lexeme ~span = { token_type; lexeme; span }
 
 let token_type_to_string = function
   | Left_paren -> "LEFT_PAREN"
@@ -173,7 +171,12 @@ let literal_to_string = function
   | Float n -> float_to_string n
   | _ -> "null"
 
-let to_string { token_type; lexeme; line; col } =
+let to_string { token_type; lexeme; span } =
+  let line, col =
+    match Source_map.Span.view span with
+    | Source_map.Span.Located l -> l.Source_map.Span.line, l.Source_map.Span.col
+    | Source_map.Span.Nowhere_in_source -> 1, 1
+  in
   Printf.sprintf
     "%d:%d %s %s %s"
     line

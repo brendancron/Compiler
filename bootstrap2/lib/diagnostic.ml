@@ -44,4 +44,4 @@ let exit_code = function
   | Cps | Verify | Runtime -> 70
 
 let at stage span message = { stage; span; message }
-let one stage span message = Error [ { stage; span; message } ]
+let one stage span message = Error [ at stage span message ]

@@ -1,21 +1,27 @@
-type span =
-  { file : string
-  ; line : int
-  ; col : int
-  }
+type span = Source_map.Span.t
+
+(* A path is shown only when it is not the file the user named, and then
+   relative to it. *)
+let shown_path ~entry path =
+  let root = Filename.dirname entry ^ "/" in
+  if String.length path > String.length root
+     && String.equal (String.sub path 0 (String.length root)) root
+  then String.sub path (String.length root) (String.length path - String.length root)
+  else path
 
 let locate ~entry (s : span) =
-  if String.equal s.file entry || String.equal s.file ""
-  then Printf.sprintf "[%d:%d]" s.line s.col
-  else (
-    let root = Filename.dirname entry ^ "/" in
-    let shown =
-      if String.length s.file > String.length root
-         && String.equal (String.sub s.file 0 (String.length root)) root
-      then String.sub s.file (String.length root) (String.length s.file - String.length root)
-      else s.file
-    in
-    Printf.sprintf "[%s %d:%d]" shown s.line s.col)
+  match Source_map.Span.view s with
+  | Source_map.Span.Nowhere_in_source -> "[unknown]"
+  | Source_map.Span.Located l ->
+    let path = Source_map.File.path l.Source_map.Span.file in
+    if String.equal path entry
+    then Printf.sprintf "[%d:%d]" l.Source_map.Span.line l.Source_map.Span.col
+    else
+      Printf.sprintf
+        "[%s %d:%d]"
+        (shown_path ~entry path)
+        l.Source_map.Span.line
+        l.Source_map.Span.col
 
 type ('a, 'ann) node =
   { it : 'a
@@ -772,4 +778,4 @@ let unop_of_token : Token.token_type -> unop option = function
   | Token.Bang -> Some Not
   | _ -> None
 
-let span_of_token (t : Token.token) = { file = t.file; line = t.line; col = t.col }
+let span_of_token (t : Token.token) = t.Token.span

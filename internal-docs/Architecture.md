@@ -23,7 +23,7 @@ The order lives in `lib/compile.ml`, from `Desugar` on, and in `lib/pipeline.ml`
 
 ### Scanner
 
-Source text to tokens. Every span a diagnostic is reported against — file, line, column — is fixed here and carried by every tree that follows.
+Source text to tokens. Every span a diagnostic is reported against — a file and a byte range into it — is fixed here and carried by every tree that follows. See [Diagnostics.md](Diagnostics.md).
 
 ### Parser
 

@@ -35,6 +35,10 @@ dune exec --root . bin/main.exe -- ../tests/core/print/hello.cx
 `main` is protected: it takes no direct pushes, so every change lands through a
 pull request. Branch, push, open the PR, and let the `test` check run.
 
+**Do not watch CI.** Opening the PR is where the work ends. Do not poll
+`gh pr checks`, do not start a monitor on the run, and do not report back on
+whether it went green — check only when asked to.
+
 **Keep a branch current with `main`.** Merge `main` in before opening a PR and
 again whenever `main` moves — a branch cut from a commit that has since been
 superseded reviews against the wrong thing, and its checks pass against a tree

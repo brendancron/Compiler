@@ -39,8 +39,9 @@ let functions : (string * (unit -> Types.infer_ty list * Types.infer_ty)) list =
    import and an `embed` are. Where the program was started from is not
    something the source can see. *)
 let beside (span : Ast.span) path =
-  if Filename.is_relative path && not (String.equal span.Ast.file "")
-  then Filename.concat (Filename.dirname span.Ast.file) path
+  let from = Source_map.Span.path span in
+  if Filename.is_relative path && not (String.equal from "")
+  then Filename.concat (Filename.dirname from) path
   else path
 
 let values ~out =

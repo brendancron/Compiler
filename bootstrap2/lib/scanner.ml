@@ -1,26 +1,18 @@
 type error =
-  { file : string
-  ; line : int
-  ; col : int
+  { span : Source_map.Span.t
   ; message : string
   }
 
 type state =
-  { file : string
+  { file : Source_map.File.t
   ; source : string
-  ; mutable start : int   ; mutable start_line : int
-  ; mutable start_col : int
-  ; mutable current : int   ; mutable line : int
-  ; mutable line_start : int   ; mutable tokens : Token.token list (* reversed *)
+  ; mutable start : int
+  ; mutable current : int
+  ; mutable tokens : Token.token list (* reversed *)
   ; mutable errors : error list (* reversed *)
   }
 
-let col_of s offset = offset - s.line_start + 1
-
-(* Call immediately after consuming a '\n'. *)
-let newline s =
-  s.line <- s.line + 1;
-  s.line_start <- s.current
+let span_here s = Source_map.Span.of_range s.file ~lo:s.start ~hi:s.current
 
 let is_at_end s = s.current >= String.length s.source
 
@@ -45,11 +37,10 @@ let lexeme s = String.sub s.source s.start (s.current - s.start)
 
 let add_token s token_type =
   s.tokens
-  <- Token.make token_type ~lexeme:(lexeme s) ~file:s.file ~line:s.start_line ~col:s.start_col
-     :: s.tokens
+  <- Token.make token_type ~lexeme:(lexeme s) ~span:(span_here s) :: s.tokens
 
 let error s message =
-  s.errors <- { file = s.file; line = s.start_line; col = s.start_col; message } :: s.errors
+  s.errors <- { span = span_here s; message } :: s.errors
 let is_digit c = c >= '0' && c <= '9'
 let is_alpha c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
 let is_alphanumeric c = is_alpha c || is_digit c
@@ -123,7 +114,6 @@ let quoted s quote =
          | None -> if !bad = None then bad := Some "Unknown escape.");
         scan ()
       | c ->
-        if c = '\n' then newline s;
         Buffer.add_char buf c;
         scan ())
   in
@@ -236,8 +226,7 @@ let scan_token s =
   (* A single `&` or `|` is not an operator at all. *)
   | '&' when matches s '&' -> add_token s Token.Amp_amp
   | '|' when matches s '|' -> add_token s Token.Pipe_pipe
-  | ' ' | '\r' | '\t' -> ()
-  | '\n' -> newline s
+  | ' ' | '\r' | '\t' | '\n' -> ()
   | '"' -> string_literal s
   | '\'' -> char_literal s
   | c ->
@@ -247,27 +236,22 @@ let scan_token s =
     then identifier s
     else error s (Printf.sprintf "Unexpected character '%c'." c)
 
-let scan_tokens ?(file = "") source =
+let scan_tokens file =
   let s =
     { file
-    ; source
+    ; source = Source_map.File.text file
     ; start = 0
-    ; start_line = 1
-    ; start_col = 1
     ; current = 0
-    ; line = 1
-    ; line_start = 0
     ; tokens = []
     ; errors = []
     }
   in
   while not (is_at_end s) do
     s.start <- s.current;
-    s.start_line <- s.line;
-    s.start_col <- col_of s s.current;
     scan_token s
   done;
-  let eof = Token.make Token.Eof ~lexeme:"" ~file ~line:s.line ~col:(col_of s s.current) in
+  s.start <- s.current;
+  let eof = Token.make Token.Eof ~lexeme:"" ~span:(span_here s) in
   match s.errors with
   | [] -> Ok (List.rev (eof :: s.tokens))
   | errors -> Error (List.rev errors)

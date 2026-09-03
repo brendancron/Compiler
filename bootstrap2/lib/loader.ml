@@ -40,24 +40,19 @@ let normalize path =
   in
   (if absolute then "/" else "") ^ String.concat "/" parts
 
-let read_file path =
-  let channel = open_in_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_in channel)
-    (fun () -> really_input_string channel (in_channel_length channel))
-
 let parse_unit span path =
   if not (Sys.file_exists path) then fail span "Cannot find module '%s'." path;
-  let source = read_file path in
-  match Scanner.scan_tokens ~file:path source with
-  | Error (e :: _) -> fail { Ast.file = path; line = e.Scanner.line; col = e.Scanner.col } "%s" e.Scanner.message
-  | Error [] -> fail span "'%s' does not scan." path
-  | Ok tokens ->
-    (match Parser.parse tokens with
-     | Error (e :: _) ->
-       fail { Ast.file = path; line = e.Parser.line; col = e.Parser.col } "%s" e.Parser.message
-     | Error [] -> fail span "'%s' does not parse." path
-     | Ok program -> program)
+  match Source_map.File.load path with
+  | Error message -> fail span "%s" message
+  | Ok file ->
+    (match Scanner.scan_tokens file with
+     | Error (e :: _) -> fail e.Scanner.span "%s" e.Scanner.message
+     | Error [] -> fail span "'%s' does not scan." path
+     | Ok tokens ->
+       (match Parser.parse tokens with
+        | Error (e :: _) -> fail e.Parser.span "%s" e.Parser.message
+        | Error [] -> fail span "'%s' does not parse." path
+        | Ok program -> program))
 
 (* Sorted, so the expansion does not depend on readdir order. *)
 let expand_wildcards ~from (program : Ast.program) =
@@ -106,7 +101,7 @@ let load entry =
         (fun (decl, span) -> walk span (resolve_path ~from:path (path_of decl)))
         (imports program))
   in
-  let root = { Ast.file = entry; line = 1; col = 1 } in
+  let root = Source_map.Span.nowhere in
   walk root entry;
   let all = List.rev !units in
   let entry_path = normalize entry in
