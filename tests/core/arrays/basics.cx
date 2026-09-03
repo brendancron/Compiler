@@ -11,5 +11,5 @@ print(typeof(grid).name);
 var names: Array<string> = ["a", "b"];
 print(str(names[1]) + " " + str(typeof(names).name));
 
-fn first(a: Array<int>) -> int { return a[0]; }
+fn first(a: Array<int>): int { return a[0]; }
 print(str(first(xs)) + " " + str(typeof(first).name));

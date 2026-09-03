@@ -7,7 +7,7 @@ type Nested<T> {
     Deep(Nested<(T, T)>),
 }
 
-fn depth<T>(n: Nested<T>) -> int {
+fn depth<T>(n: Nested<T>): int {
     match n {
         Nested::Leaf(x)     => { return 0; }
         Nested::Deep(inner) => { return 1 + depth(inner); }

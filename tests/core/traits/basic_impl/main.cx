@@ -1,5 +1,5 @@
 trait Describe {
-    fn describe(self) -> string;
+    fn describe(self): string;
 }
 
 type Circle {
@@ -12,13 +12,13 @@ type Rectangle {
 }
 
 impl Describe for Circle {
-    fn describe(self) -> string {
+    fn describe(self): string {
         return "circle with radius " + str(self.radius);
     }
 }
 
 impl Describe for Rectangle {
-    fn describe(self) -> string {
+    fn describe(self): string {
         return "rectangle " + str(self.width) + "x" + str(self.height);
     }
 }

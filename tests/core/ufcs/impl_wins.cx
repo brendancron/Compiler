@@ -3,10 +3,10 @@
 type Dog { name: string }
 
 impl Dog {
-    fn speak(self) -> string { return "method"; }
+    fn speak(self): string { return "method"; }
 }
 
-fn speak(d: Dog) -> string { return "function"; }
+fn speak(d: Dog): string { return "function"; }
 
 var rex = new Dog { name: "rex" };
 print(str(rex.speak()) + " " + str(speak(rex)));

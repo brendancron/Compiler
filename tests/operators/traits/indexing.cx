@@ -3,13 +3,13 @@ type Ring { items: Array<int>, head: int }
 impl Index<int> for Ring {
     type Output = int;
 
-    fn get(self, at: int) -> int {
+    fn get(self, at: int): int {
         return self.items[(self.head + at) % self.items.len()];
     }
 }
 
 impl IndexSet<int> for Ring {
-    fn set(self, at: int, v: int) -> int {
+    fn set(self, at: int, v: int): int {
         self.items[(self.head + at) % self.items.len()] = v;
         return v;
     }

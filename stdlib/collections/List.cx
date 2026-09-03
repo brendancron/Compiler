@@ -1,11 +1,11 @@
 
-fn map<T, U, E>(items: List<T>, f: (T) -> <E> U) -> <E> List<U> {
+fn map<T, U, E>(items: List<T>, f: (T) -> <E> U): <E> List<U> {
     var out: List<U> = [];
     for (item in items) { out.push(f(item)); }
     return out;
 }
 
-fn filter<T, E>(items: List<T>, f: (T) -> <E> bool) -> <E> List<T> {
+fn filter<T, E>(items: List<T>, f: (T) -> <E> bool): <E> List<T> {
     var out: List<T> = [];
     for (item in items) {
         if (f(item)) { out.push(item); }
@@ -13,41 +13,41 @@ fn filter<T, E>(items: List<T>, f: (T) -> <E> bool) -> <E> List<T> {
     return out;
 }
 
-fn fold<T, A, E>(items: List<T>, start: A, f: (A, T) -> <E> A) -> <E> A {
+fn fold<T, A, E>(items: List<T>, start: A, f: (A, T) -> <E> A): <E> A {
     var acc = start;
     for (item in items) { acc = f(acc, item); }
     return acc;
 }
 
-fn any<T, E>(items: List<T>, f: (T) -> <E> bool) -> <E> bool {
+fn any<T, E>(items: List<T>, f: (T) -> <E> bool): <E> bool {
     for (item in items) {
         if (f(item)) { return true; }
     }
     return false;
 }
 
-fn all<T, E>(items: List<T>, f: (T) -> <E> bool) -> <E> bool {
+fn all<T, E>(items: List<T>, f: (T) -> <E> bool): <E> bool {
     for (item in items) {
         if (f(item)) {} else { return false; }
     }
     return true;
 }
 
-fn find<T>(items: List<T>, f: (T) -> bool) -> Option<T> {
+fn find<T>(items: List<T>, f: (T) -> bool): Option<T> {
     for (item in items) {
         if (f(item)) { return new Option::Some(item); }
     }
     return new Option::None;
 }
 
-fn concat<T>(a: List<T>, b: List<T>) -> List<T> {
+fn concat<T>(a: List<T>, b: List<T>): List<T> {
     var out: List<T> = [];
     for (item in a) { out.push(item); }
     for (item in b) { out.push(item); }
     return out;
 }
 
-fn reverse<T>(items: List<T>) -> List<T> {
+fn reverse<T>(items: List<T>): List<T> {
     var out: List<T> = [];
     var at = items.len() - 1;
     while (at >= 0) {
@@ -57,7 +57,7 @@ fn reverse<T>(items: List<T>) -> List<T> {
     return out;
 }
 
-fn flat_map<T, U>(items: List<T>, f: (T) -> List<U>) -> List<U> {
+fn flat_map<T, U>(items: List<T>, f: (T) -> List<U>): List<U> {
     var out: List<U> = [];
     for (item in items) {
         for (inner in f(item)) { out.push(inner); }
@@ -65,7 +65,7 @@ fn flat_map<T, U>(items: List<T>, f: (T) -> List<U>) -> List<U> {
     return out;
 }
 
-fn join(items: List<string>, separator: string) -> string {
+fn join(items: List<string>, separator: string): string {
     if (items.len() == 0) { return ""; }
     var out = items[0];
     var at = 1;

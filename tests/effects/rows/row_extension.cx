@@ -6,18 +6,18 @@ effect ask {
     fn base(): int;
 }
 
-fn traced<T, E>(label: string, f: () -> <E> T) -> <log, E> T {
+fn traced<T, E>(label: string, f: () -> <E> T): <log, E> T {
     emit("enter " + label);
     var result = f();
     emit("leave " + label);
     return result;
 }
 
-fn quiet() -> int {
+fn quiet(): int {
     return 7;
 }
 
-fn asks() -> <ask> int {
+fn asks(): <ask> int {
     return base() + 1;
 }
 

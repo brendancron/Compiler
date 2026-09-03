@@ -14,9 +14,9 @@ fn run_one(task: () -> <sched> unit) {
     }
 }
 
-fn child() -> <sched> unit { print("child a"); tick(); print("child b"); }
+fn child(): <sched> unit { print("child a"); tick(); print("child b"); }
 
-fn parent() -> <sched> unit {
+fn parent(): <sched> unit {
     print("parent a");
     spawn(child);
     tick();

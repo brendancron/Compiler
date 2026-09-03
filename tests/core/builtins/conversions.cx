@@ -3,10 +3,10 @@
 // the failure is an effect rather than a sentinel.
 effect Fallible { final ctl invalid(text: string); }
 
-trait TryFrom<S> { fn from(source: S) -> <Fallible> Self; }
+trait TryFrom<S> { fn from(source: S): <Fallible> Self; }
 
 impl TryFrom<string> for int {
-    fn from(source: string) -> <Fallible> int {
+    fn from(source: string): <Fallible> int {
         if (source.len() == 0) { return invalid(source); }
         var total = 0;
         for (c in source.chars()) {

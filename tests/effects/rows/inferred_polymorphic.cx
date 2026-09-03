@@ -6,11 +6,11 @@ fn twice(f, x) {
     return [f(x), f(x)];
 }
 
-fn bump(x: int) -> int {
+fn bump(x: int): int {
     return x + 1;
 }
 
-fn shout(x: int) -> <log> int {
+fn shout(x: int): <log> int {
     emit("saw " + str(x));
     return x * 2;
 }

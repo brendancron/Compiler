@@ -186,11 +186,20 @@ let type_params s : string list =
   List.map (fun (p : Ast.comptime_param) -> p.Ast.cp_name) (comptime_params s)
 
 let signature ?(comptime = []) s : Ast.signature =
-  match matches s [ Token.Arrow; Token.Colon ] with
-  | None -> { Ast.ret = None; row = None; comptime }
-  | Some _ ->
+  let returning () =
     let row = if check s Token.Less then Some (row_annotation s) else None in
     { Ast.ret = Some (type_expr s); row; comptime }
+  in
+  match matches s [ Token.Colon ] with
+  | Some _ -> returning ()
+  (* The arrow belongs to a function *type*; a declaration says what it returns
+     the way every other annotation does. Read it anyway, so the mistake is one
+     diagnostic rather than the wreckage of parsing the rest as statements. *)
+  | None when check s Token.Arrow ->
+    ignore (error s (peek s) "A return type follows ':', not '->'.");
+    ignore (advance s);
+    returning ()
+  | None -> { Ast.ret = None; row = None; comptime }
 
 (* ---- expressions ---- *)
 
@@ -1019,7 +1028,7 @@ and effect_decl s sp : Ast.stmt =
       in
       ignore (consume s Token.Right_paren "Expected ')' after parameters.");
       let op_ret =
-        match matches s [ Token.Arrow; Token.Colon ] with
+        match matches s [ Token.Colon ] with
         | Some _ -> Some (type_expr s)
         | None -> None
       in

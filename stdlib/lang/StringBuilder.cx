@@ -3,7 +3,7 @@ type StringBuilder {
     length: int,
 }
 
-fn new() -> StringBuilder {
+fn new(): StringBuilder {
     return new StringBuilder { parts: [], length: 0 };
 }
 
@@ -19,12 +19,12 @@ impl StringBuilder {
         self.append(s);
         self.append("\n");
     }
-    fn build(self) -> string {
+    fn build(self): string {
         var out = "";
         for (part in self.parts) { out = out + part; }
         return out;
     }
-    fn len(self) -> int {
+    fn len(self): int {
         return self.length;
     }
     fn clear(self) {

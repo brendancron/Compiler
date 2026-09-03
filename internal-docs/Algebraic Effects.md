@@ -6,7 +6,7 @@ Status: **implemented.**
 |-------|-------|
 | Effect rows, inference, discharge | `lib/types.ml`, `lib/typecheck.ml` |
 | `fn` operations | evidence passing (`lib/cps.ml`) |
-| Tail-resumptive `ctl` | compiled as `fn` — bind-inversion |
+| Tail-resumptive `ctl` | compiled as `fn
 | Aborting `ctl`, multi-shot `resume` | continuation passing |
 | Effect inside a loop | the loop is its own continuation, re-entered per iteration |
 | Effect inside `&&`/`\|\|` | the operand it sits in becomes a branch |
@@ -38,7 +38,7 @@ Three consequences, recorded so they are not rediscovered:
 
 **Koka**, per Leijen's row-polymorphic effect types. Where this document is silent or a detail turns out to be underspecified, do what Koka does rather than inventing something.
 
-Cronyx's surface syntax is already Koka-shaped — its `fn` and `ctl` operations are Koka's `fun` and `ctl`, the tail-resumptive and general cases — so the semantics carry over with little translation.
+Cronyx's surface syntax is already Koka-shaped — its `fn
 
 ## Surface syntax
 
@@ -82,8 +82,8 @@ effect Error {
     final ctl throw(msg: string);
 }
 
-fn as_int(s: string) -> int    { … return throw("not an int"); }
-fn as_word(n: int) -> string   { … return throw("not zero"); }
+fn as_int(s: string): int    { … return throw("not an int"); }
+fn as_word(n: int): string   { … return throw("not zero"); }
 ```
 
 Both `return throw(…)` check, at `int` and at `string`, with no type parameter to settle. Declaring `throw` with a parameter instead ties every call site to one type and rejects the second — the two are not interchangeable, and this is the one that works.
@@ -100,14 +100,14 @@ Three things follow. An operation's scheme quantifies its effect's parameters, s
 
 ## Operation kinds
 
-| | `fn op` | `ctl op` | `final ctl op` |
+| | `fn
 |---|---|---|---|
 | After the arm returns | resumes automatically with that value | does **not** resume | does **not** resume |
 | Explicit `resume` | not used | resumes; may be called more than once | rejected |
 | Falling off the arm | resumes | aborts the enclosing `run` block | aborts the enclosing `run` block |
 | Result type | one per program | one per program | **fresh at every call site** |
 
-`log` and `ask` show `fn` ops. `exception` shows abort — `throw`'s handler prints and `"unreachable"` never runs. `flip` shows multi-shot resumption:
+`log` and `ask` show `fn
 
 ```cronyx
 ctl flip() { resume false; resume true; }
@@ -173,7 +173,7 @@ An unconstrained row variable **defaults to the empty row** at `resolve` time, e
 
 The whole difficulty in typing `resume` is the answer type — what the `run` block ultimately produces. Because `run` is a statement, that answer type is always `unit`, so there is nothing to thread and no delimited-continuation typing to implement. `resume e` simply checks `e` against the operation's declared return type: `ctl flip(): bool` gives `resume false;`, and `ctl throw(...): unit` gives bare `resume;`.
 
-Two errors worth checking: `resume` outside a `ctl` arm, and `resume` inside a `fn` arm, which auto-resumes and must not also resume explicitly.
+Two errors worth checking: `resume` outside a `ctl` arm, and `resume` inside a `fn
 
 When `run` becomes an expression — likely, for `var x = run { ... }` — that is the moment to introduce answer types. The row machinery will already exist.
 
@@ -188,7 +188,7 @@ Checked like function bodies, with their rows unioned into the enclosing `run`'s
 They used to be one, and a `return` inside an `if` was left as an ordinary return by the evidence-only translation, so its value never reached the continuation and the call produced nothing at all:
 
 ```cronyx
-fn pick(n: int) -> int {
+fn pick(n: int): int {
     if (n == 0) { return 42; }   // silently lost
     return ask();
 }
@@ -262,7 +262,7 @@ An effect takes the second only when some handler for it actually resumes out of
 
 | Handler | Translation |
 |---|---|
-| all `fn` operations | evidence only |
+| all `fn
 | `ctl` resuming in tail position | evidence only — bind inversion rewrites it to a return |
 | `final ctl` | evidence only, plus an unwind |
 | `ctl` otherwise | CPS |
@@ -322,7 +322,7 @@ The checker's rows *are* the CPS marking. The Rust bootstrap runs a separate `ma
 
 It has to run after `Resolve` in particular, because an operator can be an ordinary function and an ordinary function can perform effects. `a + b` whose `Add` impl performs `logger` is only visibly a call once elaboration has made it one.
 
-Marking should key on **`ctl` reachability, not on a non-empty row**. `fn` operations are tail-resumptive: they resume exactly once with the arm's value, so they are a plain call to the evidence passed in and need no continuation. This is Koka's bind-inversion, and it means `log`- and `ask`-style effects cost nothing at runtime.
+Marking should key on **`ctl` reachability, not on a non-empty row**. `fn
 
 Following the discipline the other passes use, the effect constructs (`effect` declarations, `run`/`handle`, `resume`) live in a fragment present in the parsed, desugared, typed, and reflected trees and **absent** from the post-CPS tree — so the interpreter needs no effect support at all, only closures and calls, which it already has.
 

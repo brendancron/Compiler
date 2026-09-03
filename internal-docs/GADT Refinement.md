@@ -16,7 +16,7 @@ type Expr<T> {
     If<A>(Expr<bool>, Expr<A>, Expr<A>) -> Expr<A>,
 }
 
-fn eval<T>(e: Expr<T>) -> T { … }
+fn eval<T>(e: Expr<T>): T { … }
 ```
 
 In the `Lit` arm, `return n` has to typecheck against `T` while `n` is an `int`.
@@ -42,7 +42,7 @@ This gets (1) and (2). It fails (3).
 ## The hole
 
 ```cronyx
-fn f<T, U>(q: Q<T>, p: U) -> int {
+fn f<T, U>(q: Q<T>, p: U): int {
     match q { Q::Num => { print(p + 1); }  Q::Text => { } }
     print(p + "s");
     return 0;
@@ -106,7 +106,7 @@ the return type and the payload only — is not enough. A parameter of the refin
 type reaches the arm through the *environment*:
 
 ```cronyx
-fn eval<T>(e: Expr<T>, acc: T) -> T {
+fn eval<T>(e: Expr<T>, acc: T): T {
     match e {
         Expr::Lit(n)     => { return acc + n; }
         Expr::BoolLit(b) => { return b; }

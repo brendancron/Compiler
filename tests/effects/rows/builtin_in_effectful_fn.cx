@@ -1,7 +1,7 @@
 effect log { fn log(msg: string): unit; }
 effect ask { fn ask(): int; }
 
-fn helper(n: int) -> int {
+fn helper(n: int): int {
     return n + 1;
 }
 

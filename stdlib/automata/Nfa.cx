@@ -1,5 +1,5 @@
 // `on` is a symbol, or `epsilon` for a transition that consumes nothing.
-fn epsilon() -> int { return 0 - 1; }
+fn epsilon(): int { return 0 - 1; }
 
 type Transition {
     src: int,
@@ -15,7 +15,7 @@ type Nfa {
     accept: List<int>
 }
 
-fn new(start: int) -> Nfa {
+fn new(start: int): Nfa {
     var states: List<int> = [start];
     var alphabet: List<int> = [];
     var transitions: List<Transition> = [];
@@ -29,7 +29,7 @@ fn new(start: int) -> Nfa {
     };
 }
 
-fn set_contains(set: List<int>, val: int) -> bool {
+fn set_contains(set: List<int>, val: int): bool {
     for (member in set) {
         if (member == val) { return true; }
     }
@@ -38,7 +38,7 @@ fn set_contains(set: List<int>, val: int) -> bool {
 
 // The states reachable from these without consuming anything. The worklist is
 // walked by index rather than being re-sliced, so it costs one pass.
-fn epsilon_closure(nfa: Nfa, states: List<int>) -> List<int> {
+fn epsilon_closure(nfa: Nfa, states: List<int>): List<int> {
     var closure: List<int> = [];
     for (state in states) { closure.push(state); }
     var at = 0;
@@ -54,7 +54,7 @@ fn epsilon_closure(nfa: Nfa, states: List<int>) -> List<int> {
     return closure;
 }
 
-fn step(nfa: Nfa, states: List<int>, symbol: int) -> List<int> {
+fn step(nfa: Nfa, states: List<int>, symbol: int): List<int> {
     var reached: List<int> = [];
     for (state in states) {
         for (t in nfa.transitions) {
@@ -67,9 +67,9 @@ fn step(nfa: Nfa, states: List<int>, symbol: int) -> List<int> {
     return reached;
 }
 
-fn is_accept(nfa: Nfa, id: int) -> bool { return set_contains(nfa.accept, id); }
+fn is_accept(nfa: Nfa, id: int): bool { return set_contains(nfa.accept, id); }
 
-fn simulate(nfa: Nfa, input: List<int>) -> bool {
+fn simulate(nfa: Nfa, input: List<int>): bool {
     var start: List<int> = [nfa.start];
     var current = epsilon_closure(nfa, start);
     for (symbol in input) {
@@ -91,5 +91,5 @@ impl Nfa {
         self.transitions.push(new Transition { src: src, on: epsilon(), to: to });
     }
     fn add_accept(self, id: int) { self.accept.push(id); }
-    fn accepts(self, input: List<int>) -> bool { return simulate(self, input); }
+    fn accepts(self, input: List<int>): bool { return simulate(self, input); }
 }

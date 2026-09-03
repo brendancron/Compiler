@@ -9,7 +9,7 @@ Other languages call this generics, but here the arguments are values, and a typ
 A bare name is a type parameter, inferred from the call:
 
 ```cronyx
-fn pair<T>(a: T, b: T) -> Array<T> {
+fn pair<T>(a: T, b: T): Array<T> {
     return [a, b];
 }
 
@@ -22,7 +22,7 @@ var ys = pair("a", "b");      // T = string
 An annotated name is a value parameter, passed explicitly — a string cannot be recovered from the types of the arguments:
 
 ```cronyx
-fn logged<label: string>(x: int) -> int {
+fn logged<label: string>(x: int): int {
     print(label + ": " + str(x));
     return x;
 }
@@ -35,7 +35,7 @@ The specialized copy has no `label` parameter. The string is part of the code.
 ## Both
 
 ```cronyx
-fn buffer<T, n: int>() -> Array<T> {
+fn buffer<T, n: int>(): Array<T> {
     return new Array<T>(n);
 }
 
@@ -53,7 +53,7 @@ Type parameters and value parameters are checked differently, and the `<>` list 
 What the body requires of a type parameter is *inferred*, not written:
 
 ```cronyx
-fn sum<T>(xs: Array<T>) -> T {
+fn sum<T>(xs: Array<T>): T {
     var total = xs[0];
     for (x in xs) { total = total + x; }
     return total;
@@ -92,11 +92,11 @@ That is two checking regimes in one language. The alternative is restricting val
 At a call site, an argument must be known at compile time: a literal, another comptime parameter in scope, or a call to something comptime-evaluable.
 
 ```cronyx
-fn wrap<prefix: string>(x: int) -> string {
+fn wrap<prefix: string>(x: int): string {
     return prefix + str(x);
 }
 
-fn outer<tag: string>(x: int) -> string {
+fn outer<tag: string>(x: int): string {
     return wrap<tag>(x);          // fine: tag is comptime here
 }
 

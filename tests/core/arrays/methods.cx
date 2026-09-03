@@ -6,7 +6,7 @@ var zeros = new Array<int>(3, 0);
 zeros[1] = 5;
 print(str(zeros) + " " + str(zeros.len()));
 
-fn widest(rows: Array<Array<int>>) -> int {
+fn widest(rows: Array<Array<int>>): int {
     var best = 0;
     var i = 0;
     while (i < rows.len()) {

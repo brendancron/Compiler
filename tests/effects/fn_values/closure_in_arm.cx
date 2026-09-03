@@ -1,6 +1,6 @@
 effect E { ctl op(): unit; }
 
-fn work() -> <E> unit { print("w1"); op(); print("w2"); }
+fn work(): <E> unit { print("w1"); op(); print("w2"); }
 
 var more: List<() -> <E> unit> = [];
 var pending: List<() -> unit> = [];

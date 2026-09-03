@@ -3,8 +3,8 @@ import { Hash } from "../ops/Hash";
 // Open addressing with linear probing, over the same slot scheme as HashSet:
 // a slot holds an index into the parallel `keys` and `vals`, or `empty` for
 // one never used and `deleted` for one vacated.
-fn empty() -> int { return 0 - 1; }
-fn deleted() -> int { return 0 - 2; }
+fn empty(): int { return 0 - 1; }
+fn deleted(): int { return 0 - 2; }
 
 type HashMap<K, V> {
     slots: List<int>,
@@ -14,7 +14,7 @@ type HashMap<K, V> {
     capacity: int
 }
 
-fn filled(capacity: int) -> List<int> {
+fn filled(capacity: int): List<int> {
     var slots: List<int> = [];
     var at = 0;
     while (at < capacity) {
@@ -24,7 +24,7 @@ fn filled(capacity: int) -> List<int> {
     return slots;
 }
 
-fn new<K, V>() -> HashMap<K, V> {
+fn new<K, V>(): HashMap<K, V> {
     var keys: List<K> = [];
     var vals: List<V> = [];
     return new HashMap {
@@ -32,14 +32,14 @@ fn new<K, V>() -> HashMap<K, V> {
     };
 }
 
-fn start_at<K: Hash>(key: K, capacity: int) -> int {
+fn start_at<K: Hash>(key: K, capacity: int): int {
     var h = key.hash() % capacity;
     if (h < 0) { return 0 - h; }
     return h;
 }
 
 // The index into `keys` for this key, or `empty` when it is absent.
-fn find<K: Hash, V>(map: HashMap<K, V>, key: K) -> int {
+fn find<K: Hash, V>(map: HashMap<K, V>, key: K): int {
     var at = start_at(key, map.capacity);
     var probes = 0;
     while (probes < map.capacity) {
@@ -59,7 +59,7 @@ fn probe_insert<K: Hash, V>(
     capacity: int,
     key: K,
     value: V
-) -> bool {
+): bool {
     var at = start_at(key, capacity);
     var probes = 0;
     var vacated = empty();
@@ -94,17 +94,17 @@ fn probe_insert<K: Hash, V>(
 }
 
 impl HashMap<K, V> {
-    fn size(self) -> int { return self.size; }
+    fn size(self): int { return self.size; }
 
-    fn contains(self, key: K) -> bool { return find(self, key) != empty(); }
+    fn contains(self, key: K): bool { return find(self, key) != empty(); }
 
-    fn get(self, key: K) -> Option<V> {
+    fn get(self, key: K): Option<V> {
         var slot = find(self, key);
         if (slot == empty()) { return new Option::None; }
         return new Option::Some(self.vals[slot]);
     }
 
-    fn get_or(self, key: K, fallback: V) -> V {
+    fn get_or(self, key: K, fallback: V): V {
         var slot = find(self, key);
         if (slot == empty()) { return fallback; }
         return self.vals[slot];
@@ -117,7 +117,7 @@ impl HashMap<K, V> {
         }
     }
 
-    fn remove(self, key: K) -> bool {
+    fn remove(self, key: K): bool {
         var at = start_at(key, self.capacity);
         var probes = 0;
         while (probes < self.capacity) {
@@ -136,7 +136,7 @@ impl HashMap<K, V> {
 
     // Walks the slots rather than `keys`, which still holds what `remove`
     // tombstoned.
-    fn keys(self) -> List<K> {
+    fn keys(self): List<K> {
         var out: List<K> = [];
         var at = 0;
         while (at < self.capacity) {

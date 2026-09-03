@@ -3,7 +3,7 @@
 A function may abstract over the effects its callback performs:
 
 ```cronyx
-fn map<T, U, E>(items: List<T>, f: (T) -> <E> U) -> <E> List<U>
+fn map<T, U, E>(items: List<T>, f: (T) -> <E> U): <E> List<U>
 ```
 
 `E` is an ordinary type parameter standing in a row, and which of the two a

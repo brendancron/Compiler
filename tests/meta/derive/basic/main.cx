@@ -1,5 +1,5 @@
 trait Named {
-    fn type_name(self) -> string;
+    fn type_name(self): string;
 }
 
 type Dog { age: int }
@@ -10,7 +10,7 @@ meta fn derive(shape: TypeShape) for Named {
         TypeShape::Product(t, fields) => {
             var label = str(t);
             gen impl Named for t {
-                fn type_name(self) -> string { return label; }
+                fn type_name(self): string { return label; }
             }
         }
         TypeShape::Sum(t, variants) => {}

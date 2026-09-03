@@ -2,7 +2,7 @@
 // the block once, after the handler is done.
 effect logic { ctl choose(options: Array<int>): int; }
 
-fn pick() -> int {
+fn pick(): int {
     run {
         var n = choose([1, 2]);
         print("saw" + " " + str(n));

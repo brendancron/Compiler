@@ -5,12 +5,12 @@ type Box<T> {
 }
 
 impl Box<T> {
-    fn get(self) -> T {
+    fn get(self): T {
         return self.value;
     }
 }
 
-fn identity<T>(x: T) -> T {
+fn identity<T>(x: T): T {
     return x;
 }
 

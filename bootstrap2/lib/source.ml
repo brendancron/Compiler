@@ -68,7 +68,7 @@ let signature (sg : Ast.signature) =
   | None -> ""
   | Some ret ->
     Printf.sprintf
-      " ->%s %s"
+      ":%s %s"
       (match sg.Ast.row with
        | None | Some [] -> ""
        | Some labels -> Printf.sprintf " <%s>" (String.concat ", " labels))
@@ -439,7 +439,7 @@ and effect_decl depth name params ops =
              (String.concat ", " (List.map param o.Ast.op_params))
              (match o.Ast.op_ret with
               | None -> ""
-              | Some t -> " -> " ^ type_expr t))
+              | Some t -> ": " ^ type_expr t))
          ops)
   ^ line "}"
 

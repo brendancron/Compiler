@@ -1,6 +1,6 @@
 effect E { ctl op(): int; }
 
-fn work(base: int) -> <E> int { return base + op(); }
+fn work(base: int): <E> int { return base + op(); }
 
 var tasks: List<() -> <E> int> = [];
 var pending: List<() -> unit> = [];

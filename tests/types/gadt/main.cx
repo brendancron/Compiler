@@ -8,7 +8,7 @@ type Expr<T> {
     If<A>(Expr<bool>, Expr<A>, Expr<A>) -> Expr<A>,
 }
 
-fn eval<T>(e: Expr<T>) -> T {
+fn eval<T>(e: Expr<T>): T {
     match e {
         Expr::Lit(n)      => { return n; }
         Expr::Add(l, r)   => { return eval(l) + eval(r); }
@@ -30,7 +30,7 @@ type Vec<N, T> {
     Cons<M>(T, Vec<M, T>) -> Vec<Succ<M>, T>,
 }
 
-fn head<N, T>(v: Vec<Succ<N>, T>) -> T {
+fn head<N, T>(v: Vec<Succ<N>, T>): T {
     match v {
         Vec::Cons(x, rest) => { return x; }
     }

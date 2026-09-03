@@ -2,7 +2,7 @@
 // block and hands control back to the arm, so `return 7` below is never
 // reached and the answer is the one the second resumption carried out.
 effect logic { ctl choose(): int; }
-fn pick() -> int {
+fn pick(): int {
     run {
         var n = choose();
         if (n == 2) { return n * 10; }

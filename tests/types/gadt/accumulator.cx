@@ -7,7 +7,7 @@ type Expr<T> {
     BoolLit(bool) -> Expr<bool>,
 }
 
-fn eval<T>(e: Expr<T>, acc: T) -> T {
+fn eval<T>(e: Expr<T>, acc: T): T {
     match e {
         Expr::Lit(n)     => { return acc + n; }
         Expr::BoolLit(b) => { return b; }

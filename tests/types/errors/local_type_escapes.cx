@@ -1,4 +1,4 @@
-fn f() -> unit {
+fn f(): unit {
     type Hidden { a: int }
     print(new Hidden { a: 1 }.a);
 }

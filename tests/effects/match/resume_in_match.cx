@@ -4,7 +4,7 @@ type Choice { Yes, No }
 
 effect Ask { ctl get(): int; }
 
-fn use() -> <Ask> int {
+fn use(): <Ask> int {
     return get();
 }
 

@@ -8,7 +8,7 @@ type Expr<T> {
     Fst<A, B>(Expr<(A, B)>)      -> Expr<A>,
 }
 
-fn eval<T>(e: Expr<T>) -> T {
+fn eval<T>(e: Expr<T>): T {
     match e {
         Expr::Lit(n)     => { return n; }
         Expr::Pair(a, b) => { return (eval(a), eval(b)); }

@@ -1,11 +1,11 @@
 type Box<T> { v: T }
 
 impl Box<T> {
-    fn get(self) -> T {
+    fn get(self): T {
         return self.v;
     }
 
-    fn same(self) -> T {
+    fn same(self): T {
         return self.v;
     }
 }

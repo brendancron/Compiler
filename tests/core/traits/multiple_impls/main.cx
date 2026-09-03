@@ -1,5 +1,5 @@
 trait Show {
-    fn show(self) -> string;
+    fn show(self): string;
 }
 
 type Point {
@@ -14,13 +14,13 @@ type Color {
 }
 
 impl Show for Point {
-    fn show(self) -> string {
+    fn show(self): string {
         return "(" + str(self.x) + ", " + str(self.y) + ")";
     }
 }
 
 impl Show for Color {
-    fn show(self) -> string {
+    fn show(self): string {
         return "rgb(" + str(self.r) + ", " + str(self.g) + ", " + str(self.b) + ")";
     }
 }

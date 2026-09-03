@@ -1,7 +1,7 @@
 trait Describe {
-    fn describe(self) -> string;
+    fn describe(self): string;
 }
 type Circle { radius: int }
 impl Describe for Circle {
-    fn area(self) -> int { return self.radius; }
+    fn area(self): int { return self.radius; }
 }

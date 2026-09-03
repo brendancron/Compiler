@@ -4,15 +4,15 @@ type Rectangle {
 }
 
 impl Rectangle {
-    fn area(self) -> int {
+    fn area(self): int {
         return self.width * self.height;
     }
 
-    fn scaled(self, factor: int) -> Rectangle {
+    fn scaled(self, factor: int): Rectangle {
         return new Rectangle { width: self.width * factor, height: self.height * factor };
     }
 
-    fn describe(self) -> string {
+    fn describe(self): string {
         return str(self.width) + "x" + str(self.height) + " = " + str(self.area());
     }
 }

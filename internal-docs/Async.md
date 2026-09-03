@@ -4,11 +4,11 @@ The effect has one operation:
 
 ```cronyx
 effect async {
-    ctl suspend<T>(setup: ((T) -> unit) -> unit): T;
+    ctl suspend<T>(register: ((T) -> unit) -> unit): T;
 }
 ```
 
-`suspend` hands `setup` a callback and parks. Whoever calls that callback supplies
+`suspend` hands `register` a callback and parks. Whoever calls that callback supplies
 the value `suspend` returns. Promises, `await`, yielding and `interleaved` are all
 ordinary code over it — `tests/effects/async/async` is two counters through
 `interleaved`.

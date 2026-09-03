@@ -5,7 +5,7 @@ type Choice { Yes, No }
 
 effect Ask { ctl get(): int; }
 
-fn pick(c: Choice) -> <Ask> int {
+fn pick(c: Choice): <Ask> int {
     match c {
         Choice::Yes => { return get() + 10; }
         Choice::No => { return 0; }

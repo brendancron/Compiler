@@ -4,12 +4,12 @@ effect log {
     fn emit(msg: string): unit;
 }
 
-fn doubled(x: int) -> <log> int {
+fn doubled(x: int): <log> int {
     emit("doubling " + str(x));
     return x * 2;
 }
 
-fn big(x: int) -> <log> bool {
+fn big(x: int): <log> bool {
     emit("testing " + str(x));
     return x > 2;
 }

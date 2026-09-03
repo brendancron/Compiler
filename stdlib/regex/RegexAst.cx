@@ -17,29 +17,29 @@ type RegexAst {
     root: int
 }
 
-fn make() -> RegexAst {
+fn make(): RegexAst {
     var nodes: List<RegexNode> = [];
     return new RegexAst { nodes: nodes, root: 0 };
 }
 
-fn push(ast: RegexAst, node: RegexNode) -> int {
+fn push(ast: RegexAst, node: RegexNode): int {
     var id = ast.nodes.len();
     ast.nodes.push(node);
     return id;
 }
 
-fn literal(ast: RegexAst, cp: int) -> int { return push(ast, new RegexNode::Literal(cp)); }
-fn concat(ast: RegexAst, left: int, right: int) -> int {
+fn literal(ast: RegexAst, cp: int): int { return push(ast, new RegexNode::Literal(cp)); }
+fn concat(ast: RegexAst, left: int, right: int): int {
     return push(ast, new RegexNode::Concat(left, right));
 }
-fn alt(ast: RegexAst, left: int, right: int) -> int {
+fn alt(ast: RegexAst, left: int, right: int): int {
     return push(ast, new RegexNode::Alt(left, right));
 }
-fn star(ast: RegexAst, child: int) -> int { return push(ast, new RegexNode::Star(child)); }
-fn plus(ast: RegexAst, child: int) -> int { return push(ast, new RegexNode::Plus(child)); }
-fn quest(ast: RegexAst, child: int) -> int { return push(ast, new RegexNode::Quest(child)); }
-fn dot(ast: RegexAst) -> int { return push(ast, new RegexNode::Dot); }
-fn class(ast: RegexAst, chars: List<int>, negated: bool) -> int {
+fn star(ast: RegexAst, child: int): int { return push(ast, new RegexNode::Star(child)); }
+fn plus(ast: RegexAst, child: int): int { return push(ast, new RegexNode::Plus(child)); }
+fn quest(ast: RegexAst, child: int): int { return push(ast, new RegexNode::Quest(child)); }
+fn dot(ast: RegexAst): int { return push(ast, new RegexNode::Dot); }
+fn class(ast: RegexAst, chars: List<int>, negated: bool): int {
     return push(ast, new RegexNode::Class(chars, negated));
 }
-fn empty(ast: RegexAst) -> int { return push(ast, new RegexNode::Empty); }
+fn empty(ast: RegexAst): int { return push(ast, new RegexNode::Empty); }

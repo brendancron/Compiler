@@ -2,15 +2,15 @@ effect log {
     fn emit(msg: string): unit;
 }
 
-fn apply_twice<T, E>(f: (T) -> <E> T, x: T) -> <E> T {
+fn apply_twice<T, E>(f: (T) -> <E> T, x: T): <E> T {
     return f(f(x));
 }
 
-fn bump(x: int) -> int {
+fn bump(x: int): int {
     return x + 1;
 }
 
-fn shout(x: int) -> <log> int {
+fn shout(x: int): <log> int {
     emit("saw " + str(x));
     return x + 1;
 }

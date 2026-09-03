@@ -1,7 +1,7 @@
 enum Expr<T> {
-    Lit(int)              : Expr<int>,
-    Add(Expr<int>, Expr<int>) : Expr<int>,
-    BoolLit(bool)         : Expr<bool>,
+    Lit(int): Expr<int>,
+    Add(Expr<int>, Expr<int>): Expr<int>,
+    BoolLit(bool): Expr<bool>,
 }
 
 fn eval_int(e: Expr<int>): int {

@@ -3,15 +3,15 @@
 // nothing at all.
 effect Ask { ctl get(): bool; }
 
-fn any() -> <Ask> bool {
+fn any(): <Ask> bool {
     return false || get();
 }
 
-fn both() -> <Ask> bool {
+fn both(): <Ask> bool {
     return true && get();
 }
 
-fn short() -> <Ask> bool {
+fn short(): <Ask> bool {
     return true || get();
 }
 

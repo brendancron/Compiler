@@ -21,7 +21,7 @@ for (row in [[1, 2], [3]]) {
 }
 
 var calls = 0;
-fn source() -> Array<int> {
+fn source(): Array<int> {
     calls = calls + 1;
     return [7, 8];
 }
