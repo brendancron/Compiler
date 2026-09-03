@@ -42,14 +42,24 @@ fn start(name: string) {
 
 The shape that does not work is the one that puts tasks and continuations in the same queue. Their types differ, unifying them forces the row onto the continuations too, and the result is rejected — correctly, and for a reason that reads as an arbitrary limitation only until the two are told apart.
 
-## What is still not expressible
+## Spawning a task the caller chose
 
-Spawning an arbitrary task. `start` above is fixed to `counter`; handing it a computation chosen by the caller means passing a value whose row contains an effect needing a continuation, which `Cps` refuses at the lambda case with *"a function value cannot perform an effect whose handler needs a continuation yet"*.
+`start` above takes the parameters of the work rather than the work itself, which is enough for a fixed set of tasks and was for a long time all that could be written. A task chosen by the caller is a value whose row carries an effect needing a continuation, and `Cps` now compiles one:
 
-Nothing in the suite waits on this. It is worth writing down only because it looks like the same problem as the scheduler and is not.
+```cronyx
+fn spawn(task: () -> <sched> unit) {
+    run { task(); } handle sched {
+        ctl tick() { queue.push { resume; }; }
+    }
+}
+```
 
-Supporting it means making a closure carry what a converted named function already carries. A delimited named function gains its evidence and a trailing continuation, and its body goes through `cps` rather than `sequence_body`; a lambda gets only the evidence half. The asymmetry survives because such a named function is never used as a value — the `Var` case forbids it and direct calls take the operation path — so nothing ever reads its type, which is why `widen` can add evidence parameters and stay silent about the continuation.
+A lambda whose row needs a continuation is converted the way a named function of the same shape always was — evidence parameters, a trailing continuation, and a body through `cps` rather than `sequence_body`. What made that possible was `widen` describing the continuation parameter: a converted named function has always taken one without its type saying so, which survived only because such a function could never be a value and nothing read its type. A closure has no name and travels, so its type is the only record of its arity.
 
-A closure has no name and travels, so its type is the only record of its arity. `widen` would have to describe the continuation before a lambda could be converted at all, and that changes the type of every delimited named function, so it wants the suite run on it alone before anything is built on top.
+The continuation is described as `Unit` rather than as the function it is, because that is what every site passing one annotates it with. The arity is what a caller reads and the arity is honest; the element type is a separate untruth, older than this, and worth fixing on its own rather than halfway here.
 
-One trap if that is ever attempted: `continuation` is a single generated constant, so a conversion nested inside another shadows it. A closure written inside a `ctl` arm has a continuation of its own while the `resume` it captures belongs to the arm. With one name the capture binds to the wrong one, and the result is a wrong program rather than an error.
+Each converted body binds its continuation under a fresh name. The shared one is still what an arm binds, which is what `resume` reaches for, so a closure written inside an arm keeps resuming the arm rather than itself — `effects/fn_values/closure_in_arm` is that shape and would go wrong silently under one name.
+
+A suspending call is emitted by name, so a callee that is not one — an element of a list, a field — is bound to a temporary first.
+
+`effects/fn_values` holds the shapes: a named effectful function as a value, a closure that suspends, one reached through an index, a closure built inside an arm, and `spawn` itself.
