@@ -62,11 +62,14 @@ let is_delimited info (row : Types.row) =
 let rec widen info (t : Types.ty) =
   match t with
   | Types.Fn (params, ret, row) ->
-    (* A converted function takes its continuation last. Every site that passes
-       one annotates it [Unit], so the type says [Unit] rather than the function
-       type it really is — honest about the arity, which is what a caller reads,
-       and no less honest than the value being passed. *)
-    let continuation = if is_delimited info row then [ Types.Unit ] else [] in
+    (* A converted function takes its continuation last: handed the result, and
+       answering with nothing, since a converted call is a statement. Not the
+       block's own type — that reaches its `run` by another route. *)
+    let continuation =
+      if is_delimited info row
+      then [ Types.Fn ([ widen info ret ], Types.Unit, []) ]
+      else []
+    in
     Types.Fn
       ( (List.map (widen info) params
          @ List.map (evidence_ty info) (evidence_of_row info row))
@@ -567,7 +570,8 @@ and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
         , held
         , evidence_for callee.Ast.ann )
     in
-    before @ [ call span target (args @ evidence @ [ var span Types.Unit next ]) ]
+    let answering = Types.Fn ([ widen info c.Ast.ann ], Types.Unit, []) in
+    before @ [ call span target (args @ evidence @ [ var span answering next ]) ]
   | _ -> unsupported span "This effect cannot be sequenced yet."
 
 (* An arm that never calls it abandons the rest of the body: abort. *)

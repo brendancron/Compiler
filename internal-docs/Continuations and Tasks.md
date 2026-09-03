@@ -56,7 +56,7 @@ fn spawn(task: () -> <sched> unit) {
 
 A lambda whose row needs a continuation is converted the way a named function of the same shape always was — evidence parameters, a trailing continuation, and a body through `cps` rather than `sequence_body`. What made that possible was `widen` describing the continuation parameter: a converted named function has always taken one without its type saying so, which survived only because such a function could never be a value and nothing read its type. A closure has no name and travels, so its type is the only record of its arity.
 
-The continuation is described as `Unit` rather than as the function it is, because that is what every site passing one annotates it with. The arity is what a caller reads and the arity is honest; the element type is a separate untruth, older than this, and worth fixing on its own rather than halfway here.
+A continuation takes the result it is resuming with and answers with nothing, because a converted call is emitted as a statement. It is not typed by the `run` block it belongs to, which is the shape the textbook `resume : t -> answer` suggests: the block's own value reaches it through the temporary `Resolve` hoists, not through the continuation.
 
 Each converted body binds its continuation under a fresh name. The shared one is still what an arm binds, which is what `resume` reaches for, so a closure written inside an arm keeps resuming the arm rather than itself — `effects/fn_values/closure_in_arm` is that shape and would go wrong silently under one name.
 
