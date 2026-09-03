@@ -4,12 +4,12 @@ effect Error {
     final ctl throw(msg: string);
 }
 
-fn as_int(s: string) -> int {
+fn as_int(s: string): int {
     if (s == "42") { return 42; }
     return throw("not an int: " + s);
 }
 
-fn as_word(n: int) -> string {
+fn as_word(n: int): string {
     if (n == 0) { return "zero"; }
     return throw("not zero");
 }

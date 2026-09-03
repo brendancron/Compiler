@@ -5,7 +5,7 @@ effect Log { fn note(m: string): unit; }
 
 type Q<T> { Num -> Q<int>, Text -> Q<string> }
 
-fn ask<T>(q: Q<T>) -> T {
+fn ask<T>(q: Q<T>): T {
     match q {
         Q::Num  => { note("num"); return 7; }
         Q::Text => { return "hi"; }

@@ -2,7 +2,7 @@ import { Nfa, epsilon_closure, step, is_accept, set_contains } from "Nfa";
 
 // `no_state` is what a step returns when nothing is reachable — a DFA built
 // here is partial, so a dead end is an absent transition rather than a sink.
-fn no_state() -> int { return 0 - 1; }
+fn no_state(): int { return 0 - 1; }
 
 type DfaTransition {
     src: int,
@@ -18,7 +18,7 @@ type Dfa {
     accept: List<int>
 }
 
-fn new(start: int) -> Dfa {
+fn new(start: int): Dfa {
     var states: List<int> = [start];
     var alphabet: List<int> = [];
     var transitions: List<DfaTransition> = [];
@@ -32,16 +32,16 @@ fn new(start: int) -> Dfa {
     };
 }
 
-fn dfa_is_accept(dfa: Dfa, id: int) -> bool { return set_contains(dfa.accept, id); }
+fn dfa_is_accept(dfa: Dfa, id: int): bool { return set_contains(dfa.accept, id); }
 
-fn dfa_step(dfa: Dfa, state: int, symbol: int) -> int {
+fn dfa_step(dfa: Dfa, state: int, symbol: int): int {
     for (t in dfa.transitions) {
         if (t.src == state && t.on == symbol) { return t.to; }
     }
     return no_state();
 }
 
-fn simulate(dfa: Dfa, input: List<int>) -> bool {
+fn simulate(dfa: Dfa, input: List<int>): bool {
     var current = dfa.start;
     for (symbol in input) {
         var next = dfa_step(dfa, current, symbol);
@@ -59,7 +59,7 @@ type SubsetState {
     nfa_states: List<int>
 }
 
-fn subset_construction(nfa: Nfa) -> Dfa {
+fn subset_construction(nfa: Nfa): Dfa {
     var from: List<int> = [nfa.start];
     var start_closure = epsilon_closure(nfa, from);
     var next_id = 1;
@@ -108,21 +108,21 @@ fn subset_construction(nfa: Nfa) -> Dfa {
     return dfa;
 }
 
-fn find_state(state_map: List<SubsetState>, nfa_states: List<int>) -> int {
+fn find_state(state_map: List<SubsetState>, nfa_states: List<int>): int {
     for (candidate in state_map) {
         if (sets_equal(candidate.nfa_states, nfa_states)) { return candidate.id; }
     }
     return no_state();
 }
 
-fn any_accept(nfa: Nfa, states: List<int>) -> bool {
+fn any_accept(nfa: Nfa, states: List<int>): bool {
     for (state in states) {
         if (is_accept(nfa, state)) { return true; }
     }
     return false;
 }
 
-fn sets_equal(a: List<int>, b: List<int>) -> bool {
+fn sets_equal(a: List<int>, b: List<int>): bool {
     if (a.len() != b.len()) { return false; }
     for (member in a) {
         if (!set_contains(b, member)) { return false; }
@@ -137,7 +137,7 @@ impl Dfa {
         self.transitions.push(new DfaTransition { src: src, on: on, to: to });
     }
     fn add_accept(self, id: int) { self.accept.push(id); }
-    fn step(self, state: int, symbol: int) -> int { return dfa_step(self, state, symbol); }
-    fn accepts(self, input: List<int>) -> bool { return simulate(self, input); }
-    fn is_accept(self, id: int) -> bool { return dfa_is_accept(self, id); }
+    fn step(self, state: int, symbol: int): int { return dfa_step(self, state, symbol); }
+    fn accepts(self, input: List<int>): bool { return simulate(self, input); }
+    fn is_accept(self, id: int): bool { return dfa_is_accept(self, id); }
 }

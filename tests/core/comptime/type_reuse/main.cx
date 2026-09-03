@@ -1,8 +1,8 @@
-fn wrap<T>(x: T) -> Array<T> {
+fn wrap<T>(x: T): Array<T> {
     return [x];
 }
 
-fn swap<A, B>(pair: (A, B)) -> (B, A) {
+fn swap<A, B>(pair: (A, B)): (B, A) {
     return (pair.1, pair.0);
 }
 

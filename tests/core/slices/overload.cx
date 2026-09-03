@@ -5,7 +5,7 @@ type Ring { items: List<int> }
 impl Index<Range> for Ring {
     type Output = List<int>;
 
-    fn get(self, r: Range) -> List<int> {
+    fn get(self, r: Range): List<int> {
         return self.items[r];
     }
 }

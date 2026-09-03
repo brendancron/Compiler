@@ -1,17 +1,17 @@
 impl int {
-    fn double(self) -> int {
+    fn double(self): int {
         return self * 2;
     }
 }
 
 impl string {
-    fn shout(self) -> string {
+    fn shout(self): string {
         return self + "!";
     }
 }
 
 impl Array<T> {
-    fn first(self) -> T {
+    fn first(self): T {
         return self[0];
     }
 }

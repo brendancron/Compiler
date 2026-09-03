@@ -1,8 +1,8 @@
 trait ToString {
-    fn to_string(self) -> string;
+    fn to_string(self): string;
 }
 
-fn int_to_string(n: int) -> string {
+fn int_to_string(n: int): string {
     if (n == 0) { return "0"; }
     var rest = n;
     var negative = n < 0;
@@ -18,16 +18,16 @@ fn int_to_string(n: int) -> string {
 }
 
 impl ToString for int {
-    fn to_string(self) -> string { return int_to_string(self); }
+    fn to_string(self): string { return int_to_string(self); }
 }
 
 impl ToString for bool {
-    fn to_string(self) -> string {
+    fn to_string(self): string {
         if (self) { return "true"; }
         return "false";
     }
 }
 
 impl ToString for string {
-    fn to_string(self) -> string { return self; }
+    fn to_string(self): string { return self; }
 }

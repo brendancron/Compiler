@@ -1,6 +1,6 @@
 # Metaprocessing
 
-Status: **built.** `lib/metaprocess.ml` runs `meta` blocks and `meta fn` calls and splices what `gen` emits; `tests/meta/` passes except `derive/basic`, which predates the type redesign. A meta function's parameters take values, like any other function's.
+Status: **built.** `lib/metaprocess.ml` runs `meta` blocks and `meta fn
 
 A `meta` block runs while the program is being compiled. Reaching one means compiling and running its dependencies, then continuing where compilation left off — so metaprocessing is recursive compilation.
 
@@ -79,7 +79,7 @@ Compare a meta-bound name, which is baked in:
 
 ```cronyx
 meta fn derive(T) {
-    gen fn type_name(self) -> string {
+    gen fn type_name(self): string {
         return T.name;
     }
 }
@@ -131,7 +131,7 @@ gen S    ⟶    meta#emit(k, "n", n, …)
 
 **Which names get passed is a correctness matter.** Only names the block itself binds are sent, because a name it does *not* bind is a runtime name — mentioning it inside the meta block would not compile. That is precisely why `gen var x = y + 5;` works: `y` is never passed, so it is never substituted, and it survives as an identifier.
 
-The table is shared across the whole run rather than per block, because a `meta fn` body may contain `gen` and is recorded once but called from many blocks.
+The table is shared across the whole run rather than per block, because a `meta fn
 
 ### What substitutes
 
@@ -202,7 +202,7 @@ C
 Three separate things, worth keeping apart:
 
 - **Processing** a nested meta block happens during compilation of its parent, unconditionally.
-- **Splicing** puts `gen` output at the position the meta block occupied — which, for a nested block, is inside the parent's body rather than in the program. A generated *declaration* is the exception: it hoists to the front of the program, because what generated it may stand below the code that uses it. `gen_symbol.cx` calls `greet` on line 1 and generates `fn greet` from a block below.
+- **Splicing** puts `gen` output at the position the meta block occupied — which, for a nested block, is inside the parent's body rather than in the program. A generated *declaration* is the exception: it hoists to the front of the program, because what generated it may stand below the code that uses it. `gen_symbol.cx` calls `greet` on line 1 and generates `fn
 - **Executing** spliced code follows ordinary control flow, so a statement generated inside a branch that is never taken never runs.
 
 So control flow decides what *executes*, never what gets *processed*.
@@ -211,7 +211,7 @@ A meta block **inside a `gen`** is still a nested block, so it is processed now 
 
 ## Meta functions
 
-A call to a `meta fn` is evaluated during metaprocessing, and the call is replaced by whatever it produced. What that means depends on position:
+A call to a `meta fn
 
 ```cronyx
 meta fn fib(n) { ... }
@@ -221,7 +221,7 @@ var x = fib(10);          // expression: replaced by 89, reified
 
 ```cronyx
 meta fn derive_name(T) {
-    gen fn type_name(self) -> string { return T.name; }
+    gen fn type_name(self): string { return T.name; }
 }
 
 derive_name(Dog);         // statement: replaced by the gen output
@@ -231,13 +231,13 @@ derive_name(Dog);         // statement: replaced by the gen output
 
 `meta` always means the same thing — run this while compiling. The only question is where it is written, and that answers two different needs.
 
-**On the call.** `meta fib(10)` asks for an ordinary function's result now. `fib` is a plain `fn`, equally useful at runtime, and the call site decides.
+**On the call.** `meta fib(10)` asks for an ordinary function's result now. `fib` is a plain `fn
 
 **On the declaration.** `meta fn f(…)` makes every call to `f` a meta call, with nothing written at the call sites. That is required rather than convenient: `print(a, b)` cannot become `meta print(a, b)` everywhere, so a function whose whole purpose is to expand has to say so once, where it is declared. It has no runtime form, because every call to it has already happened by then.
 
 Neither is a separate mechanism, and neither is a macro system: both are Cronyx running Cronyx, and the difference is only who says *when*.
 
-`tests/meta/functions/fib` puts `meta` on the declaration for a computation, which is the wrong lesson — it makes a perfectly ordinary recursive function compile-time-only for no gain. It wants rewriting to a plain `fn` and a `meta` call.
+`tests/meta/functions/fib` puts `meta` on the declaration for a computation, which is the wrong lesson — it makes a perfectly ordinary recursive function compile-time-only for no gain. It wants rewriting to a plain `fn
 
 ### Parameters take values
 
@@ -267,7 +267,7 @@ Four rules follow:
 | Emits code | via `gen` | no |
 | Exists at runtime | no | one copy per argument |
 
-`meta fn` produces code or values. `<>` specializes code.
+`meta fn
 
 ## Symbol resolution
 
@@ -278,7 +278,7 @@ Three things run at three different times, and what each can see follows from th
 ```mermaid
 flowchart TD
     subgraph decls["Declarations"]
-        d["fn · type · effect · meta fn"]
+        d["fn
     end
 
     subgraph inner["nested meta — runs first"]
@@ -310,7 +310,7 @@ Declarations reach every level, because they are compiled from the dependency gr
 
 | Visible to a meta block                      |     |                                    |
 | -------------------------------------------- | --- | ---------------------------------- |
-| file-level `fn`, `type`, `effect`, `meta fn` | yes | compiled as dependencies           |
+| file-level `fn
 | its own locals                               | yes | it is running                      |
 | an enclosing meta block's locals             | no  | that block has not run             |
 | runtime `var` bindings                       | no  | they have no value while compiling |
@@ -423,7 +423,7 @@ The same applies to what compile-time code may do. It can do anything the evalua
 meta fn build() {
     var check = code(true);
     for (n in [1, 2, 3]) { check = code(check and n > 0); }
-    gen fn all_positive() -> bool { return check; }
+    gen fn all_positive(): bool { return check; }
 }
 ```
 
@@ -432,7 +432,7 @@ meta fn build() {
 That helper is a meta function, because a function that manipulates syntax runs while compiling by definition:
 
 ```cronyx
-meta fn doubled(v: Code) -> Code { return code(v + v); }
+meta fn doubled(v: Code): Code { return code(v + v); }
 ```
 
 **`Code` and `Name` are compile-time types**, next to `Type`. A `Code` cannot reach a running program — `code` outside a meta block is an error, and nothing else builds one. A `Name` is ordinary once it is in hand; what is restricted is making one, since that is where a name could otherwise be forged.
@@ -451,14 +451,14 @@ A deriver is declared beside the trait it derives, bound to it by a `for` clause
 
 ```cronyx
 trait Hash {
-    fn hash(self) -> int;
+    fn hash(self): int;
 }
 
 meta fn derive(shape: TypeShape) for Hash {
     match shape {
         TypeShape::Product(t, fields) => {
             gen impl Hash for t {
-                fn hash(self) -> int { … built with `code`, above … }
+                fn hash(self): int { … built with `code`, above … }
             }
         }
         …

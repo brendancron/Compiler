@@ -3,7 +3,7 @@
 // left in `&&` and a true left in `||` never reach the operand on the right.
 effect Flip { ctl flip(): bool; }
 
-fn choose() -> <Flip> string {
+fn choose(): <Flip> string {
     if (flip() && (flip() || flip())) { return "yes"; }
     return "no";
 }

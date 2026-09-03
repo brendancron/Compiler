@@ -1,7 +1,7 @@
 effect E { ctl op(): int; }
 
-fn doubled() -> <E> int { return op() * 2; }
-fn tripled() -> <E> int { return op() * 3; }
+fn doubled(): <E> int { return op() * 2; }
+fn tripled(): <E> int { return op() * 3; }
 
 run {
     var tasks: List<() -> <E> int> = [];

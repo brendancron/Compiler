@@ -1,6 +1,6 @@
 type Point { x: int, y: int }
 
-fn describe(shape: TypeShape) -> string {
+fn describe(shape: TypeShape): string {
     match shape {
         TypeShape::Scalar => { return "scalar"; }
         TypeShape::Product(name, fields) => {

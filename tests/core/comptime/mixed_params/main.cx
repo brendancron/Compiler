@@ -1,4 +1,4 @@
-fn buffer<T, n: int>(fill: T) -> Array<T> {
+fn buffer<T, n: int>(fill: T): Array<T> {
     print(n);
     return [fill];
 }

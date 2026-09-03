@@ -1,7 +1,7 @@
 effect A { ctl get(): int; }
 effect B { ctl get(x: string): int; }
 
-fn main() -> unit {
+fn main(): unit {
     run { print(get()); } handle A { ctl get() { resume 1; } }
 }
 

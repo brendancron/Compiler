@@ -2,7 +2,7 @@
 // once inside it runs once per exit.
 effect Logic { ctl choose(options: Array<int>): int; }
 
-fn pick() -> int {
+fn pick(): int {
     defer print("cleanup");
     var n = choose([1, 2]);
     print("saw " + str(n));

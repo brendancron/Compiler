@@ -1,34 +1,34 @@
 trait Named {
-    fn name(self) -> string;
+    fn name(self): string;
 }
 
 trait Greeted: Named {
-    fn greeting(self) -> string;
+    fn greeting(self): string;
 }
 
 type Dog { call: string }
 type Robot { serial: int }
 
 impl Named for Dog {
-    fn name(self) -> string {
+    fn name(self): string {
         return self.call;
     }
 }
 
 impl Greeted for Dog {
-    fn greeting(self) -> string {
+    fn greeting(self): string {
         return "good dog, " + self.name();
     }
 }
 
 impl Named for Robot {
-    fn name(self) -> string {
+    fn name(self): string {
         return "unit-" + str(self.serial);
     }
 }
 
 impl Greeted for Robot {
-    fn greeting(self) -> string {
+    fn greeting(self): string {
         return "hello, " + self.name();
     }
 }

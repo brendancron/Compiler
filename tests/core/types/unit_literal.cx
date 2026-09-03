@@ -1,12 +1,12 @@
-fn take(u: unit) -> string {
+fn take(u: unit): string {
     return "got one";
 }
 
-fn make() -> unit {
+fn make(): unit {
     return ();
 }
 
-fn call(f: (unit) -> string) -> string {
+fn call(f: (unit) -> string): string {
     return f(());
 }
 

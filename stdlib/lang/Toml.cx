@@ -50,17 +50,17 @@ type TomlDoc {
 
 // ── Tokenizer ────────────────────────────────────────────────────────────────
 
-fn is_ident_start(c: char) -> bool {
+fn is_ident_start(c: char): bool {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
 
-fn is_ident_char(c: char) -> bool {
+fn is_ident_char(c: char): bool {
     return is_ident_start(c) || (c >= '0' && c <= '9') || c == '-';
 }
 
-fn is_digit(c: char) -> bool { return c >= '0' && c <= '9'; }
+fn is_digit(c: char): bool { return c >= '0' && c <= '9'; }
 
-fn tokenize(input: string) -> List<Token> {
+fn tokenize(input: string): List<Token> {
     var chars = input.chars();
     var n = chars.len();
     var tokens: List<Token> = [];
@@ -125,7 +125,7 @@ fn tokenize(input: string) -> List<Token> {
     return tokens;
 }
 
-fn unescape(c: char) -> char {
+fn unescape(c: char): char {
     if (c == 'n') { return '\n'; }
     if (c == 't') { return '\t'; }
     if (c == 'r') { return '\r'; }
@@ -135,10 +135,10 @@ fn unescape(c: char) -> char {
 // ── Parser ───────────────────────────────────────────────────────────────────
 
 // The cursor is a one-element list so that each level advances the same one.
-fn at(tokens: List<Token>, pos: List<int>) -> Token { return tokens[pos[0]]; }
+fn at(tokens: List<Token>, pos: List<int>): Token { return tokens[pos[0]]; }
 fn advance(pos: List<int>) { pos[0] = pos[0] + 1; }
 
-fn is_newline(t: Token) -> bool {
+fn is_newline(t: Token): bool {
     match t {
         Token::Newline => { return true; }
         _ => { return false; }
@@ -149,7 +149,7 @@ fn skip_newlines(tokens: List<Token>, pos: List<int>) {
     while (is_newline(at(tokens, pos))) { advance(pos); }
 }
 
-fn parse_primitive(tokens: List<Token>, pos: List<int>) -> TomlPrimitive {
+fn parse_primitive(tokens: List<Token>, pos: List<int>): TomlPrimitive {
     var t = at(tokens, pos);
     advance(pos);
     match t {
@@ -160,7 +160,7 @@ fn parse_primitive(tokens: List<Token>, pos: List<int>) -> TomlPrimitive {
     }
 }
 
-fn parse_value(tokens: List<Token>, pos: List<int>) -> TomlValue {
+fn parse_value(tokens: List<Token>, pos: List<int>): TomlValue {
     var opens = false;
     match at(tokens, pos) {
         Token::LBrace => { opens = true; }
@@ -190,7 +190,7 @@ fn parse_value(tokens: List<Token>, pos: List<int>) -> TomlValue {
     return new TomlValue::Primitive(parse_primitive(tokens, pos));
 }
 
-fn parse(input: string) -> TomlDoc {
+fn parse(input: string): TomlDoc {
     var tokens = tokenize(input);
     var pos: List<int> = [0];
     var sections: List<TomlSection> = [];
@@ -228,7 +228,7 @@ fn parse(input: string) -> TomlDoc {
     return new TomlDoc { sections: sections };
 }
 
-fn section_name(t: Token) -> string {
+fn section_name(t: Token): string {
     match t {
         Token::Ident(name) => { return name; }
         Token::Str(text) => { return text; }
@@ -239,7 +239,7 @@ fn section_name(t: Token) -> string {
 // ── Public API ───────────────────────────────────────────────────────────────
 
 // The section before the first header has no name, and is not one.
-fn section_names(doc: TomlDoc) -> List<string> {
+fn section_names(doc: TomlDoc): List<string> {
     var names: List<string> = [];
     for (section in doc.sections) {
         if (section.name != "") { names.push(section.name); }
@@ -247,27 +247,27 @@ fn section_names(doc: TomlDoc) -> List<string> {
     return names;
 }
 
-fn get_section(doc: TomlDoc, name: string) -> Option<TomlSection> {
+fn get_section(doc: TomlDoc, name: string): Option<TomlSection> {
     for (section in doc.sections) {
         if (section.name == name) { return new Option::Some(section); }
     }
     return new Option::None;
 }
 
-fn section_entry_keys(section: TomlSection) -> List<string> {
+fn section_entry_keys(section: TomlSection): List<string> {
     var keys: List<string> = [];
     for (entry in section.entries) { keys.push(entry.key); }
     return keys;
 }
 
-fn get_entry(section: TomlSection, key: string) -> Option<TomlEntry> {
+fn get_entry(section: TomlSection, key: string): Option<TomlEntry> {
     for (entry in section.entries) {
         if (entry.key == key) { return new Option::Some(entry); }
     }
     return new Option::None;
 }
 
-fn get_inline(entries: List<TomlInlineEntry>, key: string) -> Option<TomlPrimitive> {
+fn get_inline(entries: List<TomlInlineEntry>, key: string): Option<TomlPrimitive> {
     for (entry in entries) {
         if (entry.key == key) { return new Option::Some(entry.val); }
     }
@@ -276,56 +276,56 @@ fn get_inline(entries: List<TomlInlineEntry>, key: string) -> Option<TomlPrimiti
 
 // A value is a primitive of some kind, or a table. Asking which is what the
 // caller does before reaching for the value itself.
-fn is_string(val: TomlValue) -> bool {
+fn is_string(val: TomlValue): bool {
     match val {
         TomlValue::Primitive(p) => { return prim_is_string(p); }
         _ => { return false; }
     }
 }
 
-fn is_int(val: TomlValue) -> bool {
+fn is_int(val: TomlValue): bool {
     match val {
         TomlValue::Primitive(p) => { return prim_is_int(p); }
         _ => { return false; }
     }
 }
 
-fn is_bool(val: TomlValue) -> bool {
+fn is_bool(val: TomlValue): bool {
     match val {
         TomlValue::Primitive(p) => { return prim_is_bool(p); }
         _ => { return false; }
     }
 }
 
-fn is_table(val: TomlValue) -> bool {
+fn is_table(val: TomlValue): bool {
     match val {
         TomlValue::Table(entries) => { return true; }
         _ => { return false; }
     }
 }
 
-fn as_string(val: TomlValue) -> string {
+fn as_string(val: TomlValue): string {
     match val {
         TomlValue::Primitive(p) => { return prim_as_string(p); }
         _ => { return ""; }
     }
 }
 
-fn as_int_val(val: TomlValue) -> int {
+fn as_int_val(val: TomlValue): int {
     match val {
         TomlValue::Primitive(p) => { return prim_as_int(p); }
         _ => { return 0; }
     }
 }
 
-fn as_bool(val: TomlValue) -> bool {
+fn as_bool(val: TomlValue): bool {
     match val {
         TomlValue::Primitive(p) => { return prim_as_bool(p); }
         _ => { return false; }
     }
 }
 
-fn as_table(val: TomlValue) -> List<TomlInlineEntry> {
+fn as_table(val: TomlValue): List<TomlInlineEntry> {
     match val {
         TomlValue::Table(entries) => { return entries; }
         _ => {
@@ -335,42 +335,42 @@ fn as_table(val: TomlValue) -> List<TomlInlineEntry> {
     }
 }
 
-fn prim_is_string(p: TomlPrimitive) -> bool {
+fn prim_is_string(p: TomlPrimitive): bool {
     match p {
         TomlPrimitive::PString(s) => { return true; }
         _ => { return false; }
     }
 }
 
-fn prim_is_int(p: TomlPrimitive) -> bool {
+fn prim_is_int(p: TomlPrimitive): bool {
     match p {
         TomlPrimitive::PInt(n) => { return true; }
         _ => { return false; }
     }
 }
 
-fn prim_is_bool(p: TomlPrimitive) -> bool {
+fn prim_is_bool(p: TomlPrimitive): bool {
     match p {
         TomlPrimitive::PBool(b) => { return true; }
         _ => { return false; }
     }
 }
 
-fn prim_as_string(p: TomlPrimitive) -> string {
+fn prim_as_string(p: TomlPrimitive): string {
     match p {
         TomlPrimitive::PString(s) => { return s; }
         _ => { return ""; }
     }
 }
 
-fn prim_as_int(p: TomlPrimitive) -> int {
+fn prim_as_int(p: TomlPrimitive): int {
     match p {
         TomlPrimitive::PInt(n) => { return n; }
         _ => { return 0; }
     }
 }
 
-fn prim_as_bool(p: TomlPrimitive) -> bool {
+fn prim_as_bool(p: TomlPrimitive): bool {
     match p {
         TomlPrimitive::PBool(b) => { return b; }
         _ => { return false; }

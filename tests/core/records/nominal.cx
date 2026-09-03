@@ -14,7 +14,7 @@ print(str(p.x) + " " + str(p.y) + " " + str(typeof(p).name));
 p.x = 9;
 print(p.x);
 
-fn shift(q: Point) -> Point {
+fn shift(q: Point): Point {
     return new Point { x: q.x + 1, y: q.y };
 }
 print(str(shift(p).x) + " " + str(typeof(shift).name));

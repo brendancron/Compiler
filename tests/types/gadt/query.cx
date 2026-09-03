@@ -7,7 +7,7 @@ type Query<T> {
     Exists -> Query<bool>,
 }
 
-fn run_query<T>(q: Query<T>) -> T {
+fn run_query<T>(q: Query<T>): T {
     match q {
         Query::Count  => { return 3; }
         Query::Name   => { return "widgets"; }

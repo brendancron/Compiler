@@ -4,7 +4,7 @@ type Point {
 }
 
 impl Eq for Point {
-    fn eq(self, rhs: Point) -> bool {
+    fn eq(self, rhs: Point): bool {
         return self.x == rhs.x && self.y == rhs.y;
     }
 }

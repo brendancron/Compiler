@@ -1,7 +1,7 @@
 trait Container {
     type Item;
 
-    fn first(self) -> Item;
+    fn first(self): Item;
 }
 
 type Bag { values: Array<int> }
@@ -10,7 +10,7 @@ type Label { text: string }
 impl Container for Bag {
     type Item = int;
 
-    fn first(self) -> int {
+    fn first(self): int {
         return self.values[0];
     }
 }
@@ -18,12 +18,12 @@ impl Container for Bag {
 impl Container for Label {
     type Item = string;
 
-    fn first(self) -> string {
+    fn first(self): string {
         return self.text;
     }
 }
 
-fn head<T: Container>(c: T) -> T.Item {
+fn head<T: Container>(c: T): T.Item {
     return c.first();
 }
 

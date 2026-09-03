@@ -1,5 +1,5 @@
-fn main() -> unit {
-    fn total(nums: ...int) -> int {
+fn main(): unit {
+    fn total(nums: ...int): int {
         var sum = 0;
         for (n in nums) { sum = sum + n; }
         return sum;

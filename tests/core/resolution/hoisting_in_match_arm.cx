@@ -1,11 +1,11 @@
 type Color { Red, Blue }
 
-fn main() -> unit {
+fn main(): unit {
     var c = new Color::Red;
     match c {
         Color::Red => {
             print(later());
-            fn later() -> int { return 7; }
+            fn later(): int { return 7; }
         }
         Color::Blue => { }
     }

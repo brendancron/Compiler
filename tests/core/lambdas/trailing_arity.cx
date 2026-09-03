@@ -1,6 +1,6 @@
 fn run_twice(g: () -> unit) { g(); g(); }
-fn mapped(v: int, g: (int) -> int) -> int { return g(v); }
-fn zip(g: (int, int) -> int) -> int { return g(1, 2); }
+fn mapped(v: int, g: (int) -> int): int { return g(v); }
+fn zip(g: (int, int) -> int): int { return g(1, 2); }
 
 run_twice { print("tick"); };
 print(mapped(21) { it * 2 });

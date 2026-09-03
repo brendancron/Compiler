@@ -10,7 +10,7 @@ print("hello".to_string());
 type Point { x: int, y: int }
 
 impl ToString for Point {
-    fn to_string(self) -> string {
+    fn to_string(self): string {
         return "(" + self.x.to_string() + ", " + self.y.to_string() + ")";
     }
 }

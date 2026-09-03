@@ -3,7 +3,7 @@ type Foo { z: int }
 type Pair<T> { a: T, b: T }
 
 impl Pair<T> {
-    fn total(self) -> T {
+    fn total(self): T {
         return self.a + self.b;
     }
 }

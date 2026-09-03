@@ -1,6 +1,6 @@
 import "StringBuilder";
 
-fn substring(text: string, start: int, stop: int) -> string {
+fn substring(text: string, start: int, stop: int): string {
     var out = StringBuilder.new();
     var at = start;
     while (at < stop) {
@@ -10,11 +10,11 @@ fn substring(text: string, start: int, stop: int) -> string {
     return out.build();
 }
 
-fn index_of(text: string, needle: string) -> int {
+fn index_of(text: string, needle: string): int {
     return text.index_of(needle);
 }
 
-fn repeat(text: string, times: int) -> string {
+fn repeat(text: string, times: int): string {
     var out = StringBuilder.new();
     var done = 0;
     while (done < times) {
@@ -24,23 +24,23 @@ fn repeat(text: string, times: int) -> string {
     return out.build();
 }
 
-fn pad_left(text: string, width: int, filler: string) -> string {
+fn pad_left(text: string, width: int, filler: string): string {
     var short = width - text.len();
     if (short <= 0) { return text; }
     return repeat(filler, short) + text;
 }
 
-fn pad_right(text: string, width: int, filler: string) -> string {
+fn pad_right(text: string, width: int, filler: string): string {
     var short = width - text.len();
     if (short <= 0) { return text; }
     return text + repeat(filler, short);
 }
 
-fn is_digit(c: char) -> bool { return c >= '0' && c <= '9'; }
-fn is_upper(c: char) -> bool { return c >= 'A' && c <= 'Z'; }
-fn is_lower(c: char) -> bool { return c >= 'a' && c <= 'z'; }
-fn is_alpha(c: char) -> bool { return is_upper(c) || is_lower(c); }
-fn is_alphanumeric(c: char) -> bool { return is_alpha(c) || is_digit(c); }
-fn is_whitespace(c: char) -> bool {
+fn is_digit(c: char): bool { return c >= '0' && c <= '9'; }
+fn is_upper(c: char): bool { return c >= 'A' && c <= 'Z'; }
+fn is_lower(c: char): bool { return c >= 'a' && c <= 'z'; }
+fn is_alpha(c: char): bool { return is_upper(c) || is_lower(c); }
+fn is_alphanumeric(c: char): bool { return is_alpha(c) || is_digit(c); }
+fn is_whitespace(c: char): bool {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }

@@ -21,34 +21,34 @@ type TypeShape {
 // call; only a type declared in a program reaches the method written here.
 trait Add<Rhs> {
     type Output;
-    fn add(self, rhs: Rhs) -> Output;
+    fn add(self, rhs: Rhs): Output;
 }
 
 trait Sub<Rhs> {
     type Output;
-    fn sub(self, rhs: Rhs) -> Output;
+    fn sub(self, rhs: Rhs): Output;
 }
 
 trait Mul<Rhs> {
     type Output;
-    fn mul(self, rhs: Rhs) -> Output;
+    fn mul(self, rhs: Rhs): Output;
 }
 
 trait Div<Rhs> {
     type Output;
-    fn div(self, rhs: Rhs) -> Output;
+    fn div(self, rhs: Rhs): Output;
 }
 
 trait Rem<Rhs> {
     type Output;
-    fn rem(self, rhs: Rhs) -> Output;
+    fn rem(self, rhs: Rhs): Output;
 }
 
 // Both operands are the same type and the answer is always a bool, so this one
 // takes no argument and binds nothing. `!=` is the negation of `eq` rather than
 // an entry of its own.
 trait Eq {
-    fn eq(self, rhs: Self) -> bool;
+    fn eq(self, rhs: Self): bool;
 }
 
 type Ordering { Less, Equal, Greater }
@@ -56,33 +56,33 @@ type Ordering { Less, Equal, Greater }
 // One method answers all four comparisons. `None` is two values with no order
 // between them, which is what a float NaN is.
 trait PartialOrd {
-    fn partial_cmp(self, rhs: Self) -> Option<Ordering>;
+    fn partial_cmp(self, rhs: Self): Option<Ordering>;
 }
 
 // `Resolve` lowers `a < b` to `__is_less(partial_cmp(a, b))`. A match is a
 // statement, so the Ordering cannot become a bool where the operator stood.
-fn __is_less(o: Option<Ordering>) -> bool {
+fn __is_less(o: Option<Ordering>): bool {
     match o {
         Option::Some(c) => { match c { Ordering::Less => { return true; } _ => { return false; } } }
         Option::None => { return false; }
     }
 }
 
-fn __is_less_equal(o: Option<Ordering>) -> bool {
+fn __is_less_equal(o: Option<Ordering>): bool {
     match o {
         Option::Some(c) => { match c { Ordering::Greater => { return false; } _ => { return true; } } }
         Option::None => { return false; }
     }
 }
 
-fn __is_greater(o: Option<Ordering>) -> bool {
+fn __is_greater(o: Option<Ordering>): bool {
     match o {
         Option::Some(c) => { match c { Ordering::Greater => { return true; } _ => { return false; } } }
         Option::None => { return false; }
     }
 }
 
-fn __is_greater_equal(o: Option<Ordering>) -> bool {
+fn __is_greater_equal(o: Option<Ordering>): bool {
     match o {
         Option::Some(c) => { match c { Ordering::Less => { return false; } _ => { return true; } } }
         Option::None => { return false; }
@@ -91,22 +91,22 @@ fn __is_greater_equal(o: Option<Ordering>) -> bool {
 
 trait Neg {
     type Output;
-    fn neg(self) -> Output;
+    fn neg(self): Output;
 }
 
 trait Index<Idx> {
     type Output;
-    fn get(self, at: Idx) -> Output;
+    fn get(self, at: Idx): Output;
 }
 
 trait IndexSet<Idx>: Index<Idx> {
-    fn set(self, at: Idx, v: Output) -> Output;
+    fn set(self, at: Idx, v: Output): Output;
 }
 
 // What `var xs: List<int> = [1, 2, 3]` reaches. A literal is an array, and the
 // type it was annotated with says what to build from it.
 trait FromArray<T> {
-    fn from_array(items: Array<T>) -> Self;
+    fn from_array(items: Array<T>): Self;
 }
 
 // In the prelude rather than the stdlib because the language itself hands one
@@ -128,7 +128,7 @@ type Range {
 
 // A bound counted from the end is resolved here, once, where the length is
 // known — which is why it is the entry's business and not the language's.
-fn __bound(at: int, length: int) -> int {
+fn __bound(at: int, length: int): int {
     var resolved = at;
     if (resolved < 0) { resolved = length + resolved; }
     if (resolved < 0) { resolved = 0; }
@@ -136,7 +136,7 @@ fn __bound(at: int, length: int) -> int {
     return resolved;
 }
 
-fn __span(r: Range, length: int) -> (int, int) {
+fn __span(r: Range, length: int): (int, int) {
     match r {
         Range::Between(from, to) => {
             return (__bound(from, length), __bound(to, length));
@@ -148,7 +148,7 @@ fn __span(r: Range, length: int) -> (int, int) {
 }
 
 impl Array<T> {
-    fn contains(self, v: T) -> bool {
+    fn contains(self, v: T): bool {
         var i = 0;
         while (i < self.len()) {
             if (self[i] == v) {
@@ -164,7 +164,7 @@ impl Array<T> {
 // backing array and the array's own bounds check does the rejecting. Passing the
 // index straight through would not do: the spare capacity behind `count` holds
 // values that were left there.
-fn __past_end<T>(items: Array<T>) -> int {
+fn __past_end<T>(items: Array<T>): int {
     return items.len();
 }
 
@@ -174,7 +174,7 @@ type List<T> {
 }
 
 impl FromArray<T> for List<T> {
-    fn from_array(items: Array<T>) -> List<T> {
+    fn from_array(items: Array<T>): List<T> {
         return new List { items: items, count: items.len() };
     }
 }
@@ -182,7 +182,7 @@ impl FromArray<T> for List<T> {
 impl Index<int> for List<T> {
     type Output = T;
 
-    fn get(self, at: int) -> T {
+    fn get(self, at: int): T {
         if (at < 0 || at >= self.count) {
             return self.items[__past_end(self.items)];
         }
@@ -191,7 +191,7 @@ impl Index<int> for List<T> {
 }
 
 impl IndexSet<int> for List<T> {
-    fn set(self, at: int, v: T) -> T {
+    fn set(self, at: int, v: T): T {
         if (at < 0 || at >= self.count) {
             return self.items[__past_end(self.items)];
         }
@@ -201,7 +201,7 @@ impl IndexSet<int> for List<T> {
 }
 
 impl List<T> {
-    fn len(self) -> int {
+    fn len(self): int {
         return self.count;
     }
 
@@ -223,12 +223,12 @@ impl List<T> {
         self.count = self.count + 1;
     }
 
-    fn pop(self) -> T {
+    fn pop(self): T {
         self.count = self.count - 1;
         return self.items[self.count];
     }
 
-    fn contains(self, v: T) -> bool {
+    fn contains(self, v: T): bool {
         var i = 0;
         while (i < self.count) {
             if (self.items[i] == v) {
@@ -245,11 +245,11 @@ type Set<T> {
 }
 
 impl Set<T> {
-    fn len(self) -> int {
+    fn len(self): int {
         return self.items.len();
     }
 
-    fn contains(self, v: T) -> bool {
+    fn contains(self, v: T): bool {
         return self.items.contains(v);
     }
 
@@ -261,7 +261,7 @@ impl Set<T> {
 }
 
 impl FromArray<T> for Set<T> {
-    fn from_array(items: Array<T>) -> Set<T> {
+    fn from_array(items: Array<T>): Set<T> {
         var out = new Set { items: [] };
         var i = 0;
         while (i < items.len()) {
@@ -277,11 +277,11 @@ type Map<K, V> {
 }
 
 impl Map<K, V> {
-    fn len(self) -> int {
+    fn len(self): int {
         return self.entries.len();
     }
 
-    fn contains(self, key: K) -> bool {
+    fn contains(self, key: K): bool {
         var i = 0;
         while (i < self.entries.len()) {
             if (self.entries[i].0 == key) {
@@ -292,7 +292,7 @@ impl Map<K, V> {
         return false;
     }
 
-    fn get_or(self, key: K, fallback: V) -> V {
+    fn get_or(self, key: K, fallback: V): V {
         var i = 0;
         while (i < self.entries.len()) {
             if (self.entries[i].0 == key) {
@@ -317,7 +317,7 @@ impl Map<K, V> {
 }
 
 impl FromArray<(K, V)> for Map<K, V> {
-    fn from_array(pairs: Array<(K, V)>) -> Map<K, V> {
+    fn from_array(pairs: Array<(K, V)>): Map<K, V> {
         var out = new Map { entries: [] };
         var i = 0;
         while (i < pairs.len()) {
@@ -328,11 +328,11 @@ impl FromArray<(K, V)> for Map<K, V> {
     }
 }
 
-fn __is_space(c: char) -> bool {
+fn __is_space(c: char): bool {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
-fn __slice(text: string, start: int, stop: int) -> string {
+fn __slice(text: string, start: int, stop: int): string {
     var out = "";
     var i = start;
     while (i < stop) {
@@ -343,7 +343,7 @@ fn __slice(text: string, start: int, stop: int) -> string {
 }
 
 impl string {
-    fn chars(self) -> Array<char> {
+    fn chars(self): Array<char> {
         var out = new Array<char>(self.len(), ' ');
         var i = 0;
         while (i < self.len()) {
@@ -353,7 +353,7 @@ impl string {
         return out;
     }
 
-    fn contains(self, needle: string) -> bool {
+    fn contains(self, needle: string): bool {
         var start = 0;
         while (start + needle.len() <= self.len()) {
             var i = 0;
@@ -372,7 +372,7 @@ impl string {
         return false;
     }
 
-    fn split(self, sep: char) -> Array<string> {
+    fn split(self, sep: char): Array<string> {
         var parts: List<string> = [];
         var start = 0;
         var i = 0;
@@ -394,7 +394,7 @@ impl string {
         return out;
     }
 
-    fn trim(self) -> string {
+    fn trim(self): string {
         var start = 0;
         while (start < self.len() && __is_space(self[start])) {
             start = start + 1;
@@ -405,15 +405,15 @@ impl string {
         }
         return __slice(self, start, stop);
     }
-    fn starts_with(self, prefix: string) -> bool {
+    fn starts_with(self, prefix: string): bool {
         if (prefix.len() > self.len()) { return false; }
         return __slice(self, 0, prefix.len()) == prefix;
     }
-    fn ends_with(self, suffix: string) -> bool {
+    fn ends_with(self, suffix: string): bool {
         if (suffix.len() > self.len()) { return false; }
         return __slice(self, self.len() - suffix.len(), self.len()) == suffix;
     }
-    fn index_of(self, needle: string) -> int {
+    fn index_of(self, needle: string): int {
         var last = self.len() - needle.len();
         var at = 0;
         while (at <= last) {
@@ -422,7 +422,7 @@ impl string {
         }
         return 0 - 1;
     }
-    fn replace(self, needle: string, replacement: string) -> string {
+    fn replace(self, needle: string, replacement: string): string {
         if (needle.len() == 0) { return self; }
         var out = "";
         var at = 0;
@@ -444,7 +444,7 @@ impl string {
 impl Index<Range> for List<T> {
     type Output = List<T>;
 
-    fn get(self, r: Range) -> List<T> {
+    fn get(self, r: Range): List<T> {
         var bounds = __span(r, self.len());
         var out: List<T> = [];
         var at = bounds.0;
@@ -459,7 +459,7 @@ impl Index<Range> for List<T> {
 impl Index<Range> for Array<T> {
     type Output = Array<T>;
 
-    fn get(self, r: Range) -> Array<T> {
+    fn get(self, r: Range): Array<T> {
         var bounds = __span(r, self.len());
         var taken = bounds.1 - bounds.0;
         if (taken <= 0) { return new Array<T>(0, self[0]); }
@@ -476,7 +476,7 @@ impl Index<Range> for Array<T> {
 impl Index<Range> for string {
     type Output = string;
 
-    fn get(self, r: Range) -> string {
+    fn get(self, r: Range): string {
         var bounds = __span(r, self.len());
         return __slice(self, bounds.0, bounds.1);
     }

@@ -1,5 +1,5 @@
 trait Summary {
-    fn summarize(self) -> string;
+    fn summarize(self): string;
 }
 
 type Article {
@@ -13,13 +13,13 @@ type Tweet {
 }
 
 impl Summary for Article {
-    fn summarize(self) -> string {
+    fn summarize(self): string {
         return self.title + " by " + self.author;
     }
 }
 
 impl Summary for Tweet {
-    fn summarize(self) -> string {
+    fn summarize(self): string {
         return self.username + ": " + self.content;
     }
 }

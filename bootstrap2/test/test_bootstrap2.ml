@@ -281,6 +281,7 @@ let error_cases =
   [ "tests/core/variadic/errors/not_last"
   ; "tests/core/lambdas/errors/unnamed_pair"
   ; "tests/core/lambdas/errors/naked_arrow"
+  ; "tests/core/type_annotations/errors/arrow_return"
   ; "tests/core/lambdas/errors/trailing_comma"
   ; "tests/core/embed/errors/missing"
   ; "tests/effects/generic/errors/one_type"

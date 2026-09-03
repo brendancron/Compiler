@@ -3,11 +3,11 @@ effect Fallible {
 }
 
 trait TryFrom<S> {
-    fn from(source: S) -> <Fallible> Self;
+    fn from(source: S): <Fallible> Self;
 }
 
 impl TryFrom<string> for int {
-    fn from(source: string) -> <Fallible> int {
+    fn from(source: string): <Fallible> int {
         if (source.len() == 0) { return invalid(source); }
         var total = 0;
         for (c in source.chars()) {
@@ -19,14 +19,14 @@ impl TryFrom<string> for int {
 }
 
 impl TryFrom<string> for bool {
-    fn from(source: string) -> <Fallible> bool {
+    fn from(source: string): <Fallible> bool {
         if (source == "true") { return true; }
         if (source == "false") { return false; }
         return invalid(source);
     }
 }
 
-fn do_work<S, T: TryFrom<S>>(source: S) -> <Fallible> T {
+fn do_work<S, T: TryFrom<S>>(source: S): <Fallible> T {
     return T.from(source);
 }
 

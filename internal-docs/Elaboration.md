@@ -17,7 +17,7 @@ type Vec2 {
 impl Add<Vec2> for Vec2 {
     type Output = Vec2;
 
-    fn add(self, rhs: Vec2) -> Vec2 {
+    fn add(self, rhs: Vec2): Vec2 {
         return new Vec2 { x: self.x + rhs.x, y: self.y + rhs.y };
     }
 }
@@ -34,7 +34,7 @@ Selection is on both operands, not just the receiver, so the two sides may diffe
 impl Mul<Vec2> for int {
     type Output = Vec2;
 
-    fn mul(self, rhs: Vec2) -> Vec2 {
+    fn mul(self, rhs: Vec2): Vec2 {
         return new Vec2 { x: self * rhs.x, y: self * rhs.y };
     }
 }
@@ -50,7 +50,7 @@ That also means commutativity is not free. `v * 2` is `impl Mul<int> for Vec2`, 
 
 ```cronyx
 impl Eq for Vec2 {
-    fn eq(self, rhs: Vec2) -> bool {
+    fn eq(self, rhs: Vec2): bool {
         return self.x == rhs.x && self.y == rhs.y;
     }
 }
@@ -67,7 +67,7 @@ print(v == v);      // true
 Because operators are traits, generic code can require one, which is the thing a table of entries could not express:
 
 ```cronyx
-fn twice<T: Add<T, Output = T>>(x: T) -> T {
+fn twice<T: Add<T, Output = T>>(x: T): T {
     return x + x;
 }
 
@@ -105,13 +105,13 @@ type Ring<T> {
 impl Index<int> for Ring<T> {
     type Output = T;
 
-    fn get(self, i: int) -> T {
+    fn get(self, i: int): T {
         return self.items[(self.head + i) % self.items.len()];
     }
 }
 
 impl IndexSet<int> for Ring<T> {
-    fn set(self, i: int, v: T) -> T {
+    fn set(self, i: int, v: T): T {
         self.items[(self.head + i) % self.items.len()] = v;
         return v;
     }
@@ -133,7 +133,7 @@ ring[0] = 5;
 impl Index<Range> for Ring {
     type Output = List<int>;
 
-    fn get(self, r: Range) -> List<int> { return self.items[r]; }
+    fn get(self, r: Range): List<int> { return self.items[r]; }
 }
 ```
 
@@ -163,7 +163,7 @@ A type says it can be built from a literal by implementing `FromArray` — the a
 
 ```cronyx
 impl FromArray<T> for Ring<T> {
-    fn from_array(items: Array<T>) -> Ring<T> {
+    fn from_array(items: Array<T>): Ring<T> {
         return new Ring { items: items, head: 0 };
     }
 }
@@ -219,7 +219,7 @@ print(typeof(double));   // (int) -> int
 The same constraint is what a generic function carries. A body using `+` on a type parameter requires an entry for it, that requirement travels with the signature, and each call site discharges it against the table — inferred throughout, never written. See [Comptime Params](Comptime%20Params.md). Annotating changes the answer without changing the body:
 
 ```cronyx
-fn double_vec(x: Vec2) -> Vec2 {
+fn double_vec(x: Vec2): Vec2 {
     return x + x;
 }
 ```
@@ -257,15 +257,15 @@ Without it, zero-cost operators exist only in monomorphic code. That is the ceil
 
 ```cronyx
 trait Len {
-    fn len(self) -> int;
+    fn len(self): int;
 }
 
 impl Len for Array {
-    fn len(self) -> int { … }
+    fn len(self): int { … }
 }
 
 impl Rectangle {
-    fn area(self) -> int { return self.width * self.height; }
+    fn area(self): int { return self.width * self.height; }
 }
 ```
 

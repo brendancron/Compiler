@@ -8,7 +8,7 @@ type Fragment {
 
 // Thompson's construction. Symbols are code points, and `.` is expanded to
 // printable ASCII here rather than being a wildcard the simulator knows about.
-fn build(ast: RegexAst) -> Nfa {
+fn build(ast: RegexAst): Nfa {
     var states: List<int> = [];
     var alphabet: List<int> = [];
     var transitions: List<Transition> = [];
@@ -26,7 +26,7 @@ fn build(ast: RegexAst) -> Nfa {
     };
 }
 
-fn fresh(states: List<int>, counter: List<int>) -> int {
+fn fresh(states: List<int>, counter: List<int>): int {
     var id = counter[0];
     counter[0] = id + 1;
     states.push(id);
@@ -55,7 +55,7 @@ fn build_node(
     counter: List<int>,
     ast: RegexAst,
     node_id: int
-) -> Fragment {
+): Fragment {
     match ast.nodes[node_id] {
         RegexNode::Literal(cp) => {
             return build_literal(states, alphabet, transitions, counter, cp);
@@ -122,7 +122,7 @@ fn build_literal(
     transitions: List<Transition>,
     counter: List<int>,
     cp: int
-) -> Fragment {
+): Fragment {
     var s = fresh(states, counter);
     var e = fresh(states, counter);
     add_trans(transitions, s, cp, e);
@@ -135,7 +135,7 @@ fn build_range(
     alphabet: List<int>,
     transitions: List<Transition>,
     counter: List<int>
-) -> Fragment {
+): Fragment {
     var s = fresh(states, counter);
     var e = fresh(states, counter);
     var cp = 32;
@@ -154,7 +154,7 @@ fn build_class(
     counter: List<int>,
     chars: List<int>,
     negated: bool
-) -> Fragment {
+): Fragment {
     var s = fresh(states, counter);
     var e = fresh(states, counter);
     if (negated) {
@@ -175,7 +175,7 @@ fn build_class(
     return new Fragment { start: s, end: e };
 }
 
-fn contains(items: List<int>, val: int) -> bool {
+fn contains(items: List<int>, val: int): bool {
     for (item in items) {
         if (item == val) { return true; }
     }

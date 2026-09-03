@@ -3,7 +3,7 @@
 // the deferred statement — comes after it.
 effect Error { final ctl throw(msg: string); }
 
-fn risky(bad: bool) -> int {
+fn risky(bad: bool): int {
     defer print("cleanup");
     if (bad) { return throw("failed"); }
     return 1;

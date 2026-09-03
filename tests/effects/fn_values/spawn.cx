@@ -4,7 +4,7 @@ effect sched {
 
 var queue: List<() -> unit> = [];
 
-fn counter(name: string) -> <sched> unit {
+fn counter(name: string): <sched> unit {
     for (var i = 0; i < 3; i += 1) {
         print(name + ": " + str(i));
         tick();

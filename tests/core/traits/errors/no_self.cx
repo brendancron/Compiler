@@ -1,7 +1,7 @@
 type Circle { radius: int }
 
 impl Circle {
-    fn area(n: int) -> int { return n; }
+    fn area(n: int): int { return n; }
 }
 
 // An associated function is reached through the type, not through a value of

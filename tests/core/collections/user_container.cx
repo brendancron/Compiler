@@ -4,7 +4,7 @@ type Ring<T> {
 }
 
 impl FromArray<T> for Ring<T> {
-    fn from_array(items: Array<T>) -> Ring<T> {
+    fn from_array(items: Array<T>): Ring<T> {
         return new Ring { items: items, head: 0 };
     }
 }
@@ -12,7 +12,7 @@ impl FromArray<T> for Ring<T> {
 impl Index<int> for Ring<T> {
     type Output = T;
 
-    fn get(self, i: int) -> T {
+    fn get(self, i: int): T {
         var at = self.head + i;
         while (at >= self.items.len()) {
             at = at - self.items.len();
@@ -22,7 +22,7 @@ impl Index<int> for Ring<T> {
 }
 
 impl IndexSet<int> for Ring<T> {
-    fn set(self, i: int, v: T) -> T {
+    fn set(self, i: int, v: T): T {
         var at = self.head + i;
         while (at >= self.items.len()) {
             at = at - self.items.len();

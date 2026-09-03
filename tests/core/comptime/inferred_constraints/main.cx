@@ -6,12 +6,12 @@ type Vec2 {
 impl Add<Vec2> for Vec2 {
     type Output = Vec2;
 
-    fn add(self, rhs: Vec2) -> Vec2 {
+    fn add(self, rhs: Vec2): Vec2 {
         return new Vec2 { x: self.x + rhs.x, y: self.y + rhs.y };
     }
 }
 
-fn sum<T>(xs: Array<T>) -> T {
+fn sum<T>(xs: Array<T>): T {
     var total = xs[0];
     var i = 1;
     while (i < 3) {

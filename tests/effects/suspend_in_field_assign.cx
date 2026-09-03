@@ -7,7 +7,7 @@ type Point {
     y: int
 }
 
-fn shift(p: Point) -> <Ask> unit {
+fn shift(p: Point): <Ask> unit {
     p.x = get();
 }
 

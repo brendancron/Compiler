@@ -3,7 +3,7 @@
 // of the body.
 effect E { ctl ask(): int; }
 
-fn pick(n: int) -> int {
+fn pick(n: int): int {
     if (n == 0) { return 42; }
     return ask();
 }

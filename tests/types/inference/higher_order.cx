@@ -1,8 +1,8 @@
-fn twice(f: (int) -> int, v: int) -> int {
+fn twice(f: (int) -> int, v: int): int {
   return f(f(v));
 }
 
-fn inc(n: int) -> int {
+fn inc(n: int): int {
   return n + 1;
 }
 

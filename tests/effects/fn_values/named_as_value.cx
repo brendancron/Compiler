@@ -1,9 +1,9 @@
 effect E { ctl op(): int; }
 
-fn doubled() -> <E> int { return op() * 2; }
-fn tripled() -> <E> int { return op() * 3; }
+fn doubled(): <E> int { return op() * 2; }
+fn tripled(): <E> int { return op() * 3; }
 
-fn call_it(task: () -> <E> int) -> <E> int { return task(); }
+fn call_it(task: () -> <E> int): <E> int { return task(); }
 
 run {
     print(call_it(doubled));

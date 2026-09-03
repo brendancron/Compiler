@@ -11,7 +11,7 @@ meta fn derive_eq(shape: TypeShape) {
                 check = code(check && self.field == other.field);
             }
             gen impl t {
-                fn eq(self, other: t) -> bool { return check; }
+                fn eq(self, other: t): bool { return check; }
             }
         }
         TypeShape::Sum(t, variants) => {}

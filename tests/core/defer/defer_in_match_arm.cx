@@ -1,6 +1,6 @@
 type Color { Red, Blue }
 
-fn main() -> unit {
+fn main(): unit {
     var c = new Color::Red;
     match c {
         Color::Red => {
