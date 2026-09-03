@@ -74,6 +74,7 @@ let cases =
   ; "tests/effects/fn_values/spawn"
   ; "tests/effects/fn_values/multishot_closure"
   ; "tests/effects/fn_values/nested_spawn"
+  ; "tests/effects/abort_after_resumption"
   ; "tests/core/arrays/basics"
   ; "tests/core/arrays/identity"
   ; "tests/core/arrays/methods"
@@ -405,11 +406,6 @@ let expected_failing : (string * blocker) list =
        for a continuation to capture the active scope stack and restore it when
        invoked, which is a change to how [Interp] represents one. *)
   [ "tests/effects/abort_under_conversion", Waiting "a continuation that restores its scopes"
-    (* The same, reaching the interpreter: the unwind passes the handler that
-       catches it and then finds no scope left, so `Interp.Aborted` escapes
-       rather than any diagnostic. *)
-  ; ( "tests/effects/abort_after_resumption"
-    , Waiting "a continuation that restores its scopes" )
     (* Parked — native compilation, deliberately out of scope *)
   ; "tests/compile/m0/m0", Parked
   ; "tests/compile/m1/fib", Parked

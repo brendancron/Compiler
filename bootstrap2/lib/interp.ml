@@ -6,6 +6,11 @@ exception Return_value of value * Ast.span
 (* Carries where it left from, so one that finds no scope can still say where. *)
 exception Aborted of string * Ast.span
 
+(* A scope is a frame on the interpreter's own stack as well as OCaml's, because
+   a continuation invoked after its `run` block returned has to put back what
+   entering it installed. Innermost first. *)
+let active_scopes : (string * Ast.cps_stmt list * Value.env) list ref = ref []
+
 let compare_ordered op x y =
   match op with
   | Ast.Less -> x < y
@@ -162,8 +167,20 @@ let rec eval env (e : Ast.cps_expr) : value =
      | Tuple items -> List.nth items index
      | v -> fail span "Cannot take a field of %s." (type_name v))
 (* OCaml's argument order is unspecified, and right to left in practice. *)
+(* Outermost first, so an inner scope's catcher sits inside its outer one. *)
+and under missing k =
+  match missing with
+  | [] -> k ()
+  | (name, on_abort, senv) :: inner ->
+    (match under inner k with
+     | v -> v
+     | exception Aborted (caught, _) when String.equal caught name ->
+       List.iter (exec senv) on_abort;
+       Unit)
+
 and closure env name params body =
   let names = List.map (fun (p : Ast.param) -> p.Ast.name) params in
+  let captured = !active_scopes in
   Fn
     { name
     ; arity = Some (List.length names)
@@ -171,11 +188,28 @@ and closure env name params body =
         (fun _ args ->
           let frame = new_env (Some env) in
           List.iter2 (define frame) names args;
-          (try
-             run_block frame body;
-             Unit
-           with
-           | Return_value (v, _) -> v))
+          (* What it was made under and is no longer inside. Re-entering only
+             those leaves an ordinary call, made where it was written, alone. *)
+          let current = !active_scopes in
+          let missing =
+            List.filter
+              (fun (n, _, _) ->
+                not (List.exists (fun (m, _, _) -> String.equal m n) current))
+              captured
+          in
+          let saved = current in
+          active_scopes := missing @ current;
+          Fun.protect
+            ~finally:(fun () -> active_scopes := saved)
+            (fun () ->
+              under
+                (List.rev missing)
+                (fun () ->
+                  try
+                    run_block frame body;
+                    Unit
+                  with
+                  | Return_value (v, _) -> v)))
     }
 
 and eval_all env = function
@@ -240,7 +274,11 @@ and exec env (s : Ast.cps_stmt) : unit =
   (* Nothing catches this in between: a function's own handler is for
      `return`. *)
   | `Scope (scope, body, on_abort) ->
-    (match List.iter (exec env) body with
+    let saved = !active_scopes in
+    active_scopes := (scope, on_abort, env) :: saved;
+    (match Fun.protect ~finally:(fun () -> active_scopes := saved) (fun () ->
+             List.iter (exec env) body)
+     with
      | () -> ()
      | exception Aborted (caught, _) when String.equal caught scope ->
        List.iter (exec env) on_abort)
