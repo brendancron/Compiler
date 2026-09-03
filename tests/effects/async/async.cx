@@ -15,7 +15,7 @@ fn start(name: string) {
     run {
         counter(name);
     } handle sched {
-        ctl tick() { pending.push(() => { resume; }); }
+        ctl tick() { pending.push { -> resume; }; }
     }
 }
 

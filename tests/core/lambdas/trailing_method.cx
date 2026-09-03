@@ -1,0 +1,13 @@
+type Box { v: int }
+
+impl Box {
+    fn apply(self, g: (int) -> int) -> int { return g(self.v); }
+    fn combine(self, extra: int, g: (int) -> int) -> int { return g(self.v + extra); }
+}
+
+var b = new Box { v: 21 };
+
+print(b.apply { it * 2 });
+print(b.apply { x -> x + 1 });
+print(b.combine(3) { it * 2 });
+print(b.apply { it * 2 } + b.apply { it });
