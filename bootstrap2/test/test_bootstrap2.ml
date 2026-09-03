@@ -259,6 +259,7 @@ let cases =
   ; "tests/core/defer/defer_in_match_arm"
   ; "tests/core/resolution/hoisting_in_match_arm"
   ; "tests/core/types/local_type_per_function"
+  ; "tests/core/types/unit_literal"
   ; "tests/core/modules/local_binders/main"
   ; "tests/core/comptime/shadowed_value_param"
   ; "tests/core/comptime/nested/template_in_function"

@@ -41,6 +41,7 @@ let string_of_param (p : Ast.param) = p.Ast.name ^ annotation p.Ast.ty
 
 let rec string_of_expr (e : Ast.expr) : string =
   match e.Ast.it with
+  | `Unit -> "()"
   | `Int n -> string_of_int n
   | `Bytes b -> Printf.sprintf "(bytes %d)" (String.length b)
   | `Float n -> Token.float_to_string n
@@ -270,6 +271,7 @@ let rec string_of_typed_expr (e : Ast.typed_expr) : string =
   let ty = Types.string_of_ty e.Ast.ann in
   let body =
     match e.Ast.it with
+    | `Unit -> "()"
     | `Int n -> string_of_int n
     | `Bytes b -> Printf.sprintf "(bytes %d)" (String.length b)
     | `Lambda (params, _, _) ->

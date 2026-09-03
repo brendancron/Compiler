@@ -1,0 +1,16 @@
+fn take(u: unit) -> string {
+    return "got one";
+}
+
+fn make() -> unit {
+    return ();
+}
+
+fn call(f: (unit) -> string) -> string {
+    return f(());
+}
+
+var value: unit = ();
+print(take(value));
+print(take(make()));
+print(call((u) => { return "via callback"; }));

@@ -114,7 +114,8 @@ and 's arm =
   }
 
 type lit =
-  [ `Int of int
+  [ `Unit
+  | `Int of int
   | `Float of float
   | `Str of Uchar.t array
   | `Char of Uchar.t

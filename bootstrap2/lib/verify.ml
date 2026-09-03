@@ -30,6 +30,7 @@ let rec expr (e : Ast.cps_expr) : unit =
   let span = e.Ast.span
   and ann = e.Ast.ann in
   match e.Ast.it with
+  | `Unit -> expect span "A unit literal" Types.Unit ann
   | `Int _ -> expect span "An int literal" Types.Int ann
   | `Float _ -> expect span "A float literal" Types.Float ann
   | `Str _ -> expect span "A string literal" Types.Str ann

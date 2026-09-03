@@ -2,8 +2,8 @@ effect async {
     ctl suspend<T>(setup: ((T) -> unit) -> unit): T;
 }
 
-fn pause() -> <async> int {
-    return suspend((wake) => { wake(0); });
+fn pause() -> <async> unit {
+    return suspend { it(()) };
 }
 
 fn interleaved(actions: List<() -> <async> unit>) {
@@ -13,11 +13,17 @@ fn interleaved(actions: List<() -> <async> unit>) {
         run {
             action();
         } handle async {
-            ctl suspend(setup) { setup((value) => { ready.push { resume value; }; }); }
+            ctl suspend(setup) {
+                setup {
+                    ready.push { resume it; };
+                };
+            }
         }
     }
 
-    for (action in actions) { ready.push { strand(action); }; }
+    for (action in actions) {
+        ready.push { strand(action); };
+    }
 
     while (ready.len() > 0) {
         var next = ready[0];

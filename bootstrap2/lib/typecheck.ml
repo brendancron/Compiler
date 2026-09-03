@@ -826,6 +826,7 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
   | `Bytes b -> node (Types.iarray Types.IByte) (`Bytes b)
   | `Char c -> node Types.IChr (`Char c)
   | `Bool b -> node Types.IBool (`Bool b)
+  | `Unit -> node Types.IUnit `Unit
   | `Var name ->
     (match lookup env name with
      | Some scheme -> node (Types.instantiate scheme) (`Var name)

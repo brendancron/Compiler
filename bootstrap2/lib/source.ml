@@ -76,6 +76,7 @@ let signature (sg : Ast.signature) =
 
 let rec expr (e : Ast.expr) : string =
   match e.Ast.it with
+  | `Unit -> "()"
   | `Int n -> string_of_int n
   | `Float n -> Token.float_to_string n
   | `Str s -> Printf.sprintf "\"%s\"" (escape (Utf8.encode s))

@@ -623,6 +623,11 @@ and primary s : Ast.expr =
     ignore (consume s Token.Right_bracket "Expected ']' after collection items.");
     Ast.at sp (`Collection_lit items)
   | Token.Left_paren when starts_lambda s -> lambda s sp
+  (* After [starts_lambda], so `() => ...` is still a lambda. *)
+  | Token.Left_paren when (peek_at s 1).Token.token_type = Token.Right_paren ->
+    ignore (advance s);
+    ignore (advance s);
+    Ast.at sp `Unit
   | Token.Left_paren ->
     ignore (advance s);
     let saved = s.no_brace in
