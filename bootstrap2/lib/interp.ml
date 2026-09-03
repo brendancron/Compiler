@@ -3,7 +3,8 @@ open Value
 exception Return_value of value * Ast.span
 
 (* Caught by the `Scope` its own `run` became, passed through any between. *)
-exception Aborted of string
+(* Carries where it left from, so one that finds no scope can still say where. *)
+exception Aborted of string * Ast.span
 
 let compare_ordered op x y =
   match op with
@@ -241,9 +242,9 @@ and exec env (s : Ast.cps_stmt) : unit =
   | `Scope (scope, body, on_abort) ->
     (match List.iter (exec env) body with
      | () -> ()
-     | exception Aborted caught when String.equal caught scope ->
+     | exception Aborted (caught, _) when String.equal caught scope ->
        List.iter (exec env) on_abort)
-  | `Abort scope -> raise (Aborted scope)
+  | `Abort scope -> raise (Aborted (scope, s.Ast.span))
   | `On_unwind (body, cleanup) ->
     (try List.iter (exec env) body with
      | e ->
@@ -313,3 +314,7 @@ let run env (program : Ast.cps_stmt list) : (unit, error) result =
   with
   | Runtime_error e -> Error e
   | Return_value (_, span) -> Error { span; message = "'return' outside of a function." }
+  (* The scope it named is gone: a continuation re-entered it without putting it
+     back. A diagnostic rather than an escaping exception. *)
+  | Aborted (_, span) ->
+    Error { span; message = "An unwind found no scope left to stop at." }
