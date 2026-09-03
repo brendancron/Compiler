@@ -64,6 +64,8 @@ let cases =
   ; "tests/effects/run_value/arm_answers"
   ; "tests/effects/run_value/two_in_one_expr"
   ; "tests/effects/deferred/deferred"
+  ; "tests/effects/fn_values/in_list"
+  ; "tests/effects/fn_values/in_tuple"
   ; "tests/core/arrays/basics"
   ; "tests/core/arrays/identity"
   ; "tests/core/arrays/methods"

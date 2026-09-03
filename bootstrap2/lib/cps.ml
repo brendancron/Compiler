@@ -63,7 +63,14 @@ let rec widen info (t : Types.ty) =
       ( List.map (widen info) params @ List.map (evidence_ty info) (evidence_of_row info row)
       , widen info ret
       , row )
+  | Types.Tuple items -> Types.Tuple (List.map (widen info) items)
+  | Types.Record fields -> Types.Record (widen_fields info fields)
+  | Types.Named (name, args, fields) ->
+    Types.Named (name, List.map (widen info) args, widen_fields info fields)
+  | Types.Sum (name, args) -> Types.Sum (name, List.map (widen info) args)
   | other -> other
+
+and widen_fields info fields = List.map (fun (label, t) -> label, widen info t) fields
 
 let is_delimited info (row : Types.row) =
   List.exists (fun (label, _) -> Hashtbl.mem info.delimited label) row
@@ -157,7 +164,7 @@ let convert_body : (effects -> Ast.reflected_stmt list -> Ast.cps_stmt list) ref
   ref (fun _ _ -> [])
 
 let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
-  let widened = ref e.Ast.ann in
+  let widened = ref (widen info e.Ast.ann) in
   let it : Ast.cps_expr_kind =
     match e.Ast.it with
     | #Ast.lit as l -> l
