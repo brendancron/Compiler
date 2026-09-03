@@ -20,27 +20,33 @@ let ansi =
   ; off = "\027[0m"
   }
 
-(* A tab is a stop every eight columns in both the source line and the underline
-   beneath it, so the two are measured the same way and line up. *)
+(* A tab is a stop every eight columns, counted the way a terminal draws them
+   rather than in bytes, so a line holding wide or combining characters and the
+   underline beneath it still agree on where a column is. *)
 let tab_width = 8
+let tab = Uchar.of_char '\t'
 
-let expand text =
+let laid_out text =
   let buf = Buffer.create (String.length text) in
-  String.iter
-    (fun c ->
-      if c = '\t'
-      then Buffer.add_string buf (String.make (tab_width - (Buffer.length buf mod tab_width)) ' ')
-      else Buffer.add_char buf c)
-    text;
-  Buffer.contents buf
-
-(* Columns taken by the first [bytes] bytes of [text], counting a UTF-8 sequence
-   once rather than once per byte. *)
-let width text bytes =
-  let expanded = expand (String.sub text 0 (min bytes (String.length text))) in
   let columns = ref 0 in
-  String.iter (fun c -> if Char.code c land 0xc0 <> 0x80 then incr columns) expanded;
-  !columns
+  Array.iter
+    (fun scalar ->
+      if Uchar.equal scalar tab
+      then (
+        let step = tab_width - (!columns mod tab_width) in
+        Buffer.add_string buf (String.make step ' ');
+        columns := !columns + step)
+      else (
+        Buffer.add_utf_8_uchar buf scalar;
+        columns := !columns + Char_width.of_uchar scalar))
+    (Utf8.decode text);
+  Buffer.contents buf, !columns
+
+let slice text ~from ~upto =
+  let limit = String.length text in
+  let from = max 0 (min from limit) in
+  let upto = max from (min upto limit) in
+  String.sub text from (upto - from)
 
 let frame ~palette ~entry (e : Diagnostic.error) =
   let buf = Buffer.create 256 in
@@ -70,8 +76,17 @@ let frame ~palette ~entry (e : Diagnostic.error) =
      let path = Ast.shown_path ~entry (Source_map.File.path l.Source_map.Span.file) in
      rule (Printf.sprintf "┌─ %s:%d:%d" path l.Source_map.Span.line l.Source_map.Span.col);
      let text = l.Source_map.Span.line_text in
-     let before = width text l.Source_map.Span.underline_from in
-     let marked = max 1 (width text l.Source_map.Span.underline_to - before) in
+     let _, before =
+       laid_out (slice text ~from:0 ~upto:l.Source_map.Span.underline_from)
+     in
+     let _, marked =
+       laid_out
+         (slice
+            text
+            ~from:l.Source_map.Span.underline_from
+            ~upto:l.Source_map.Span.underline_to)
+     in
+     let marked = max 1 marked in
      rule "│";
      add
        (Printf.sprintf
@@ -79,7 +94,7 @@ let frame ~palette ~entry (e : Diagnostic.error) =
           l.Source_map.Span.line
           palette.cyan
           palette.off
-          (expand text));
+          (fst (laid_out text)));
      add
        (Printf.sprintf
           "%s %s│%s %s%s%s%s\n"

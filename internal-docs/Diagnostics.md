@@ -80,11 +80,17 @@ Columns are counted in bytes from the start of the line, which is what
   by a fixed two spaces and the source line by the number's own width, which
   agreed only for single-digit line numbers.
 
-Tabs are expanded to eight-column stops in both the source line and the underline
-beneath it, and a UTF-8 sequence counts as one column rather than one per byte.
-A character the terminal draws double-width — an emoji, most CJK — still counts
-as one, so an underline after one sits a column left of where it should. Fixing
-that needs a width table, and has not been worth one.
+Both rows are measured in the columns a terminal draws, not in bytes: a tab is a
+stop every eight of those columns, a combining mark takes none, and the East
+Asian wide and fullwidth ranges take two. `lib/char_width.ml` holds the ranges,
+generated from the Unicode data by `tools/gen_char_width.py`; regenerate it
+rather than editing it. Measuring in bytes, or counting each character as one
+column, drifts the underline left of what it points at — a byte per non-ASCII
+character in the first case, a column per wide one in the second.
+
+An emoji built from a ZWJ sequence — a family, a flag, a profession — is still
+counted per component, so an underline after one sits left of its target.
+Terminals do not agree on those either, so there is no width to match.
 
 Colour is ANSI when stderr is a terminal and `NO_COLOR` is unset, and the same
 code path otherwise with an empty escape for every entry, so the two cannot
@@ -109,4 +115,5 @@ The fixture suite compares `[line:col] message` against a `.err` file, which
 would not notice a frame missing its source line or its closing rule. The
 renderer is pinned separately by `run_rendering` in
 `bootstrap2/test/test_bootstrap2.ml`: a span inside a line, a two-digit line
-number for the gutter, and a span with no source behind it.
+number for the gutter, a line carrying a tab and a wide character, and a span
+with no source behind it.

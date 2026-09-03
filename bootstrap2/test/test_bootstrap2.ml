@@ -674,6 +674,23 @@ let renderings =
        12 │ var zz = 1;\n\
       \   │     ~~\n\
       \   └─\n" )
+    (* A tab is eight columns and the emoji is two, in the line and in the
+       underline alike. *)
+  ; ( "a line with a tab and a wide character"
+    , rendered
+        Diagnostic.Verify
+        ~entry:"wide.cx"
+        ~path:"wide.cx"
+        ~text:(Some "\tvar wide = \"\xf0\x9f\x8e\x89\"; var bad = 1;\n")
+        ~lo:24
+        ~hi:27
+        "not in scope"
+    , "\xc3\x97 Verify error: not in scope\n\
+      \  \xe2\x94\x8c\xe2\x94\x80 wide.cx:1:25\n\
+      \  \xe2\x94\x82\n\
+       1 \xe2\x94\x82         var wide = \"\xf0\x9f\x8e\x89\"; var bad = 1;\n\
+      \  \xe2\x94\x82                              ~~~\n\
+      \  \xe2\x94\x94\xe2\x94\x80\n" )
     (* No location is a case the frame answers for, not one it skips. *)
   ; ( "a span with no source behind it"
     , rendered
