@@ -1,39 +1,29 @@
 effect sched {
-    ctl spawn(task: fn(): unit): unit;
     ctl tick(): unit;
 }
 
-var queue = [];
+var queue: List<() -> <sched> unit> = [];
 
-fn dequeue() {
-    if (queue.len() > 0) {
-        var next = queue[0];
-        queue = queue[1:];
-        next();
-    }
-}
-
-fn counter(name: string) {
+fn counter(name: string) -> <sched> unit {
     for (var i = 0; i < 10; i += 1) {
-        print(name + ": " + to_string(i));
+        print(name + ": " + str(i));
         tick();
     }
 }
 
-run {
-    spawn(fn() { counter("A"); });
-    spawn(fn() { counter("B"); });
-    dequeue();
-} handle sched {
-    ctl spawn(task) {
-        queue.push {
-            task();
-            dequeue();
-        };
-        resume;
+fn step(task: () -> <sched> unit) {
+    run {
+        task();
+    } handle sched {
+        ctl tick() { queue.push(() => { resume; }); }
     }
-    ctl tick() {
-        queue.push { resume; };
-        dequeue();
-    }
+}
+
+queue.push(() => { counter("A"); });
+queue.push(() => { counter("B"); });
+
+while (queue.len() > 0) {
+    var next = queue[0];
+    queue = queue[1:];
+    step(next);
 }

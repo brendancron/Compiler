@@ -63,6 +63,7 @@ let cases =
   ; "tests/effects/run_value/unit_body"
   ; "tests/effects/run_value/arm_answers"
   ; "tests/effects/run_value/two_in_one_expr"
+  ; "tests/effects/deferred/deferred"
   ; "tests/core/arrays/basics"
   ; "tests/core/arrays/identity"
   ; "tests/core/arrays/methods"
@@ -387,7 +388,8 @@ let expected_failing : (string * blocker) list =
        for a continuation to capture the active scope stack and restore it when
        invoked, which is a change to how [Interp] represents one. *)
   [ "tests/effects/abort_under_conversion", Waiting "a continuation that restores its scopes"
-    (* Unplanned *)
+  ; ( "tests/effects/async/async"
+    , Waiting "a function value that performs a resumed effect" )
     (* Parked — native compilation, deliberately out of scope *)
   ; "tests/compile/m0/m0", Parked
   ; "tests/compile/m1/fib", Parked
@@ -398,8 +400,6 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m6/apply", Parked
   ; "tests/compile/m7/safe_div", Parked
   ; "tests/compile/m8/gadt", Parked
-    (* Unplanned *)
-  ; "tests/effects/async/async", Unplanned
     (* The same missing re-entry, and a semantics to settle before fixing it:
        a resumption re-runs only what followed the suspension, so a `defer`
        paired with an acquisition that ran once would release it per pass. *)
