@@ -1,4 +1,0 @@
-eager 1
-later 2
-word hi
-done

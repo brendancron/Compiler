@@ -10,8 +10,8 @@ effect async {
 
 `suspend` hands `setup` a callback and parks. Whoever calls that callback supplies
 the value `suspend` returns. Promises, `await`, yielding and `interleaved` are all
-ordinary code over it — `tests/effects/async/promise` and
-`tests/effects/async/interleaved`.
+ordinary code over it — `tests/effects/async/async` is two counters through
+`interleaved`.
 
 ## Why one operation
 

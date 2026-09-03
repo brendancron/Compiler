@@ -65,8 +65,6 @@ let cases =
   ; "tests/effects/run_value/two_in_one_expr"
   ; "tests/effects/deferred/deferred"
   ; "tests/effects/async/async"
-  ; "tests/effects/async/promise"
-  ; "tests/effects/async/interleaved"
   ; "tests/effects/fn_values/in_list"
   ; "tests/effects/fn_values/in_tuple"
   ; "tests/effects/fn_values/named_as_value"
