@@ -67,6 +67,7 @@ let cases =
   ; "tests/effects/async/async"
   ; "tests/effects/fn_values/in_list"
   ; "tests/effects/fn_values/in_tuple"
+  ; "tests/effects/fn_values/named_as_value"
   ; "tests/core/arrays/basics"
   ; "tests/core/arrays/identity"
   ; "tests/core/arrays/methods"

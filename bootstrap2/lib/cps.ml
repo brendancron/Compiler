@@ -185,10 +185,16 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
         `Lambda (params @ evidence, signature, !convert_body info body))
     | `Var name ->
       (* A bare reference would escape with the wrong arity. *)
-      if is_effectful info e.Ast.ann
+      if is_delimited info (row_of e.Ast.ann)
       then
-        unsupported e.Ast.span "'%s' performs effects and cannot be used as a value yet." name
-      else `Var name
+        unsupported
+          e.Ast.span
+          "'%s' performs an effect whose handler needs a continuation, and cannot be used as \
+           a value yet."
+          name
+      else (
+        widened := widen info e.Ast.ann;
+        `Var name)
     | `Call (callee, args) ->
       let args = List.map (expr info) args in
       (match callee.Ast.it with
