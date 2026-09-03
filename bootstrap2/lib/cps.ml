@@ -63,7 +63,14 @@ let rec widen info (t : Types.ty) =
       ( List.map (widen info) params @ List.map (evidence_ty info) (evidence_of_row info row)
       , widen info ret
       , row )
+  | Types.Tuple items -> Types.Tuple (List.map (widen info) items)
+  | Types.Record fields -> Types.Record (widen_fields info fields)
+  | Types.Named (name, args, fields) ->
+    Types.Named (name, List.map (widen info) args, widen_fields info fields)
+  | Types.Sum (name, args) -> Types.Sum (name, List.map (widen info) args)
   | other -> other
+
+and widen_fields info fields = List.map (fun (label, t) -> label, widen info t) fields
 
 let is_delimited info (row : Types.row) =
   List.exists (fun (label, _) -> Hashtbl.mem info.delimited label) row
@@ -157,7 +164,7 @@ let convert_body : (effects -> Ast.reflected_stmt list -> Ast.cps_stmt list) ref
   ref (fun _ _ -> [])
 
 let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
-  let widened = ref e.Ast.ann in
+  let widened = ref (widen info e.Ast.ann) in
   let it : Ast.cps_expr_kind =
     match e.Ast.it with
     | #Ast.lit as l -> l
@@ -168,7 +175,7 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
       then
         unsupported
           e.Ast.span
-          "A function value cannot perform an effect whose handler resumes yet."
+          "A function value cannot perform an effect whose handler needs a continuation yet."
       else (
         let evidence =
           evidence_of_row info row
@@ -336,7 +343,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
        let value =
          match value with
          | Some v -> v
-         | None -> { Ast.it = `Bool false; span; ann = Types.Unit }
+         | None -> { Ast.it = `Bool false; span; ann = Types.Bool }
        in
        (match extract info value with
         | Some (c, rebuild) -> sequence info span c (fun name ->
@@ -347,7 +354,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
             unsupported
               span
               "A 'return' out of a 'run' block is not supported yet when its \
-               handler resumes."
+               handler needs a continuation."
           else [ call span ret [ expr info value ] ])
      (* The arm keeps running afterwards: multi-shot falls out. *)
      | `Resume value ->
@@ -601,7 +608,7 @@ and stmt info (s : Ast.reflected_stmt) : Ast.cps_stmt option =
   | `Run (body, handlers) when not (handlers_are_tail_resumptive handlers) ->
     unsupported
       s.Ast.span
-      "A 'run' whose handler resumes is not supported yet in this position."
+      "A 'run' whose handler needs a continuation is not supported yet in this position."
   | `Run (body, handlers) ->
     let scope = fresh "scope" in
     keep

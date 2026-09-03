@@ -1,0 +1,17 @@
+effect deferred {
+    ctl todo(): unit;
+}
+
+var pending: List<() -> unit> = [];
+
+run {
+    print("before");
+    todo();
+    print("after");
+} handle deferred {
+    ctl todo() { pending.push(() => { resume; }); }
+}
+
+print("run finished");
+pending[0]();
+print("done");

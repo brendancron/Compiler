@@ -148,6 +148,13 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
         | #Ast.collection as c -> (Ast.map_collection expr c :> Ast.expr_kind)
         | #Ast.comptime_call as c -> (Ast.map_comptime_call expr c :> Ast.expr_kind)
         | #Ast.reflect as r -> (Ast.map_reflect expr r :> Ast.expr_kind)
+        | #Ast.run_expr as r ->
+          let clause (c : Ast.stmt Ast.handler_clause) =
+            match c with
+            | Ast.Inline h -> Ast.Inline (Ast.map_handler (stmt shadowed) h)
+            | Ast.Named name -> Ast.Named name
+          in
+          (Ast.map_run_expr expr (stmt shadowed) clause r :> Ast.expr_kind)
       in
       { e with Ast.it }
   and sequence shadowed (body : Ast.stmt list) : Ast.stmt list =
@@ -172,8 +179,9 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
           , signature sg
           , sequence (hidden shadowed (param_names params)) body )
       | `Block body -> `Block (sequence shadowed body)
-      | `For_in (name, over, inner) ->
-        `For_in (name, expr over, stmt (Shadowed.add name shadowed) inner)
+      | `For_in (names, over, inner) ->
+        `For_in
+          (names, expr over, stmt (List.fold_left (Fun.flip Shadowed.add) shadowed names) inner)
       | `For (init, cond, step, inner) ->
         let inner_scope =
           match init with
@@ -229,6 +237,7 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
       | `Import decl -> `Import decl
       | `Var_decl (name, ty, init) ->
         `Var_decl (name, Option.map type_expr ty, Option.map expr init)
+      | `Var_tuple (names, init) -> `Var_tuple (names, expr init)
       | #Ast.stmts as st ->
         (Ast.map_stmts expr (stmt shadowed) st :> Ast.stmt_kind)
       | #Ast.effects as e ->
@@ -352,6 +361,13 @@ let lower { table; codes; _ } ~params (body : Ast.program) =
         | #Ast.comptime_call as c -> (Ast.map_comptime_call expr c :> Ast.expr_kind)
         | #Ast.method_call as m -> (Ast.map_method_call expr m :> Ast.expr_kind)
         | #Ast.reflect as r -> (Ast.map_reflect expr r :> Ast.expr_kind)
+        | #Ast.run_expr as r ->
+          let clause (c : Ast.stmt Ast.handler_clause) =
+            match c with
+            | Ast.Inline h -> Ast.Inline (Ast.map_handler (fun s -> fst (stmt scope s)) h)
+            | Ast.Named name -> Ast.Named name
+          in
+          (Ast.map_run_expr expr (fun s -> fst (stmt scope s)) clause r :> Ast.expr_kind)
       in
       { e with Ast.it }
   (* A `code` in an initializer cannot be given the name it initializes. *)
@@ -369,8 +385,8 @@ let lower { table; codes; _ } ~params (body : Ast.program) =
     | `While (cond, body) -> same (`While (expr scope cond, fst (stmt scope body)))
     | `If (cond, t, e) ->
       same (`If (expr scope cond, fst (stmt scope t), Option.map (fun e -> fst (stmt scope e)) e))
-    | `For_in (name, iterable, body) ->
-      same (`For_in (name, expr scope iterable, fst (stmt (name :: scope) body)))
+    | `For_in (names, iterable, body) ->
+      same (`For_in (names, expr scope iterable, fst (stmt (names @ scope) body)))
     | `For (init, cond, step, body) ->
       let init, inner =
         match init with
@@ -445,6 +461,13 @@ let expand context ~meta_fns ~named ~seen (root : Ast.stmt) : Ast.stmt =
         | #Ast.comptime_call as c -> (Ast.map_comptime_call expr c :> Ast.expr_kind)
         | #Ast.method_call as m -> (Ast.map_method_call expr m :> Ast.expr_kind)
         | #Ast.reflect as r -> (Ast.map_reflect expr r :> Ast.expr_kind)
+        | #Ast.run_expr as r ->
+          let clause (c : Ast.stmt Ast.handler_clause) =
+            match c with
+            | Ast.Inline h -> Ast.Inline (Ast.map_handler (stmt) h)
+            | Ast.Named name -> Ast.Named name
+          in
+          (Ast.map_run_expr expr (stmt) clause r :> Ast.expr_kind)
       in
       { e with Ast.it }
   and stmt (s : Ast.stmt) : Ast.stmt =

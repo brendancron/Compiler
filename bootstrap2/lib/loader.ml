@@ -248,6 +248,13 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
       | #Ast.collection as c -> (Ast.map_collection go c :> Ast.expr_kind)
       | #Ast.comptime_call as c -> (Ast.map_comptime_call go c :> Ast.expr_kind)
       | #Ast.reflect as r -> (Ast.map_reflect go r :> Ast.expr_kind)
+      | #Ast.run_expr as r ->
+        let clause (c : Ast.stmt Ast.handler_clause) =
+          match c with
+          | Ast.Inline h -> Ast.Inline (Ast.map_handler (stmt locals) h)
+          | Ast.Named name -> Ast.Named name
+        in
+        (Ast.map_run_expr go (stmt locals) clause r :> Ast.expr_kind)
     in
     { e with Ast.it }
   and stmt locals (s : Ast.stmt) : Ast.stmt =
@@ -323,6 +330,7 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
         `Block (List.map (stmt inner) body)
       | `Var_decl (name, ty, init) ->
         `Var_decl (name, Option.map type_expr ty, Option.map (expr locals) init)
+      | `Var_tuple (names, init) -> `Var_tuple (names, expr locals init)
       | `Import _ -> `Block []
       | `Meta body -> `Meta (List.map (stmt locals) body)
       | `Gen inner -> `Gen (stmt locals inner)
@@ -330,8 +338,9 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
         `Meta_fn (name, List.map param params, signature sg, List.map (stmt locals) body)
       | #Ast.stmts as st -> (Ast.map_stmts (expr locals) (stmt locals) st :> Ast.stmt_kind)
       (* A loop variable binds for the body alone, so not via [bound_by]. *)
-      | `For_in (name, over, body) ->
-        `For_in (name, expr locals over, stmt (S.add name locals) body)
+      | `For_in (names, over, body) ->
+        `For_in
+          (names, expr locals over, stmt (List.fold_left (Fun.flip S.add) locals names) body)
       | `For (init, cond, step, body) ->
         let inner =
           match init with

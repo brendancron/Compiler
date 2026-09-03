@@ -27,6 +27,7 @@ and checked_expr_kind =
   | checked_expr Ast.method_call
   | checked_expr Ast.reflect
   | (checked_expr, checked_stmt) Ast.lambdas
+  | (checked_expr, checked_stmt, checked_stmt Ast.handler) Ast.run_expr
   ]
 
 and checked_stmt = (checked_stmt_kind, Types.infer_ty) Ast.node
@@ -599,8 +600,26 @@ let rec assigned_in_expr (e : Ast.desugared_expr) acc =
       (fun acc (_, v) -> assigned_in_expr v acc)
       acc
       (Ast.payload_fields payload)
+  | `Run_expr (body, handlers, clause) ->
+    let block b acc =
+      let acc = List.fold_left (fun acc st -> assigned_in_stmt st acc) acc b.Ast.vb_stmts in
+      Option.fold ~none:acc ~some:(fun v -> assigned_in_expr v acc) b.Ast.vb_value
+    in
+    let acc = block body acc in
+    let acc =
+      List.fold_left
+        (fun acc (h : Ast.desugared_stmt Ast.handler) ->
+          List.fold_left
+            (fun acc (a : Ast.desugared_stmt Ast.arm) ->
+              List.fold_left (fun acc st -> assigned_in_stmt st acc) acc a.Ast.arm_body)
+            acc
+            h.Ast.arms)
+        acc
+        handlers
+    in
+    Option.fold ~none:acc ~some:(fun c -> block c.Ast.rc_body acc) clause
 
-let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
+and assigned_in_stmt (s : Ast.desugared_stmt) acc =
   let opt f o acc =
     match o with
     | Some x -> f x acc
@@ -608,6 +627,7 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
   in
   match s.Ast.it with
   | `Expr e -> assigned_in_expr e acc
+  | `Var_tuple (_, init) -> assigned_in_expr init acc
   | `Defer inner -> assigned_in_stmt inner acc
   | `Var_decl (_, _, init) -> opt assigned_in_expr init acc
   | `Block body | `Fn (_, _, _, body) ->
@@ -641,6 +661,16 @@ let rec assigned_in_stmt (s : Ast.desugared_stmt) acc =
           h.Ast.arms)
       acc
       handlers
+
+(* Anywhere but a nested function, where it would be a different handler's. *)
+let rec resumes (s : Ast.desugared_stmt) =
+  match s.Ast.it with
+  | `Resume _ -> true
+  | `Block body -> List.exists resumes body
+  | `If (_, t, e) -> resumes t || Option.fold ~none:false ~some:resumes e
+  | `While (_, body) | `Defer body -> resumes body
+  | `Match (_, cases) -> List.exists (fun (_, body) -> List.exists resumes body) cases
+  | _ -> false
 
 let assigned_names body =
   List.fold_left (fun acc s -> assigned_in_stmt s acc) [] body
@@ -776,6 +806,35 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     (match lookup env name with
      | Some scheme -> node (Types.instantiate scheme) (`Var name)
      | None -> fail span "Undefined variable '%s'." name)
+  | `Run_expr (body, handlers, clause) ->
+    let answer = Types.fresh () in
+    let assigned = assigned_in_expr e [] in
+    let valued scope (b : (Ast.desugared_expr, Ast.desugared_stmt) Ast.valued_block) =
+      let stmts = infer_block scope ctx b.Ast.vb_stmts in
+      let value = Option.map (infer_expr scope ctx) b.Ast.vb_value in
+      ( { Ast.vb_stmts = stmts; vb_value = value }
+      , match value with
+        | None -> Types.IUnit
+        | Some v -> v.Ast.ann )
+    in
+    let (body, produced), handlers =
+      check_run env ctx assigned span ~answer handlers (fun () ->
+        valued (new_env (Some env)) body)
+    in
+    let clause =
+      match clause with
+      | None ->
+        (* Without one, finishing normally is what the block evaluates to. *)
+        unify_at span answer produced;
+        None
+      | Some c ->
+        let scope = new_env (Some env) in
+        bind scope c.Ast.rc_param (Types.mono produced);
+        let rc_body, result = valued scope c.Ast.rc_body in
+        unify_at span answer result;
+        Some { Ast.rc_param = c.Ast.rc_param; rc_body }
+    in
+    node answer (`Run_expr (body, handlers, clause))
   | `Assign (name, v) ->
     (match lookup env name with
      | None -> fail span "Undefined variable '%s'." name
@@ -1765,6 +1824,14 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
   let node it : checked_stmt = Ast.annotated span Types.IUnit it in
   match s.Ast.it with
   | `Expr e -> node (`Expr (infer_expr env ctx e))
+  (* The arity is written, so the tuple it takes apart is known before the
+     initializer is looked at — an annotation would say nothing more. *)
+  | `Var_tuple (names, init) ->
+    let init = infer_expr env ctx init in
+    let parts = List.map (fun _ -> Types.fresh ()) names in
+    unify_at init.Ast.span (Types.ITuple parts) init.Ast.ann;
+    List.iter2 (fun name part -> bind env name (Types.mono part)) names parts;
+    node (`Var_tuple (names, init))
   | `Var_decl (name, annotation, init) ->
     let declared = annotated_or_fresh annotation in
     let init =
@@ -2098,63 +2165,12 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
       ops);
     node (`Effect_decl (name, params, ops))
   | `Run (body, handlers) ->
-    List.iter
-      (fun (h : Ast.desugared_stmt Ast.handler) ->
-        match Hashtbl.find_opt ctx_effects.declared h.Ast.handled with
-        | None -> fail span "Unknown effect '%s'." h.Ast.handled
-        | Some ops ->
-          List.iter
-            (fun (o : Ast.op_decl) ->
-              if not (List.exists (fun (a : Ast.desugared_stmt Ast.arm) ->
-                        String.equal a.Ast.arm_name o.Ast.op_name)
-                        h.Ast.arms)
-              then
-                fail
-                  span
-                  "Handler for '%s' is missing operation '%s'."
-                  h.Ast.handled
-                  o.Ast.op_name)
-            ops;
-          List.iter
-            (fun (a : Ast.desugared_stmt Ast.arm) ->
-              if not (List.exists (fun (o : Ast.op_decl) ->
-                        String.equal o.Ast.op_name a.Ast.arm_name)
-                        ops)
-              then
-                fail
-                  span
-                  "Effect '%s' has no operation '%s'."
-                  h.Ast.handled
-                  a.Ast.arm_name)
-            h.Ast.arms)
-      handlers;
-    let body_row = Types.fresh_row () in
-    let body =
-      in_ctx ctx ~set:(fun () -> ctx.row <- body_row) (fun () ->
-        infer_block (new_env (Some env)) ctx body)
+    let (body, _), handlers =
+      check_run env ctx assigned span ~answer:Types.IUnit handlers (fun () ->
+        { Ast.vb_stmts = infer_block (new_env (Some env)) ctx body; vb_value = None }
+        , Types.IUnit)
     in
-    let instantiated =
-      List.map
-        (fun (h : Ast.desugared_stmt Ast.handler) ->
-          let arity =
-            List.length
-              (Option.value ~default:[] (Hashtbl.find_opt ctx_effect_params h.Ast.handled))
-          in
-          h, List.init arity (fun _ -> Types.fresh ()))
-        handlers
-    in
-    let remaining =
-      List.fold_left
-        (fun row ((h : Ast.desugared_stmt Ast.handler), args) ->
-          try Types.rewrite_row h.Ast.handled args row with
-          | Types.Type_error _ -> row)
-        body_row
-        instantiated
-    in
-    Types.unify_row remaining ctx.row;
-    node
-      (`Run
-        (body, List.map (fun (h, args) -> infer_handler env ctx assigned ~args h) instantiated))
+    node (`Run (body.Ast.vb_stmts, handlers))
   | `Resume value ->
     let expected =
       match ctx.resume_type with
@@ -2198,8 +2214,65 @@ and infer_stmt_impl env ctx assigned (s : Ast.desugared_stmt) : checked_stmt =
     in
     node (`Return e)
 
+(* The row work is the same wherever a `run` stands; [answer] is what its arms
+   and its return clause must agree on. *)
+and check_run env ctx assigned span ~answer handlers infer_body =
+  List.iter
+    (fun (h : Ast.desugared_stmt Ast.handler) ->
+      match Hashtbl.find_opt ctx_effects.declared h.Ast.handled with
+      | None -> fail span "Unknown effect '%s'." h.Ast.handled
+      | Some ops ->
+        List.iter
+          (fun (o : Ast.op_decl) ->
+            if not (List.exists (fun (a : Ast.desugared_stmt Ast.arm) ->
+                      String.equal a.Ast.arm_name o.Ast.op_name)
+                      h.Ast.arms)
+            then
+              fail
+                span
+                "Handler for '%s' is missing operation '%s'."
+                h.Ast.handled
+                o.Ast.op_name)
+          ops;
+        List.iter
+          (fun (a : Ast.desugared_stmt Ast.arm) ->
+            if not (List.exists (fun (o : Ast.op_decl) ->
+                      String.equal o.Ast.op_name a.Ast.arm_name)
+                      ops)
+            then
+              fail
+                span
+                "Effect '%s' has no operation '%s'."
+                h.Ast.handled
+                a.Ast.arm_name)
+          h.Ast.arms)
+    handlers;
+  let body_row = Types.fresh_row () in
+  let body = in_ctx ctx ~set:(fun () -> ctx.row <- body_row) (fun () -> infer_body ()) in
+  let instantiated =
+    List.map
+      (fun (h : Ast.desugared_stmt Ast.handler) ->
+        let arity =
+          List.length
+            (Option.value ~default:[] (Hashtbl.find_opt ctx_effect_params h.Ast.handled))
+        in
+        h, List.init arity (fun _ -> Types.fresh ()))
+      handlers
+  in
+  let remaining =
+    List.fold_left
+      (fun row ((h : Ast.desugared_stmt Ast.handler), args) ->
+        try Types.rewrite_row h.Ast.handled args row with
+        | Types.Type_error _ -> row)
+      body_row
+      instantiated
+  in
+  Types.unify_row remaining ctx.row;
+  ( body
+  , List.map (fun (h, args) -> infer_handler env ctx assigned ~answer ~args h) instantiated )
+
 (* An arm performing its own operation propagates outward. *)
-and infer_handler env ctx assigned ~args (h : Ast.desugared_stmt Ast.handler)
+and infer_handler env ctx assigned ~answer ~args (h : Ast.desugared_stmt Ast.handler)
   : checked_stmt Ast.handler
   =
   let arm (a : Ast.desugared_stmt Ast.arm) : checked_stmt Ast.arm =
@@ -2225,9 +2298,24 @@ and infer_handler env ctx assigned ~args (h : Ast.desugared_stmt Ast.handler)
               | Ast.Op_ctl -> Some (annotated_or_fresh op.Ast.op_ret)
               | Ast.Op_fn | Ast.Op_final -> None);
           ctx.in_final_arm <- a.Ast.arm_kind = Ast.Op_final;
-          ctx.return_type <- Some (annotated_or_fresh op.Ast.op_ret);
+          (* An `fn` arm's value resumes the operation; any other arm's answers
+             for the whole `run`. *)
+          ctx.return_type
+          <- Some
+               (match a.Ast.arm_kind with
+                | Ast.Op_fn -> annotated_or_fresh op.Ast.op_ret
+                | Ast.Op_ctl | Ast.Op_final -> answer);
           ctx.saw_return <- false)
-        (fun () -> List.map (infer_stmt scope ctx assigned) a.Ast.arm_body)
+        (fun () ->
+          let body = List.map (infer_stmt scope ctx assigned) a.Ast.arm_body in
+          (* Leaving without answering and without handing the continuation the
+             job leaves nothing for the `run` to evaluate to. *)
+          (match a.Ast.arm_kind with
+           | Ast.Op_fn -> ()
+           | Ast.Op_ctl | Ast.Op_final ->
+             if (not ctx.saw_return) && not (List.exists resumes a.Ast.arm_body)
+             then Types.unify answer Types.IUnit);
+          body)
     in
     { Ast.arm_name = a.Ast.arm_name
     ; arm_kind = a.Ast.arm_kind
@@ -2264,6 +2352,9 @@ let rec resolve_expr (e : checked_expr) : Ast.typed_expr =
     | #Ast.method_call as m ->
       (Ast.map_method_call resolve_expr m :> Ast.typed_expr_kind)
     | #Ast.reflect as r -> (Ast.map_reflect resolve_expr r :> Ast.typed_expr_kind)
+    | #Ast.run_expr as r ->
+      (Ast.map_run_expr resolve_expr resolve_stmt (Ast.map_handler resolve_stmt) r
+       :> Ast.typed_expr_kind)
   in
   { Ast.it; span = e.Ast.span; ann = Types.resolve e.Ast.ann }
 

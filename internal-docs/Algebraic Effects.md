@@ -194,6 +194,29 @@ fn pick(n: int) -> int {
 
 Only a program whose handler was not tail-resumptive could reach it, which is why no fixture had — `effects/recover` is this shape with a `resume`, and passes. `effects/nested_return` is the one that would have caught it. A statement holding a `return` is now converted whether or not anything in it suspends, which is what makes the two continuations differ in the first place.
 
+## A `return` inside an arm
+
+It answers the `run` block, not the function the arm is written in. `Resolve` rewrites every `return v` in a `ctl` or `final` arm into an assignment to the block's temporary followed by a bare `return`, which leaves the arm without resuming and so aborts the run.
+
+An arm declining to resume is how a handler produces a result at all — it is what exceptions, early exit, and a generator that stops have in common — so the value it carries belongs to the block. Koka draws the same line: a clause that does not resume terminates the handled computation and its value is the result.
+
+The block's type governs, exactly as a function's return type does. A `run` standing where a value is wanted takes whatever its arms answer with; one standing as a statement has block type `unit`, so an arm may write a bare `return;` and nothing else, the same rule that rejects `return 5` in a `-> unit` function.
+
+```cronyx
+var first_even = run { each() } handle Yield {
+    ctl yield(v) {
+        if (v % 2 == 0) { return v; }
+        resume;
+    }
+} return (nothing) { 0 };
+```
+
+The cost is that leaving the enclosing function from inside an arm cannot be written. Two alternatives that would have kept it were rejected.
+
+Giving `return` its ordinary meaning and adding a second keyword for the block — `answer v` — buys the missing capability at the price of a keyword, and makes the common case the one that does not compile: escaping a run reaches the enclosing function's continuation, which [`return_in_inner_run`](../tests/effects/return_in_inner_run.cx) shows works only while the handler needs none of its own, and [`errors/return_out_of_run`](../tests/effects/errors/return_out_of_run.cx) shows is rejected once it resumes.
+
+Kotlin-style `return@` labels were rejected for a reason particular to this language. Labels exist because a nested loop or a lambda has no other channel to its enclosing scopes; here that channel is performing an operation, which the row records and inference checks. A label would be a second control path doing the same work untyped. Nothing is left for it to name, either: an arm is lexically bound to the `handle` clause it appears in, so the run it answers is unique, and a label with one possible value is not a label. Should `break` and `continue` ever arrive they may want labels for the ordinary reason, which this decision does not prejudge.
+
 ## How a row prints
 
 Between the arrow and the result, and naming effects rather than operations:

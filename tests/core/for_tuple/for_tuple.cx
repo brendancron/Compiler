@@ -1,19 +1,17 @@
-import "../../../stdlib/collections/HashMap";
+var pairs = [(1, "a"), (2, "b"), (3, "c")];
 
-var m = HashMap.new();
-m.set("x", 10);
-m.set("y", 20);
-m.set("z", 30);
-
-var total = 0;
-for ((k, v) in m.entries()) {
-    total += 1;
-}
-print(total);
-
-var nums = [(1, "a"), (2, "b"), (3, "c")];
 var sum = 0;
-for ((n, s) in nums) {
-    sum += n;
+for ((n, s) in pairs) {
+    sum = sum + n;
+    print(s);
 }
 print(sum);
+
+var triples: List<(int, int, int)> = [(1, 2, 3), (4, 5, 6)];
+for ((a, b, c) in triples) {
+    print(a + b + c);
+}
+
+for (whole in pairs) {
+    print(whole.1);
+}

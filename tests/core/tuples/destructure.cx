@@ -1,0 +1,14 @@
+var pair = (1, "one");
+var (n, s) = pair;
+print(str(n) + " " + s);
+
+fn swap(p: (int, string)) -> (string, int) {
+    var (a, b) = p;
+    return (b, a);
+}
+
+var (text, number) = swap(pair);
+print(text + " " + str(number));
+
+var (x, y, z) = (1, 2, 3);
+print(x + y + z);

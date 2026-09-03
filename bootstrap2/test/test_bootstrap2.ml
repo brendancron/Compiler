@@ -58,6 +58,15 @@ let cases =
   ; "tests/effects/recover/recover"
   ; "tests/effects/handler/handler"
   ; "tests/effects/stream/stream"
+  ; "tests/effects/run_value/value"
+  ; "tests/effects/run_value/return_clause"
+  ; "tests/effects/run_value/unit_body"
+  ; "tests/effects/run_value/arm_answers"
+  ; "tests/effects/run_value/two_in_one_expr"
+  ; "tests/effects/deferred/deferred"
+  ; "tests/effects/async/async"
+  ; "tests/effects/fn_values/in_list"
+  ; "tests/effects/fn_values/in_tuple"
   ; "tests/core/arrays/basics"
   ; "tests/core/arrays/identity"
   ; "tests/core/arrays/methods"
@@ -81,6 +90,8 @@ let cases =
   ; "tests/core/tuples/tuple_basic"
   ; "tests/reflection/typeof_tuple"
   ; "tests/core/tuples/typed"
+  ; "tests/core/tuples/destructure"
+  ; "tests/core/for_tuple/for_tuple"
   ; "tests/core/records/structural"
   ; "tests/reflection/typeof_record"
   ; "tests/reflection/shape_product"
@@ -380,8 +391,6 @@ let expected_failing : (string * blocker) list =
        for a continuation to capture the active scope stack and restore it when
        invoked, which is a change to how [Interp] represents one. *)
   [ "tests/effects/abort_under_conversion", Waiting "a continuation that restores its scopes"
-    (* Unplanned *)
-  ; "tests/core/for_tuple/for_tuple", Unplanned
     (* Parked — native compilation, deliberately out of scope *)
   ; "tests/compile/m0/m0", Parked
   ; "tests/compile/m1/fib", Parked
@@ -392,8 +401,6 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m6/apply", Parked
   ; "tests/compile/m7/safe_div", Parked
   ; "tests/compile/m8/gadt", Parked
-    (* Unplanned *)
-  ; "tests/effects/async/async", Unplanned
     (* The same missing re-entry, and a semantics to settle before fixing it:
        a resumption re-runs only what followed the suspension, so a `defer`
        paired with an acquisition that ran once would release it per pass. *)

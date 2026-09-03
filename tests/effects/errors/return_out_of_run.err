@@ -1,1 +1,1 @@
-[5:23] A 'return' out of a 'run' block is not supported yet when its handler resumes.
+[5:23] A 'return' out of a 'run' block is not supported yet when its handler needs a continuation.

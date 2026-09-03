@@ -1,0 +1,13 @@
+effect Yield { ctl yield(v: int): unit; }
+
+fn each() -> <Yield> unit {
+    yield(1);
+    yield(2);
+    yield(3);
+}
+
+var first = run { each() } handle Yield {
+    ctl yield(v) { return v; }
+} return (nothing) { 0 };
+
+print(first);

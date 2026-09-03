@@ -1,0 +1,10 @@
+effect Log { ctl note(msg: string): unit; }
+
+var count = run {
+    note("first");
+    note("second");
+} handle Log {
+    ctl note(msg) { print(msg); resume; }
+} return (nothing) { 7 };
+
+print(count);

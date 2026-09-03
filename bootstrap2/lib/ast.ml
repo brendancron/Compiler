@@ -270,9 +270,16 @@ type 'e reflect = [ `Typeof of 'e ]
 
 type 'e quote = [ `Code of 'e ]
 
+(* The names a binder introduces. More than one takes a tuple apart. *)
+type binder = string list
+
 type ('e, 's) stmts =
   [ `Expr of 'e
   | `Var_decl of string * type_expr option * 'e option
+  (* `var (a, b) = pair;`. One statement binding several names, because
+     expanding it into several would need a block, and a block would scope them
+     away from what follows. *)
+  | `Var_tuple of binder * 'e
   | `Block of 's list
   | `If of 'e * 's * 's option
   | `While of 'e * 's
@@ -284,6 +291,25 @@ type ('e, 's) stmts =
 
 (* Why every stage's expression and statement are one recursive group. *)
 type ('e, 's) lambdas = [ `Lambda of param list * signature * 's list ]
+
+(* Statements, and the value they leave behind. An expression filling the braces
+   exactly is that value, as it is for a trailing lambda; anything else is a
+   body and leaves unit. *)
+type ('e, 's) valued_block =
+  { vb_stmts : 's list
+  ; vb_value : 'e option
+  }
+
+(* What the block produces when it finishes without an arm answering for it. *)
+type ('e, 's) ret_clause =
+  { rc_param : string
+  ; rc_body : ('e, 's) valued_block
+  }
+
+(* `run` where a value is wanted. Desugar lowers it to the statement form and a
+   temporary, so no later stage meets one. *)
+type ('e, 's, 'h) run_expr =
+  [ `Run_expr of ('e, 's) valued_block * 'h list * ('e, 's) ret_clause option ]
 
 (* `Abort` unwinds to the `Scope` its `run` block became, so an effect that only
    aborts needs no continuation. Both carry that scope's name: stopping at the
@@ -297,7 +323,7 @@ type 's aborts =
 
 type ('e, 's) loops =
   [ `For of 's option * 'e option * 'e option * 's
-  | `For_in of string * 'e * 's
+  | `For_in of binder * 'e * 's
   ]
 
 type expr = (expr_kind, unit) node
@@ -318,6 +344,7 @@ and expr_kind =
   | expr reflect
   | expr quote
   | (expr, stmt) lambdas
+  | (expr, stmt, stmt handler_clause) run_expr
   ]
 
 and stmt = (stmt_kind, unit) node
@@ -353,6 +380,7 @@ and desugared_expr_kind =
   | desugared_expr method_call
   | desugared_expr reflect
   | (desugared_expr, desugared_stmt) lambdas
+  | (desugared_expr, desugared_stmt, desugared_stmt handler) run_expr
   ]
 
 and desugared_stmt = (desugared_stmt_kind, unit) node
@@ -383,6 +411,7 @@ and typed_expr_kind =
   | typed_expr method_call
   | typed_expr reflect
   | (typed_expr, typed_stmt) lambdas
+  | (typed_expr, typed_stmt, typed_stmt handler) run_expr
   ]
 
 and typed_stmt = (typed_stmt_kind, Types.ty) node
@@ -638,6 +667,7 @@ let map_stmts (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) stmts)
   match s with
   | `Expr e -> `Expr (fe e)
   | `Var_decl (name, ty, init) -> `Var_decl (name, ty, Option.map fe init)
+  | `Var_tuple (names, init) -> `Var_tuple (names, fe init)
   | `Block body -> `Block (List.map fs body)
   | `If (c, t, e) -> `If (fe c, fs t, Option.map fs e)
   | `While (c, body) -> `While (fe c, fs body)
@@ -652,7 +682,7 @@ let map_loops (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (s : ('e1, 's1) loops)
   match s with
   | `For (init, cond, step, body) ->
     `For (Option.map fs init, Option.map fe cond, Option.map fe step, fs body)
-  | `For_in (name, iterable, body) -> `For_in (name, fe iterable, fs body)
+  | `For_in (names, iterable, body) -> `For_in (names, fe iterable, fs body)
 
 let map_arm (fs : 's1 -> 's2) (a : 's1 arm) : 's2 arm =
   { arm_name = a.arm_name
@@ -663,6 +693,27 @@ let map_arm (fs : 's1 -> 's2) (a : 's1 arm) : 's2 arm =
 
 let map_handler (fs : 's1 -> 's2) (h : 's1 handler) : 's2 handler =
   { handled = h.handled; arms = List.map (map_arm fs) h.arms }
+
+let map_valued_block (fe : 'e1 -> 'e2) (fs : 's1 -> 's2) (b : ('e1, 's1) valued_block)
+  : ('e2, 's2) valued_block
+  =
+  { vb_stmts = List.map fs b.vb_stmts; vb_value = Option.map fe b.vb_value }
+
+let map_run_expr
+      (fe : 'e1 -> 'e2)
+      (fs : 's1 -> 's2)
+      (fh : 'h1 -> 'h2)
+      (r : ('e1, 's1, 'h1) run_expr)
+  : ('e2, 's2, 'h2) run_expr
+  =
+  match r with
+  | `Run_expr (body, handlers, clause) ->
+    `Run_expr
+      ( map_valued_block fe fs body
+      , List.map fh handlers
+      , Option.map
+          (fun c -> { rc_param = c.rc_param; rc_body = map_valued_block fe fs c.rc_body })
+          clause )
 
 let map_effects
       (fe : 'e1 -> 'e2)
