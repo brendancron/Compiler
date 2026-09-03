@@ -93,7 +93,7 @@ let fn_decl span name params body =
     span
     (`Fn
       ( name
-      , List.map (fun p -> { Ast.name = p; ty = None }) params
+      , List.map (fun p -> { Ast.name = p; ty = None; implicit = false }) params
       , { Ast.ret = None; row = None; comptime = [] }
       , body ))
 
@@ -179,7 +179,7 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
       else (
         let evidence =
           evidence_of_row info row
-          |> List.map (fun op -> { Ast.name = evidence_name op; ty = None })
+          |> List.map (fun op -> { Ast.name = evidence_name op; ty = None; implicit = false })
         in
         widened := widen info e.Ast.ann;
         `Lambda (params @ evidence, signature, !convert_body info body))
@@ -594,14 +594,14 @@ and stmt info (s : Ast.reflected_stmt) : Ast.cps_stmt option =
   | `Fn (name, params, signature, body) ->
     let row = row_of s.Ast.ann in
     let evidence =
-      evidence_of_row info row |> List.map (fun op -> { Ast.name = evidence_name op; ty = None })
+      evidence_of_row info row |> List.map (fun op -> { Ast.name = evidence_name op; ty = None; implicit = false })
     in
     if is_delimited info row
     then
       keep
         (`Fn
           ( name
-          , params @ evidence @ [ { Ast.name = continuation; ty = None } ]
+          , params @ evidence @ [ { Ast.name = continuation; ty = None; implicit = false } ]
           , signature
           , cps info continuation continuation ~at:s.Ast.span body ))
     else keep (`Fn (name, params @ evidence, signature, sequence_body info body))

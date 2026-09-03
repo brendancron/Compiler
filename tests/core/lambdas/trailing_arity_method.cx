@@ -1,0 +1,15 @@
+type Box { v: int }
+
+impl Box {
+    fn twice(self, g: () -> unit) { g(); g(); }
+    fn apply(self, g: (int) -> int) -> int { return g(self.v); }
+}
+
+var b = new Box { v: 21 };
+
+b.twice { print("tick"); };
+print(b.apply { it * 2 });
+
+var queued: List<() -> unit> = [];
+queued.push { print("queued"); };
+queued[0]();

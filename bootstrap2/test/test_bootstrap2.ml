@@ -102,6 +102,10 @@ let cases =
   ; "tests/core/lambdas/basics"
   ; "tests/core/lambdas/trailing"
   ; "tests/core/lambdas/trailing_no_parens"
+  ; "tests/core/lambdas/trailing_method"
+  ; "tests/core/lambdas/method_brace_not_match"
+  ; "tests/core/lambdas/trailing_arity"
+  ; "tests/core/lambdas/trailing_arity_method"
   ; "tests/core/lambdas/trailing_named"
   ; "tests/core/ufcs/basics"
   ; "tests/core/ufcs/impl_wins"
@@ -250,6 +254,9 @@ let cases =
 (* Programs that must be rejected, and the diagnostics they must produce. *)
 let error_cases =
   [ "tests/core/variadic/errors/not_last"
+  ; "tests/core/lambdas/errors/unnamed_pair"
+  ; "tests/core/lambdas/errors/naked_arrow"
+  ; "tests/core/lambdas/errors/trailing_comma"
   ; "tests/core/embed/errors/missing"
   ; "tests/effects/errors/return_out_of_run"
   ; "tests/effects/generic/errors/one_type"

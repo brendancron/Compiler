@@ -58,9 +58,12 @@ and type_expr_kind =
   (* `Output = T`: what the impl the bound reaches must have bound. *)
   | Ty_bind of string * type_expr
 
+(* [implicit] marks a trailing lambda whose parameters were not written, so how
+   many it has is not known until the expected type says. *)
 type param =
   { name : string
   ; ty : type_expr option
+  ; implicit : bool
   }
 
 type comptime_param =
