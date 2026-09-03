@@ -33,7 +33,9 @@ let derived_eq span target : Ast.stmt =
         ; ib_methods =
             [ { Ast.md_name = "eq"
               ; md_params =
-                  [ { Ast.name = "self"; ty = None }; { Ast.name = "rhs"; ty = Some (ty target) } ]
+                  [ { Ast.name = "self"; ty = None; implicit = false }
+                  ; { Ast.name = "rhs"; ty = Some (ty target); implicit = false }
+                  ]
               ; md_signature =
                   { Ast.ret = Some (ty "bool"); row = Some []; comptime = [] }
               ; md_body =

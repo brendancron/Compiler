@@ -400,16 +400,17 @@ and callable (e : Ast.expr) =
   | `Var _ | `Call _ | `Method_call _ | `Comptime_call _ -> true
   | _ -> false
 
-(* `{ x, y -> … }` names the parameters; anything else takes the implicit `it`.
-   Read by lookahead, since a body may legitimately start with a name. *)
+(* `{ x, y -> … }` names the parameters; anything else leaves how many there are
+   to the type it is passed to. Read by lookahead, since a body may legitimately
+   start with a name. *)
 and trailing_params s : Ast.param list option =
   let rec names acc at =
     match (peek_at s at).Token.token_type with
     | Token.Arrow -> Some (List.rev acc)
     | Token.Identifier name ->
       (match (peek_at s (at + 1)).Token.token_type with
-       | Token.Arrow -> Some (List.rev ({ Ast.name; ty = None } :: acc))
-       | Token.Comma -> names ({ Ast.name; ty = None } :: acc) (at + 2)
+       | Token.Arrow -> Some (List.rev ({ Ast.name; ty = None; implicit = false } :: acc))
+       | Token.Comma -> names ({ Ast.name; ty = None; implicit = false } :: acc) (at + 2)
        | _ -> None)
     | _ -> None
   in
@@ -426,8 +427,9 @@ and trailing_params s : Ast.param list option =
     skip ();
     Some params
 
-(* `f(xs) { it * 2 }` — a block after a call is a function value passed last,
-   taking the parameters it names or a single `it`. *)
+(* `f(xs) { it * 2 }` — a block after a call is a function value passed last.
+   Unnamed parameters stay unresolved here: only the expected type knows whether
+   there are none or the one `it` stands for. *)
 and trailing_lambda s args : Ast.expr list =
   if not (check s Token.Left_brace && not s.no_brace)
   then args
@@ -437,7 +439,7 @@ and trailing_lambda s args : Ast.expr list =
     let params =
       match trailing_params s with
       | Some params -> params
-      | None -> [ { Ast.name = "it"; ty = None } ]
+      | None -> [ { Ast.name = "it"; ty = None; implicit = true } ]
     in
     (* An expression filling the braces exactly is the value; anything else
        is a body. Telling them apart takes trying. *)
@@ -746,7 +748,7 @@ and parameters s : Ast.param list =
          | None -> Some (type_expr s)
          | Some _ -> Some (Ast.at sp (Ast.Ty_variadic (type_expr s))))
     in
-    { Ast.name; ty }, starts
+    { Ast.name; ty; implicit = false }, starts
   in
   let params = listed_until s Token.Right_paren parameter in
   let rec check_last = function
@@ -997,7 +999,7 @@ and effect_decl s sp : Ast.stmt =
       let params =
         listed_until s Token.Right_paren (fun s ->
           let name = consume_identifier s "Expected parameter name." in
-          { Ast.name; ty = type_annotation s })
+          { Ast.name; ty = type_annotation s; implicit = false })
       in
       ignore (consume s Token.Right_paren "Expected ')' after parameters.");
       let op_ret =

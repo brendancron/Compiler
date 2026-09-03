@@ -787,6 +787,30 @@ let binop_result registry (op : Ast.binop) a b =
               } ]);
        if produces_bool then Types.IBool else a)
 
+(* A trailing lambda writes no parameters, so how many it has is whatever the
+   type it is passed to says: none, or the single `it` it already carries. Two or
+   more have no names to be reached by, and must be written. *)
+let name_implicit_params_from (expected : Types.infer_ty list) (args : Ast.desugared_expr list) =
+    List.mapi
+      (fun index (arg : Ast.desugared_expr) ->
+        match arg.Ast.it with
+        | `Lambda ([ { Ast.implicit = true; _ } ], signature, body) ->
+          (match Option.map Types.repr (List.nth_opt expected index) with
+           | Some (Types.IFn ([], _, _)) -> { arg with Ast.it = `Lambda ([], signature, body) }
+           | Some (Types.IFn (wanted, _, _)) when List.length wanted > 1 ->
+             fail
+               arg.Ast.span
+               "A lambda taking %d parameters must name them."
+               (List.length wanted)
+           | _ -> arg)
+        | _ -> arg)
+      args
+
+let name_implicit_params (callee : Types.infer_ty) (args : Ast.desugared_expr list) =
+  match Types.repr callee with
+  | Types.IFn (expected, _, _) -> name_implicit_params_from expected args
+  | _ -> args
+
 let rec infer_expr env ctx (e : Ast.desugared_expr) : checked_expr =
   try infer_expr_impl env ctx e with
   | Types.Type_error message -> raise (Located { span = e.Ast.span; message })
@@ -893,8 +917,9 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
     in
     node Types.IBool it
   | `Call (callee, args) ->
-    let args = List.map (infer_expr env ctx) args in
     let callee_node = infer_expr env ctx callee in
+    let args = name_implicit_params callee_node.Ast.ann args in
+    let args = List.map (infer_expr env ctx) args in
     (* The name has to still mean the entry, not merely be spelled like it. *)
     let variadic =
       match callee.Ast.it with
@@ -1002,7 +1027,6 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
       | Some ann -> { Ast.it = `Int 0; span = receiver.Ast.span; ann }
       | None -> infer_expr env ctx receiver
     in
-    let args = List.map (infer_expr env ctx) args in
     let owners =
       List.sort_uniq
         compare
@@ -1012,6 +1036,31 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
            ctx_methods
            [])
     in
+    (* An unpinned receiver has no owner to look in. *)
+    let found =
+      try Ok (receiver_of span ctx.registry receiver name owners) with
+      | Located _ as e -> Error e
+    in
+    (* The method's own parameters, so a trailing lambda is sized before its body
+       is read rather than after. *)
+    let expected =
+      match found with
+      | Ok (Owner owner) when not (Hashtbl.mem ctx_associated (owner, name)) ->
+        (match lookup env (Registry.entry_for_method ctx.registry owner name) with
+         | Some scheme ->
+           (match Types.repr (Types.instantiate scheme) with
+            | Types.IFn (self :: rest, _, _) ->
+              (* A generic parameter only says how many a lambda takes once the
+                 receiver has bound it. This instantiation is read and dropped;
+                 the call makes its own. *)
+              (try Types.unify self receiver.Ast.ann with
+               | _ -> ());
+              rest
+            | _ -> [])
+         | None -> [])
+      | _ -> []
+    in
+    let args = List.map (infer_expr env ctx) (name_implicit_params_from expected args) in
     (* An `impl` wins, or a free function could shadow a method. *)
     let via_function () =
       match lookup env as_function with
@@ -1037,11 +1086,6 @@ and infer_expr_impl env ctx (e : Ast.desugared_expr) : checked_expr =
         admits_row (Some scheme) row ctx.row;
         Some
           (node ret (`Call ({ Ast.it = `Var as_function; span; ann = fn }, receiver :: args)))
-    in
-    (* An unpinned receiver has no owner to look in. *)
-    let found =
-      try Ok (receiver_of span ctx.registry receiver name owners) with
-      | Located _ as e -> Error e
     in
     (match found with
      | Error e ->
