@@ -8,9 +8,11 @@ Status: **implemented.**
 | `fn` operations | evidence passing (`lib/cps.ml`) |
 | Tail-resumptive `ctl` | compiled as `fn` — bind-inversion |
 | Aborting `ctl`, multi-shot `resume` | continuation passing |
-| Effect inside a loop | rejected — needs a loop continuation |
-| Effect inside `&&`/`\|\|` | rejected — hoisting would break short-circuiting |
-| Effectful function as a value | rejected — needs row monomorphization |
+| Effect inside a loop | the loop is its own continuation, re-entered per iteration |
+| Effect inside `&&`/`\|\|` | the operand it sits in becomes a branch |
+| Effect inside a record or variant literal | the literal is built in the continuation |
+| Effectful function as a value | converted like a named function of the same shape |
+| `return` out of a nested `run` whose handler holds a continuation | unwinds past the frames the pass made |
 
 Running: `log`, `ask`, `multi_handle`, `exception`, `delim`, `flip`, `recover`.
 
@@ -213,9 +215,31 @@ var first_even = run { each() } handle Yield {
 
 The cost is that leaving the enclosing function from inside an arm cannot be written. Two alternatives that would have kept it were rejected.
 
-Giving `return` its ordinary meaning and adding a second keyword for the block — `answer v` — buys the missing capability at the price of a keyword, and makes the common case the one that does not compile: escaping a run reaches the enclosing function's continuation, which [`return_in_inner_run`](../tests/effects/return_in_inner_run.cx) shows works only while the handler needs none of its own, and [`errors/return_out_of_run`](../tests/effects/errors/return_out_of_run.cx) shows is rejected once it resumes.
+Giving `return` its ordinary meaning and adding a second keyword for the block — `answer v` — buys the missing capability at the price of a keyword, and buys nothing for the case that motivated it. Escaping a run reaches the enclosing function whether or not the handler holds a continuation of its own — through that function's continuation in [`return_in_inner_run`](../tests/effects/return_in_inner_run.cx), by unwinding in [`return_out_of_run`](../tests/effects/return_out_of_run.cx) — so what the keyword would add is the arm's own escape and nothing else.
 
 Kotlin-style `return@` labels were rejected for a reason particular to this language. Labels exist because a nested loop or a lambda has no other channel to its enclosing scopes; here that channel is performing an operation, which the row records and inference checks. A label would be a second control path doing the same work untyped. Nothing is left for it to name, either: an arm is lexically bound to the `handle` clause it appears in, so the run it answers is unique, and a label with one possible value is not a label. Should `break` and `continue` ever arrive they may want labels for the ordinary reason, which this decision does not prejudge.
+
+## A `return` that unwinds past an arm
+
+A `run` block whose handler needs a continuation may sit in a function the pass left alone, because handling the effect discharged that function's row. A `return` in the block's body then has no continuation to call: the frames between it and the function are the ones the pass wrote — the arm that resumed, the continuation it resumed into, the joins around them — and none of them is the function it is leaving.
+
+So it stays a `return` statement, and those frames let it through. `Ast.Frame` is what the pass emits for its own functions, and `Interp` gives a frame no answer for `Return_value`; the source function is the nearest closure that catches one. Every frame the unwind crosses runs its `On_unwind` cleanups on the way, so a `defer` armed inside the block or inside the arm still releases.
+
+An arm's own code after `resume` does not run. The continuation left through the function rather than returning, so there is nothing for `resume` to answer with:
+
+```cronyx
+ctl tick() {
+    defer { print("cleaned up"); }   // runs
+    resume 1;
+    print("skipped");                // does not
+}
+```
+
+Koka draws the line in the same place. Its handler `return` clause is documented as not running when the action exits without resuming — that is why `finally` exists, and the tour's `with-file` example is a file handle left open by exactly this mistake. `defer` is the `finally` here.
+
+The alternative was an `Abort` to a scope at the boundary, carrying the value in a mutable temporary. Where that abort lands is the objection: a continuation re-enters every scope it captured and `Interp.under` catches an unwind for each of them, so the boundary scope is re-installed inside the continuation and would catch the abort there — handing control back to the arm and running the sequel that must not run.
+
+[`return_in_inner_ctl_run`](../tests/effects/return_in_inner_ctl_run.cx), [`return_past_arm_defer`](../tests/effects/return_past_arm_defer.cx) and [`return_out_of_run`](../tests/effects/return_out_of_run.cx) are the three shapes: plain, with a cleanup, and with two resumptions where only the second returns.
 
 ## How a row prints
 
