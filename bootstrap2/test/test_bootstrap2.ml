@@ -64,6 +64,7 @@ let cases =
   ; "tests/effects/run_value/arm_answers"
   ; "tests/effects/run_value/two_in_one_expr"
   ; "tests/effects/deferred/deferred"
+  ; "tests/effects/async/async"
   ; "tests/effects/fn_values/in_list"
   ; "tests/effects/fn_values/in_tuple"
   ; "tests/core/arrays/basics"
@@ -390,8 +391,6 @@ let expected_failing : (string * blocker) list =
        for a continuation to capture the active scope stack and restore it when
        invoked, which is a change to how [Interp] represents one. *)
   [ "tests/effects/abort_under_conversion", Waiting "a continuation that restores its scopes"
-  ; ( "tests/effects/async/async"
-    , Waiting "a function value that suspends" )
     (* Parked — native compilation, deliberately out of scope *)
   ; "tests/compile/m0/m0", Parked
   ; "tests/compile/m1/fib", Parked
