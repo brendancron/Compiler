@@ -551,6 +551,15 @@ let map_nominal (f : 'a -> 'b) (e : 'a nominal) : 'b nominal =
 
 (* `#` is in no identifier the scanner can produce. Two parts or more, or the
    separator would not appear. *)
+(* [Cps] names every continuation it builds with this, and [Interp] has to tell
+   one from an ordinary closure: only a continuation re-enters scopes that are
+   still live. *)
+let continuation_prefix = "k"
+
+let is_continuation_name name =
+  String.length name > String.length continuation_prefix
+  && String.starts_with ~prefix:(continuation_prefix ^ "#") name
+
 let generated parts =
   match parts with
   | [] | [ _ ] -> invalid_arg "Ast.generated: a generated name needs two parts"

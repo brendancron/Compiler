@@ -344,6 +344,44 @@ and extract_list info items rebuild =
   in
   loop [] items
 
+(* Scopes entered on the way to the statement being converted, innermost first.
+   A continuation is the rest of a computation that was inside them, so invoking
+   one has to be inside them again — and structurally, where the scope covered
+   what it covered, rather than around the whole body. *)
+let open_scopes : (string * Ast.cps_stmt list) list ref = ref []
+
+(* Deferred statements armed on the way here. Leaving disarms them, so a pass
+   that resumes past one would find nothing armed and release nothing. *)
+let open_defers : string list ref = ref []
+
+(* And the cleanups guarding them. An unwind reaching a later pass would pass
+   through nothing, since the frame it went through belonged to the first. *)
+let open_unwinds : Ast.cps_stmt list list ref = ref []
+
+let delimited span body =
+  let armed =
+    List.map
+      (fun flag ->
+        node
+          span
+          (`Expr
+            { Ast.it = `Assign (flag, { Ast.it = `Bool true; span; ann = Types.Bool })
+            ; span
+            ; ann = Types.Bool
+            }))
+      !open_defers
+  in
+  let guarded =
+    List.fold_left
+      (fun acc cleanup -> [ node span (`On_unwind (acc, cleanup)) ])
+      (armed @ body)
+      !open_unwinds
+  in
+  List.fold_left
+    (fun acc (scope, on_abort) -> [ node span (`Scope (scope, acc, on_abort)) ])
+    guarded
+    !open_scopes
+
 (* ---- continuation-passing form ---- *)
 
 (* [ret] is what a `return` calls, [k] what the next statement runs under. They
@@ -416,25 +454,33 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
            name, [ declaration ])
        in
        let k', wrapped_k = wrapper k in
+       (* No continuation here, so one performing an effect cannot run. *)
+       let cleanup =
+         if suspends_stmt info inner
+         then []
+         else
+           [ node
+               span
+               (`If
+                 ( var span Types.Bool armed
+                 , node span (`Block (disarm :: Option.to_list (stmt info inner)))
+                 , None ))
+           ]
+       in
+       let outer_defers = !open_defers
+       and outer_unwinds = !open_unwinds in
+       let converted_rest =
+         open_defers := armed :: outer_defers;
+         open_unwinds := cleanup :: outer_unwinds;
+         Fun.protect
+           ~finally:(fun () ->
+             open_defers := outer_defers;
+             open_unwinds := outer_unwinds)
+           (fun () -> cps info ret' k' ~at:span rest)
+       in
        (node span (`Var_decl (armed, None, Some (flag true)))
         :: wrapped_ret)
-       @ [ wrapped_k
-         ; node
-             span
-             (`On_unwind
-               ( cps info ret' k' ~at:span rest
-                 (* No continuation here, so one performing an effect cannot run. *)
-               , (if suspends_stmt info inner
-                  then []
-                  else
-                    [ node
-                        span
-                        (`If
-                          ( var span Types.Bool armed
-                          , node span (`Block (disarm :: Option.to_list (stmt info inner)))
-                          , None ))
-                    ]) ))
-         ]
+       @ [ wrapped_k; node span (`On_unwind (converted_rest, cleanup)) ]
      | `Expr e when suspends info e ->
        (match extract info e with
         | Some (c, rebuild) ->
@@ -459,7 +505,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
           let tmp = fresh "v" in
           let body = build tmp in
           let next = fresh "k" in
-          fn_decl span next [ !bound ] body :: invoke info span next c
+          fn_decl span next [ !bound ] (delimited span body) :: invoke info span next c
         | None -> unsupported span "This effect cannot be sequenced yet.")
      | `If (cond, then_branch, else_branch) when suspends_stmt info s || holds_return s ->
        let join = fresh "join" in
@@ -489,7 +535,7 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
             ])
      | `Block body when suspends_stmt info s || holds_return s ->
        let next = fresh "k" in
-       [ fn_decl span next [ fresh "x" ] (cps info ret k ~at:span rest)
+       [ fn_decl span next [ fresh "x" ] (delimited span (cps info ret k ~at:span rest))
        ; node span (`Block (cps info ret next ~at:span body))
        ]
      (* The body's "what runs next" is the loop itself, so resuming carries
@@ -522,15 +568,18 @@ let rec cps info ret k ~at (stmts : Ast.reflected_stmt list) : Ast.cps_stmt list
        when List.exists (fun b -> suspends_stmt info b || holds_return b) body ->
        let after = fresh "after" in
        let scope = fresh "scope" in
+       (* An abort skipped the body's own continuation. *)
+       let on_abort = [ call span after [ ignored span ] ] in
+       let outer = !open_scopes in
+       let converted =
+         open_scopes := (scope, on_abort) :: outer;
+         Fun.protect
+           ~finally:(fun () -> open_scopes := outer)
+           (fun () -> cps info ret after ~at:span body)
+       in
        fn_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
        :: (direct_arms info span ~scope handlers
-           @ [ node
-                 span
-                 (`Scope
-                   ( scope
-                   , cps info ret after ~at:span body
-                   (* An abort skipped the body's own continuation. *)
-                   , [ call span after [ ignored span ] ] )) ])
+           @ [ node span (`Scope (scope, converted, on_abort)) ])
      | _ ->
        (match stmt info s with
         | Some s -> s :: cps info ret k ~at:span rest
@@ -549,7 +598,7 @@ and controlled_by info span (cond : Ast.reflected_expr) build =
 and sequence info span c build =
   let name = fresh "v" in
   let next = fresh "k" in
-  fn_decl span next [ name ] (build name) :: invoke info span next c
+  fn_decl span next [ name ] (delimited span (build name)) :: invoke info span next c
 
 and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
   match c.Ast.it with

@@ -188,6 +188,7 @@ and under missing k =
 and closure env name params body =
   let names = List.map (fun (p : Ast.param) -> p.Ast.name) params in
   let captured = !active_scopes in
+  let is_continuation = Ast.is_continuation_name name in
   Fn
     { name
     ; arity = Some (List.length names)
@@ -198,11 +199,19 @@ and closure env name params body =
           (* What it was made under and is no longer inside. Re-entering only
              those leaves an ordinary call, made where it was written, alone. *)
           let current = !active_scopes in
+          (* A continuation is the rest of a computation that was inside those
+             frames, so it is inside them again even where they are still live:
+             the arm resuming it is outside them, and an abort must land in the
+             continuation rather than unwind through the arm. Any other closure
+             re-enters only what is gone. *)
           let missing =
-            List.filter
-              (fun (n, _, _) ->
-                not (List.exists (fun (m, _, _) -> String.equal m n) current))
-              captured
+            if is_continuation
+            then captured
+            else
+              List.filter
+                (fun (n, _, _) ->
+                  not (List.exists (fun (m, _, _) -> String.equal m n) current))
+                captured
           in
           let saved = current in
           active_scopes := missing @ current;
