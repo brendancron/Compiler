@@ -173,7 +173,16 @@ let cases =
   ; "tests/effects/match/suspend_in_scrutinee"
   ; "tests/effects/suspend_in_condition"
   ; "tests/effects/suspend_in_while_condition"
+  ; "tests/effects/suspend_in_record"
+  ; "tests/effects/suspend_in_variant"
+  ; "tests/effects/suspend_in_field_assign"
+  ; "tests/effects/suspend_in_logical"
+  ; "tests/effects/suspend_in_logical_while"
+  ; "tests/effects/suspend_in_logical_nested"
   ; "tests/effects/return_in_inner_run"
+  ; "tests/effects/return_in_inner_ctl_run"
+  ; "tests/effects/return_past_arm_defer"
+  ; "tests/effects/return_out_of_run"
   ; "tests/effects/inner_run_suspends_outward"
   ; "tests/effects/nested_aborts"
   ; "tests/stdlib/iterable/iterable"
@@ -268,7 +277,6 @@ let error_cases =
   ; "tests/core/lambdas/errors/naked_arrow"
   ; "tests/core/lambdas/errors/trailing_comma"
   ; "tests/core/embed/errors/missing"
-  ; "tests/effects/errors/return_out_of_run"
   ; "tests/effects/generic/errors/one_type"
   ; "tests/effects/final/errors/resumes"
   ; "tests/core/ufcs/errors/arity"
@@ -406,8 +414,6 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m6/apply", Parked
   ; "tests/compile/m7/safe_div", Parked
   ; "tests/compile/m8/gadt", Parked
-    (* Operators resolved through an impl instead of the operator registry. *)
-    (* A tuple has no declaration to derive from. *)
   ]
 
 (* Ought to be rejected and are not, paired with the `.err` they should

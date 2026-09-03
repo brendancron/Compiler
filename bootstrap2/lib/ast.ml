@@ -501,6 +501,12 @@ and cps_stmt_kind =
      invoking one is being inside the scopes it was captured under again, even
      where those are still entered, which is true of nothing else. *)
   | `Cont of string * param list * cps_stmt list
+  (* A function the pass cut out of another: what follows a branch, a loop or a
+     suspension, and the arm that resumes into it. A `return` reaching one is
+     leaving the source function it was cut from, so it passes through rather
+     than stopping here — which is also why an arm's sequel does not run once a
+     resumption returns. *)
+  | `Frame of string * param list * cps_stmt list
   ]
 
 let map_vars (f : 'a -> 'b) (e : 'a vars) : 'b vars =
