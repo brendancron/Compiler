@@ -1,0 +1,12 @@
+effect Flip { ctl coin(): bool; }
+
+fn trial() -> <Flip> unit {
+    if (coin()) { print("heads"); } else { print("tails"); }
+}
+
+run {
+    var task = () => { trial(); };
+    task();
+} handle Flip {
+    ctl coin() { resume true; resume false; }
+}
