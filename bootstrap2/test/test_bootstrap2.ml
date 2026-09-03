@@ -175,6 +175,7 @@ let cases =
   ; "tests/effects/suspend_in_while_condition"
   ; "tests/effects/suspend_in_record"
   ; "tests/effects/suspend_in_variant"
+  ; "tests/effects/suspend_in_field_assign"
   ; "tests/effects/suspend_in_logical"
   ; "tests/effects/suspend_in_logical_while"
   ; "tests/effects/suspend_in_logical_nested"
