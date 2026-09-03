@@ -338,6 +338,13 @@ and call s : Ast.expr =
               (Ast.at
                  callee.Ast.span
                  (`Method_call (callee, label, label, trailing_lambda s (arguments s))))
+          (* `x.m { it }` is the method, not a field holding a function: with
+             parentheses there is no field to reach, so braces agree. *)
+          | None when check s Token.Left_brace && not s.no_brace ->
+            loop
+              (Ast.at
+                 callee.Ast.span
+                 (`Method_call (callee, label, label, trailing_lambda s [])))
           | None -> loop (Ast.at callee.Ast.span (`Field (callee, label)))))
     | _ -> callee
   in
@@ -390,7 +397,7 @@ and arguments s : Ast.expr list =
    record literal keep their braces. *)
 and callable (e : Ast.expr) =
   match e.Ast.it with
-  | `Var _ | `Field _ | `Call _ | `Method_call _ | `Comptime_call _ -> true
+  | `Var _ | `Call _ | `Method_call _ | `Comptime_call _ -> true
   | _ -> false
 
 (* `{ x, y -> … }` names the parameters; anything else takes the implicit `it`.
