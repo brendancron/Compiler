@@ -406,8 +406,13 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m6/apply", Parked
   ; "tests/compile/m7/safe_div", Parked
   ; "tests/compile/m8/gadt", Parked
-    (* Operators resolved through an impl instead of the operator registry. *)
-    (* A tuple has no declaration to derive from. *)
+    (* An evaluation context CPS does not split at the suspension. *)
+  ; ( "tests/effects/suspend_in_record"
+    , Waiting "splitting a record literal around a suspending field" )
+  ; ( "tests/effects/suspend_in_logical"
+    , Waiting "splitting 'and'/'or' around a suspending right operand" )
+  ; ( "tests/effects/return_in_inner_ctl_run"
+    , Waiting "a 'return' that unwinds past a handler holding a continuation" )
   ]
 
 (* Ought to be rejected and are not, paired with the `.err` they should
