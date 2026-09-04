@@ -1,0 +1,45 @@
+type Shape {
+    @tag("c") Circle(int),
+    @tag("r") Rect(int, int),
+    Point,
+}
+
+trait Tagged {
+    fn tags(self): string;
+}
+
+meta fn derive(shape: TypeShape) for Tagged {
+    match shape {
+        TypeShape::Sum(t, variants) => {
+            var tname = str(t);
+            var text = code(tname);
+            for (v in variants) {
+                var label = str(v.name);
+                for (a in v.attrs) {
+                    if (str(a.name) == "tag") {
+                        for (arg in a.args) {
+                            match arg {
+                                AttrArg::Str(x) => { label = label + ":" + x; }
+                                AttrArg::Int(x) => {}
+                                AttrArg::Float(x) => {}
+                                AttrArg::Bool(x) => {}
+                            }
+                        }
+                    }
+                }
+                var head = code(label);
+                text = code(text + " " + head);
+            }
+            gen impl Tagged for t {
+                fn tags(self): string { return text; }
+            }
+        }
+        TypeShape::Product(t, fields) => {}
+        TypeShape::Scalar => {}
+        TypeShape::Other => {}
+    }
+}
+
+derive Tagged for Shape;
+
+print(new Shape::Point.tags());

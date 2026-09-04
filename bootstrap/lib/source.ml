@@ -367,6 +367,25 @@ and nested depth (s : Ast.stmt) =
   | `Block body -> block (depth + 1) body
   | _ -> stmt (depth + 1) s
 
+and attrs (list : Ast.attr list) =
+  let arg = function
+    | Ast.A_str text -> Printf.sprintf "%S" text
+    | Ast.A_int value -> string_of_int value
+    | Ast.A_float value -> Printf.sprintf "%g" value
+    | Ast.A_bool value -> if value then "true" else "false"
+  in
+  String.concat
+    ""
+    (List.map
+       (fun (a : Ast.attr) ->
+         Printf.sprintf
+           "@%s%s "
+           a.Ast.a_name
+           (match a.Ast.a_args with
+            | [] -> ""
+            | args -> Printf.sprintf "(%s)" (String.concat ", " (List.map arg args))))
+       list)
+
 and type_decl depth name params body =
   let line = line depth in
   let head =
@@ -382,15 +401,24 @@ and type_decl depth name params body =
      | Ast.T_fields fields ->
        String.concat
          ",\n"
-         (List.map (fun (l, t) -> Printf.sprintf "%s%s: %s" (pad (depth + 1)) l (type_expr t)) fields)
+         (List.map
+            (fun (f : Ast.field) ->
+              Printf.sprintf
+                "%s%s%s: %s"
+                (pad (depth + 1))
+                (attrs f.Ast.f_attrs)
+                f.Ast.f_name
+                (type_expr f.Ast.f_ty))
+            fields)
      | Ast.T_variants variants ->
        String.concat
          ",\n"
          (List.map
             (fun (v : Ast.variant) ->
               Printf.sprintf
-                "%s%s%s%s%s"
+                "%s%s%s%s%s%s"
                 (pad (depth + 1))
+                (attrs v.Ast.v_attrs)
                 v.Ast.v_name
                 (match v.Ast.v_params with
                  | [] -> ""

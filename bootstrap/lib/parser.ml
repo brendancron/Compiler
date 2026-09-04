@@ -683,6 +683,9 @@ and declaration s : Ast.stmt option =
     | Token.Type ->
       ignore (advance s);
       Some (type_decl s sp)
+    (* Only a member carries one, so the whole feature is per-field locality —
+       anything a whole type would say is an argument to the deriver instead. *)
+    | Token.At -> raise (error s tok "An attribute belongs to a field or a variant.")
     | Token.Trait ->
       ignore (advance s);
       Some (trait_decl s sp)
@@ -1139,6 +1142,60 @@ and impl_decl s sp : Ast.stmt =
   ignore (consume s Token.Right_brace "Expected '}' after the methods.");
   Ast.at sp (`Impl_decl (trait, type_name, params, { Ast.ib_assoc = assoc; ib_methods = methods }))
 
+(* Arguments are literals rather than expressions: an attribute is data a
+   deriver reads, so there is nothing to evaluate and no stage that could. *)
+and attributes s =
+  let rec loop acc =
+    match matches s [ Token.At ] with
+    | None -> List.rev acc
+    | Some at ->
+      let sp = Ast.span_of_token at in
+      let name = consume_identifier s "Expected an attribute name." in
+      let args =
+        match matches s [ Token.Left_paren ] with
+        | None -> []
+        | Some _ ->
+          let args =
+            if check s Token.Right_paren then [] else comma_separated s attribute_arg
+          in
+          ignore (consume s Token.Right_paren "Expected ')' after attribute arguments.");
+          args
+      in
+      loop ({ Ast.a_name = name; a_args = args; a_span = sp } :: acc)
+  in
+  loop []
+
+and attribute_arg s =
+  let tok = peek s in
+  match tok.Token.token_type with
+  | Token.String text ->
+    ignore (advance s);
+    Ast.A_str text
+  | Token.Int value ->
+    ignore (advance s);
+    Ast.A_int value
+  | Token.Float value ->
+    ignore (advance s);
+    Ast.A_float value
+  | Token.True ->
+    ignore (advance s);
+    Ast.A_bool true
+  | Token.False ->
+    ignore (advance s);
+    Ast.A_bool false
+  | Token.Minus ->
+    ignore (advance s);
+    let tok = peek s in
+    (match tok.Token.token_type with
+     | Token.Int value ->
+       ignore (advance s);
+       Ast.A_int (-value)
+     | Token.Float value ->
+       ignore (advance s);
+       Ast.A_float (-.value)
+     | _ -> raise (error s tok "An attribute argument must be a literal."))
+  | _ -> raise (error s tok "An attribute argument must be a literal.")
+
 and type_decl s sp : Ast.stmt =
   let name = consume_identifier s "Expected a type name." in
   let params = type_params s in
@@ -1147,6 +1204,7 @@ and type_decl s sp : Ast.stmt =
     if check s Token.Right_brace || is_at_end s
     then List.rev fields, List.rev variants
     else (
+      let attrs = attributes s in
       let label = consume_identifier s "Expected a field or variant name." in
       match (peek s).Token.token_type with
       | Token.Colon ->
@@ -1155,7 +1213,7 @@ and type_decl s sp : Ast.stmt =
         ignore (advance s);
         let ty = type_expr s in
         ignore (matches s [ Token.Comma ]);
-        loop ((label, ty) :: fields) variants
+        loop ({ Ast.f_name = label; f_ty = ty; f_attrs = attrs } :: fields) variants
       | _ ->
         if fields <> []
         then ignore (error s (peek s) "A type declares fields or variants, not both.");
@@ -1198,6 +1256,7 @@ and type_decl s sp : Ast.stmt =
            ; v_params = variant_params
            ; v_payload = payload
            ; v_result = result
+           ; v_attrs = attrs
            }
            :: variants))
   in

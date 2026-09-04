@@ -396,7 +396,8 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
         let body =
           match body with
           | Ast.T_fields fields ->
-            Ast.T_fields (List.map (fun (l, t) -> l, type_expr t) fields)
+            Ast.T_fields
+              (List.map (fun (f : Ast.field) -> { f with Ast.f_ty = type_expr f.Ast.f_ty }) fields)
           | Ast.T_variants variants ->
             Ast.T_variants
               (List.map

@@ -231,7 +231,7 @@ let rec write_stmt buf indent (s : Ast.stmt) =
        | params -> Printf.sprintf "<%s>" (String.concat ", " params))
       (match body with
        | Ast.T_fields fields ->
-         String.concat "" (List.map (fun (l, _) -> " " ^ l) fields)
+         String.concat "" (List.map (fun (f : Ast.field) -> " " ^ f.Ast.f_name) fields)
        | Ast.T_variants variants ->
          String.concat "" (List.map (fun (v : Ast.variant) -> " " ^ v.Ast.v_name) variants))
   | `Match (scrutinee, cases) ->

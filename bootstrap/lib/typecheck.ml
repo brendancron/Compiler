@@ -84,6 +84,19 @@ and variant_decl =
 
 let ctx_types : (string, decl) Hashtbl.t = Hashtbl.create 16
 
+(* Attributes are inert, so they stay out of [decl] — nothing unification or
+   monomorphization touches has a reason to carry them. [Reflect] is the only
+   reader, and it asks by type name and member label. *)
+let ctx_attrs : (string, (string * Ast.attr list) list) Hashtbl.t = Hashtbl.create 8
+
+let attrs_of name label =
+  match Hashtbl.find_opt ctx_attrs name with
+  | None -> []
+  | Some members ->
+    (match List.assoc_opt label members with
+     | None -> []
+     | Some attrs -> attrs)
+
 let ctx_type_params : (string, Types.infer_ty) Hashtbl.t = Hashtbl.create 8
 
 let decl_params = function
@@ -173,6 +186,7 @@ let scoped_declarations f =
     List.iter (fun (key, v) -> Hashtbl.add table key v) saved
   in
   let types = snapshot ctx_types
+  and attrs = snapshot ctx_attrs
   and traits = snapshot ctx_traits
   and trait_spans = snapshot ctx_trait_spans
   and type_spans = snapshot ctx_type_spans
@@ -188,6 +202,7 @@ let scoped_declarations f =
   Fun.protect
     ~finally:(fun () ->
       restore ctx_types types;
+      restore ctx_attrs attrs;
       restore ctx_traits traits;
       restore ctx_trait_spans trait_spans;
       restore ctx_type_spans type_spans;
@@ -207,6 +222,7 @@ let reset_effects () =
   Hashtbl.reset ctx_effects.declared;
   Hashtbl.reset ctx_op_owner;
   Hashtbl.reset ctx_types;
+  Hashtbl.reset ctx_attrs;
   Hashtbl.reset ctx_effect_params;
   Hashtbl.reset ctx_traits;
   Hashtbl.reset ctx_trait_spans;
@@ -1763,13 +1779,22 @@ and declare_types (body : Ast.desugared_stmt list) =
               Product
                 ( vars
                 , List.fold_right
-                    (fun (l, t) rest -> Types.FCons (l, infer_ty_of_annotation t, rest))
+                    (fun (f : Ast.field) rest ->
+                      Types.FCons (f.Ast.f_name, infer_ty_of_annotation f.Ast.f_ty, rest))
                     fields
                     Types.FEmpty )
             | Ast.T_variants variants ->
               Sum (vars, List.map (variant_of s.Ast.span name vars) variants))
         in
-        Hashtbl.replace ctx_types name declared
+        Hashtbl.replace ctx_types name declared;
+        Hashtbl.replace
+          ctx_attrs
+          name
+          (match body with
+           | Ast.T_fields fields ->
+             List.map (fun (f : Ast.field) -> f.Ast.f_name, f.Ast.f_attrs) fields
+           | Ast.T_variants variants ->
+             List.map (fun (v : Ast.variant) -> v.Ast.v_name, v.Ast.v_attrs) variants)
       | _ -> ())
     body
 

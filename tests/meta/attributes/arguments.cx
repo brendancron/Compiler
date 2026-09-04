@@ -1,0 +1,45 @@
+type Config {
+    @max(255)
+    @scale(0.5)
+    @required(true)
+    @unit("ms")
+    timeout: int,
+}
+
+trait Describe {
+    fn describe(self): string;
+}
+
+meta fn derive(shape: TypeShape) for Describe {
+    match shape {
+        TypeShape::Product(t, fields) => {
+            var tname = str(t);
+            var text = code(tname);
+            for (f in fields) {
+                for (a in f.attrs) {
+                    var written = str(a.name);
+                    for (arg in a.args) {
+                        match arg {
+                            AttrArg::Str(v) => { written = written + "=" + v; }
+                            AttrArg::Int(v) => { written = written + "=" + str(v); }
+                            AttrArg::Float(v) => { written = written + "=" + str(v); }
+                            AttrArg::Bool(v) => { written = written + "=" + str(v); }
+                        }
+                    }
+                    var head = code(written);
+                    text = code(text + " " + head);
+                }
+            }
+            gen impl Describe for t {
+                fn describe(self): string { return text; }
+            }
+        }
+        TypeShape::Sum(t, variants) => {}
+        TypeShape::Scalar => {}
+        TypeShape::Other => {}
+    }
+}
+
+derive Describe for Config;
+
+print(new Config { timeout: 30 }.describe());

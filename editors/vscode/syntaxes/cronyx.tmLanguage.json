@@ -6,6 +6,7 @@
     { "include": "#comments" },
     { "include": "#strings" },
     { "include": "#meta-blocks" },
+    { "include": "#attributes" },
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#constants" },
@@ -37,6 +38,10 @@
           "name": "keyword.other.meta.cx"
         }
       ]
+    },
+    "attributes": {
+      "match": "@[A-Za-z_][A-Za-z0-9_]*",
+      "name": "entity.name.function.decorator.cx"
     },
     "keywords": {
       "patterns": [
