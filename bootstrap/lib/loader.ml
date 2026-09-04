@@ -392,6 +392,7 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
   and stmt locals (s : Ast.stmt) : Ast.stmt =
     let it : Ast.stmt_kind =
       match s.Ast.it with
+      | `Attributed (attrs, inner) -> `Attributed (attrs, stmt locals inner)
       | `Type_decl (name, params, body) ->
         let body =
           match body with

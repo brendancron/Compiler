@@ -12,6 +12,20 @@ let declared : (string, stmt handler) Hashtbl.t = Hashtbl.create 8
 (* Functions whose last parameter is variadic, and how many come before it. *)
 let variadic : (string, int) Hashtbl.t = Hashtbl.create 8
 
+(* What a declaration was written with, kept here because this is where the
+   wrapper is unwound and no later tree can hold one.
+
+   Only a type is recorded. `typeof(T).attrs` is the one reader and it keys by
+   type name, so recording a function or a variable under the same key would
+   collide rather than answer — and nothing can ask for those yet, because
+   `typeof` takes a value and a function value's type names no declaration. *)
+let decl_attrs : (string, Ast.attr list) Hashtbl.t = Hashtbl.create 8
+
+let declared_name (s : stmt) =
+  match s.it with
+  | `Type_decl (name, _, _) -> Some name
+  | _ -> None
+
 let variadic_arity (params : param list) =
   match List.rev params with
   | { ty = Some { it = Ty_variadic _; _ }; _ } :: before -> Some (List.length before)
@@ -81,9 +95,16 @@ let rec expr (e : expr) : desugared_expr =
 
 and stmt (s : stmt) : desugared_stmt =
   let sp = s.span in
+  match s.it with
+  (* The attributes are recorded and the wrapper dropped: nothing after this
+     pass has a type that could carry one. *)
+  | `Attributed (attrs, inner) ->
+    Option.iter (fun name -> Hashtbl.replace decl_attrs name attrs) (declared_name inner);
+    stmt inner
+  | _ ->
   let it : desugared_stmt_kind =
     match s.it with
-        | `Import _ | `Meta _ | `Gen _ | `Meta_fn _ | `Derive _ -> assert false
+        | `Import _ | `Meta _ | `Gen _ | `Meta_fn _ | `Derive _ | `Attributed _ -> assert false
     (* for (x in xs) body  ⇒  { var seq = xs; var i = 0;
                                  while (i < seq.len()) { var x = seq[i]; body; i = i + 1; } }
 
@@ -181,6 +202,7 @@ let program (p : program) : (desugared_stmt list, error) result =
     List.iter collect (children s)
   and children (s : stmt) =
     match s.it with
+    | `Attributed (_, inner) -> [ inner ]
     | `Block body | `Fn (_, _, _, body) | `Meta body | `Meta_fn (_, _, _, body) -> body
     | `Defer inner | `Gen inner -> [ inner ]
     | `If (_, t, e) -> t :: Option.to_list e

@@ -1,4 +1,0 @@
-@json("person")
-type Person {
-    name: string,
-}
