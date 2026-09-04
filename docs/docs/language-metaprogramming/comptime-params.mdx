@@ -59,11 +59,11 @@ It's also the same machinery, ultimately, as the `meta { for ... gen fn ... }` p
 A function can have more than one type parameter. Comma-separate them:
 
 ```cronyx
-fn wrap<T>(x: T) -> Array<T> {
+fn wrap<T>(x: T): Array<T> {
     return [x];
 }
 
-fn swap<A, B>(pair: (A, B)) -> (B, A) {
+fn swap<A, B>(pair: (A, B)): (B, A) {
     return (pair.1, pair.0);
 }
 
