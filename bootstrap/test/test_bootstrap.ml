@@ -186,6 +186,7 @@ let cases =
   ; "tests/effects/suspend_in_logical_nested"
   ; "tests/effects/return_in_inner_run"
   ; "tests/effects/return_in_inner_ctl_run"
+  ; "tests/effects/two_runs_one_expr"
   ; "tests/effects/return_past_arm_defer"
   ; "tests/effects/return_out_of_run"
   ; "tests/effects/inner_run_suspends_outward"
@@ -431,6 +432,13 @@ let expected_failing : (string * blocker) list =
        calls it wrong. *)
   ; ( "tests/effects/multi_handle/differing_arms"
     , Waiting "`Cps` choosing evidence arity per handler, as `Type_mono` copies per row" )
+    (* A `return` out of a converted function, reached while a handler is
+       resuming into it. Converted code leaves by calling its return
+       continuation, and a call comes back, so the arm carries on afterwards
+       instead of being unwound past. The unconverted case works because there
+       the `return` is a real return. *)
+  ; ( "tests/effects/return_past_outer_ctl_run"
+    , Waiting "an unwind for `return` in converted code, not a call to the return continuation" )
   ]
 
 (* Ought to be rejected and are not, paired with the `.err` they should

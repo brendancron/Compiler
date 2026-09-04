@@ -16,9 +16,34 @@ type effects =
   ; operations : (string, string list) Hashtbl.t (* effect -> operations *)
   ; delimited : (string, unit) Hashtbl.t (* effects needing continuations *)
   ; op_ty : (string, Types.ty) Hashtbl.t (* operation -> its function type *)
+  (* Which evidence a `perform` currently reaches: the innermost `run` that
+     installed a handler for it, rather than the one name the operation has. *)
+  ; bound : (string, string) Hashtbl.t
   }
 
 let evidence_name op = Ast.generated [ "ev"; op ]
+
+(* A converted function receives its evidence as parameters under the canonical
+   name; a `run` inside it installs its own. Two `run` blocks live in one
+   expression often enough -- `run { … } + run { … }` -- that sharing one name
+   per operation lets the second quietly answer for the first. *)
+let evidence_var info op =
+  match Hashtbl.find_opt info.bound op with
+  | Some name -> name
+  | None -> evidence_name op
+
+let with_bound info names f =
+  let saved = List.map (fun (op, _) -> op, Hashtbl.find_opt info.bound op) names in
+  List.iter (fun (op, name) -> Hashtbl.replace info.bound op name) names;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (op, previous) ->
+          match previous with
+          | Some name -> Hashtbl.replace info.bound op name
+          | None -> Hashtbl.remove info.bound op)
+        saved)
+    f
 
 (* Converted code whose enclosing function was left unconverted, because
    handling the effect discharged its row. A `return` there has no continuation
@@ -231,11 +256,11 @@ let rec expr info (e : Ast.reflected_expr) : Ast.cps_expr =
            Types.Fn
              (List.map (fun (a : Ast.cps_expr) -> a.Ast.ann) args, e.Ast.ann, Types.closed_row [])
          in
-         `Call (var callee.Ast.span ty (evidence_name name), args)
+         `Call (var callee.Ast.span ty (evidence_var info name), args)
        | _ ->
          let evidence =
            evidence_of_row info (row_of callee.Ast.ann)
-           |> List.map (fun op -> var e.Ast.span (evidence_ty info op) (evidence_name op))
+           |> List.map (fun op -> var e.Ast.span (evidence_ty info op) (evidence_var info op))
          in
          let callee =
            match callee.Ast.it with
@@ -698,11 +723,11 @@ and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
     let args = List.map (expr info) args in
     let evidence_for ty =
       evidence_of_row info (row_of ty)
-      |> List.map (fun op -> var span (evidence_ty info op) (evidence_name op))
+      |> List.map (fun op -> var span (evidence_ty info op) (evidence_var info op))
     in
     let before, target, evidence =
       match callee.Ast.it with
-      | `Var name when Hashtbl.mem info.owner name -> [], evidence_name name, []
+      | `Var name when Hashtbl.mem info.owner name -> [], evidence_var info name, []
       | `Var name -> [], name, evidence_for callee.Ast.ann
       (* Anything else is bound first, since the call is emitted by name. *)
       | _ ->
@@ -719,6 +744,14 @@ and invoke info span next (c : Ast.reflected_expr) : Ast.cps_stmt list =
 and run info ret span k handlers body rest : Ast.cps_stmt list =
   let after = fresh "after" in
   let finished = fresh "finished" in
+  let installed =
+    List.concat_map
+      (fun (h : Ast.reflected_stmt Ast.handler) ->
+        List.map (fun (a : Ast.reflected_stmt Ast.arm) -> a.Ast.arm_name, fresh "ev") h.Ast.arms)
+      handlers
+  in
+  (* An arm is not under its own handler: an operation it performs itself
+     reaches whatever installed the evidence outside this block. *)
   let arms =
     List.concat_map
       (fun (h : Ast.reflected_stmt Ast.handler) ->
@@ -731,7 +764,11 @@ and run info ret span k handlers body rest : Ast.cps_stmt list =
               | Ast.Op_ctl | Ast.Op_final ->
                 cps info finished finished ~at:span a.Ast.arm_body
             in
-            frame_decl span (evidence_name a.Ast.arm_name) (a.Ast.arm_params @ [ continuation ]) arm_body)
+            frame_decl
+              span
+              (List.assoc a.Ast.arm_name installed)
+              (a.Ast.arm_params @ [ continuation ])
+              arm_body)
           h.Ast.arms)
       handlers
   in
@@ -740,7 +777,7 @@ and run info ret span k handlers body rest : Ast.cps_stmt list =
   (frame_decl span after [ fresh "x" ] (cps info ret k ~at:span rest)
    :: frame_decl span finished [ fresh "x" ] []
    :: arms)
-  @ cps info ret finished ~at:span body
+  @ with_bound info installed (fun () -> cps info ret finished ~at:span body)
   @ [ call span after [ ignored span ] ]
 
 (* ---- evidence-only translation ---- *)
@@ -842,6 +879,7 @@ let collect (p : Ast.reflected_stmt list) =
     ; operations = Hashtbl.create 8
     ; delimited = Hashtbl.create 8
     ; op_ty = Hashtbl.create 16
+    ; bound = Hashtbl.create 8
     }
   in
   List.iter
