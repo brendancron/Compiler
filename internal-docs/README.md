@@ -16,6 +16,7 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 | [Comptime Params.md](Comptime%20Params.md)                   | `<>` parameters, and why they are not just generics                   |
 | [Diagnostics.md](Diagnostics.md)                             | Spans, and why a frame cannot render half-drawn                       |
 | [Modules.md](Modules.md)                                     | `import`, and why several files become one program                    |
+| [Package Manager.md](Package%20Manager.md)                   | `cx`, packages, resolution, and where the module boundary hardens     |
 | [Metaprocessing.md](Metaprocessing.md)                       | `meta` and `gen`, and compilation calling itself                      |
 | [Reify.md](Reify.md)                                         | Turning a compile-time value back into syntax                         |
 | [GADT Refinement.md](GADT%20Refinement.md)                   | Refining a type parameter in a match arm, and the choice of how       |
