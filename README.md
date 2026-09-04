@@ -50,11 +50,20 @@ brew update
 brew upgrade cronyx
 ```
 
-# Installing the toolchain
+This installs `cx`, the package manager, and `cronyxc`, the compiler it links.
+`cx` is the one to reach for; `cronyxc` runs a single file and nothing else.
+
+# Starting a package
 
 ```
-cronyx toolchain instal vX.X.X
+cx new hello
+cd hello
+cx run
 ```
+
+`cx build` compiles the package and its dependencies, `cx publish` uploads it,
+and `cx toolchain list` says which compilers are installed. A package names the
+compiler it needs in `cronyx.toml`, and `cx` hands the job to that one.
 
 # Running a program
 

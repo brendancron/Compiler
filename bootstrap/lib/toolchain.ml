@@ -14,10 +14,21 @@ let up_from dir =
   in
   up dir
 
+(* An installed toolchain is `<prefix>/bin/cx` beside `<prefix>/lib/cronyx/stdlib`,
+   so the library is found from the binary rather than from wherever the user
+   happens to be standing. *)
+let beside_binary () =
+  let prefix = Filename.dirname (Filename.dirname Sys.executable_name) in
+  let installed = Filename.concat prefix (Filename.concat "lib" (Filename.concat "cronyx" "stdlib")) in
+  if Sys.file_exists (Filename.concat installed "lang") then Some installed else None
+
 let stdlib () =
   match Sys.getenv_opt "CRONYX_STDLIB" with
   | Some dir -> Some dir
   | None ->
-    (match up_from (Sys.getcwd ()) with
+    (match beside_binary () with
      | Some dir -> Some dir
-     | None -> up_from (Filename.dirname Sys.executable_name))
+     | None ->
+       (match up_from (Sys.getcwd ()) with
+        | Some dir -> Some dir
+        | None -> up_from (Filename.dirname Sys.executable_name)))

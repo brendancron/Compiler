@@ -88,7 +88,6 @@ A build runs from the package root, so every path an artifact carries is relativ
 
 **Todo, left by this milestone**
 
-- **`meta` still has a clock.** `builtins.ml` has `clock`, and `writefile` besides. A `meta` block calling either makes the input hash a lie that no amount of recording repairs, and the cache will serve a stale answer with a straight face. Denying both at meta time belongs with the sandbox section the design doc still needs.
 - **Nothing bounds a `meta` block.** It can loop forever or eat the machine. Out of scope for the cache, but it is the other half of "the environment the build sees is empty".
 - **The artifact stops before the checker.** A consumer re-checks a dependency's bodies, so the cache saves parsing and metaprocessing but not inference. Turning the artifact into a real interface needs five things that do not exist: generalized schemes for exported names (generalization happens in `infer_stmt`, not `hoist`), `Desugar`'s whole-program `handler` and variadic tables, a serializable snapshot of `Typecheck`'s global tables, the `Registry` entries a dependency registered, and the prelude split out of package compilation so it is not carried by every artifact. Worth doing when `pub` arrives or when re-checking is measurably the slow part; neither is true yet.
 - **The standard library is embedded per package.** Compiling `std` like any other package retires both that and the first-wins dedup at link.

@@ -6,6 +6,7 @@ let usage =
   \  build           compile the package here, and its dependencies\n\
   \  toolchain …     install <version> <binary>, or list\n\
   \  publish         upload the package here to a registry\n\
+  \  version         print the toolchain version\n\
   \  run [file.cx]   compile and execute a program, or the package here\n\n\
    options for `build` and `run`:\n\
   \  --locked        fail if the lockfile would change\n\
@@ -155,6 +156,7 @@ let () =
   | "build" :: args -> build args
   | "toolchain" :: args -> toolchain args
   | "publish" :: _ -> publish ()
+  | "version" :: _ -> print_endline ("cx " ^ Release.version)
   | "run" :: args ->
     (match parse_run args with
      (* No file named: the package here, through its artifacts. *)

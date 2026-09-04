@@ -35,9 +35,11 @@ git fetch -q origin "$branch" 2>/dev/null || die "origin has no branch '$branch'
 
 echo "==> Testing"
 (cd bootstrap && dune test)
+dune test cx
+./scripts/cx-parity.sh
 
 echo "==> Building"
-(cd bootstrap && dune build --release)
+dune build --release
 
 # uname's spelling of the host, in the triple form the archives have always used.
 case "$(uname -s)-$(uname -m)" in
@@ -47,14 +49,21 @@ case "$(uname -s)-$(uname -m)" in
   *) die "no archive name for $(uname -s)-$(uname -m)" ;;
 esac
 
+# One release ships one toolchain: the package manager, the compiler it links,
+# and the standard library it resolves `std/…` against. `cx` finds the library
+# at ../lib/cronyx/stdlib, so the layout here is the layout it is installed in.
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
-cp bootstrap/_build/default/bin/main.exe "$out/cronyxc"
-chmod +x "$out/cronyxc"
+tree="$out/cronyx-$version-$target"
+mkdir -p "$tree/bin" "$tree/lib/cronyx"
+cp _build/default/cx/bin/main.exe "$tree/bin/cx"
+cp _build/default/bootstrap/bin/main.exe "$tree/bin/cronyxc"
+chmod +x "$tree/bin/cx" "$tree/bin/cronyxc"
+cp -R stdlib "$tree/lib/cronyx/stdlib"
 
-archive="cronyxc-$version-$target.tar.gz"
-tar -czf "$out/$archive" -C "$out" cronyxc
-(cd "$out" && sha256sum "$archive" | awk '{print $1}' > "$archive.sha256")
+archive="cronyx-$version-$target.tar.gz"
+tar -czf "$out/$archive" -C "$out" "cronyx-$version-$target"
+shasum -a 256 "$out/$archive" | awk '{print $1}' > "$out/$archive.sha256"
 
 echo "==> Tagging $version"
 git tag "$version"
@@ -62,11 +71,20 @@ git push origin "$version"
 
 echo "==> Publishing"
 gh release create "$version" \
-  --title "cronyxc $version" \
-  --notes "Download the binary for your platform, unpack it, and put \`cronyxc\` on your \`\$PATH\`.
+  --title "cronyx $version" \
+  --notes "Unpack it and put \`bin/cx\` on your \`\$PATH\`, keeping \`lib/cronyx/stdlib\`
+beside it — that is where \`import \"std/…\"\` resolves to.
 
-Run a program with \`cronyxc path/to/file.cx\`. Imports resolve relative to the
-file that writes them, so the compiler needs nothing else installed." \
+    cx new hello
+    cd hello
+    cx run" \
   "$out/$archive" "$out/$archive.sha256"
 
 echo "==> $version published"
+
+# What the Homebrew formula needs, so cutting a release hands it over rather
+# than leaving someone to compute it.
+echo
+echo "For brendancron/homebrew-cronyx, $target:"
+echo "  url \"https://github.com/brendancron/CronyxLang/releases/download/$version/$archive\""
+echo "  sha256 \"$(cat "$out/$archive.sha256")\""
