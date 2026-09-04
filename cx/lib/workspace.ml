@@ -4,11 +4,14 @@
 open Bootstrap
 
 let dependency_roots (m : Manifest.t) =
-  List.map
+  List.filter_map
     (fun (d : Manifest.dependency) ->
       match d.Manifest.source with
       | Manifest.Path path ->
-        d.Manifest.name, Loader.from_source (Filename.concat m.Manifest.root path))
+        Some (d.Manifest.name, Loader.from_source (Filename.concat m.Manifest.root path))
+      (* Where a registry dependency was unpacked is the resolver's answer, and
+         this is the path that has none. *)
+      | Manifest.Registry _ -> None)
     m.Manifest.dependencies
 
 let roots_for entry =

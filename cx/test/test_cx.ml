@@ -4,7 +4,7 @@
 
 open Bootstrap
 
-let accepted = [ "minimal"; "deps"; "comments"; "dotted" ]
+let accepted = [ "minimal"; "deps"; "comments"; "dotted"; "registry_dep" ]
 
 let rejected =
   [ "unknown_top_key"
@@ -15,7 +15,6 @@ let rejected =
   ; "leading_zero"
   ; "version_not_string"
   ; "bad_name"
-  ; "registry_dep"
   ; "dep_unknown_key"
   ; "dep_missing_path"
   ; "duplicate_key"
@@ -62,7 +61,12 @@ let summary (m : Cx.Manifest.t) =
      @ List.map
          (fun (d : Cx.Manifest.dependency) ->
            match d.Cx.Manifest.source with
-           | Cx.Manifest.Path path -> Printf.sprintf "dep %s = path %s" d.Cx.Manifest.name path)
+           | Cx.Manifest.Path path -> Printf.sprintf "dep %s = path %s" d.Cx.Manifest.name path
+           | Cx.Manifest.Registry requirement ->
+             Printf.sprintf
+               "dep %s = registry %s"
+               d.Cx.Manifest.name
+               (Cx.Requirement.render requirement))
          m.Cx.Manifest.dependencies)
 
 (* A diagnostic about a file other than the entry renders that file's path, and
@@ -505,6 +509,99 @@ let lockfile_cases dir =
       check "lock/byte-identical when written again" (String.equal first (read_file lock)))
   && check "lock/holds under --locked" (build ~mode:locked ())
 
+(* The whole circle: a package published into a registry, then resolved,
+   fetched, verified and built by one that has never seen it. The registry is a
+   directory rather than a server, so what is exercised here is the client --
+   the index, the checksum, the cache and the yank rules -- and not the
+   transport. *)
+let registry_cases root =
+  let dir = Filename.concat root (Filename.concat "cx" (Filename.concat "test" "registry")) in
+  let temp = Filename.get_temp_dir_name () in
+  let registry = Filename.concat temp "cx-test-registry" in
+  let cache = Filename.concat (Filename.concat temp "cx-test-home") "registry" in
+  let greet = Filename.concat dir "greet" in
+  let app = Filename.concat dir "app" in
+  let later = Filename.concat temp "cx-test-greet-1.1.0" in
+  remove registry;
+  remove cache;
+  remove later;
+  clean dir;
+  Unix.putenv "CRONYX_REGISTRY" registry;
+  let lock = Filename.concat app Cx.Lockfile.file_name in
+  if Sys.file_exists lock then Sys.remove lock;
+  let check what ok =
+    if ok then Printf.printf "ok   %s\n" what else Printf.printf "FAIL %s\n" what;
+    ok
+  in
+  let version_of name =
+    match Cx.Lockfile.read app with
+    | None -> None
+    | Some text -> List.assoc_opt name (Cx.Lockfile.pins text)
+  in
+  (* The same package at a later version, so that a yank has something to fall
+     back to. *)
+  Cx.Home.ensure later;
+  Cx.Archive.into_directory later (Cx.Archive.of_directory greet);
+  write
+    (Filename.concat later Cx.Manifest.file_name)
+    "[package]\nname    = \"greet\"\nversion = \"1.1.0\"\ncronyx  = \"0.1.0\"\n";
+  let published = Cx.Publish.publish greet in
+  let ok =
+    check "registry/publish" (Result.is_ok published)
+    && check "registry/publish is once only" (Result.is_error (Cx.Publish.publish greet))
+    && check
+         "registry/publishing a path dependency fails"
+         (Result.is_error (Cx.Publish.publish (Filename.concat dir "pathdep")))
+    && check "registry/publish a later version" (Result.is_ok (Cx.Publish.publish later))
+    && (match built app with
+        | Ok output ->
+          check
+            "registry/resolves, fetches, verifies and builds"
+            (String.equal
+               (normalize output)
+               (normalize (read_file (Filename.concat app "expected.txt"))))
+          && check
+               "registry/takes the newest satisfying version"
+               (Option.equal Cx.Version.equal (version_of "greet") (Result.to_option (Cx.Version.of_string "1.1.0")))
+        | Error _ -> check "registry/resolves, fetches, verifies and builds" false)
+    (* Yanked after this build already chose it: the lockfile keeps it, because
+       one disclosure breaking every downstream build at once is not what a
+       disclosure is for. *)
+    && (let index = Cx.Registry_source.release_path registry "greet" "1.1.0" in
+        write
+          index
+          (String.concat
+             "\n"
+             (String.split_on_char '\n' (read_file index)
+              |> List.map (fun line ->
+                if String.length line >= 6 && String.equal (String.sub line 0 6) "yanked"
+                then "yanked = true"
+                else line)));
+        Result.is_ok (built app)
+        && check
+             "registry/a yank leaves a pinned version alone"
+             (Option.equal
+                Cx.Version.equal
+                (version_of "greet")
+                (Result.to_option (Cx.Version.of_string "1.1.0"))))
+    (* Resolved afresh, the yanked one is skipped. *)
+    && (Sys.remove lock;
+        Result.is_ok (built app)
+        && check
+             "registry/a yank is skipped by a new resolution"
+             (Option.equal
+                Cx.Version.equal
+                (version_of "greet")
+                (Result.to_option (Cx.Version.of_string "1.0.0"))))
+    (* The archive the registry serves is not the archive it promised. *)
+    && (remove cache;
+        let archive = Cx.Registry_source.archive_path registry "greet" "1.0.0" in
+        write archive (read_file archive ^ "tampered");
+        check "registry/a bad checksum stops the build" (Result.is_error (built app)))
+  in
+  Unix.putenv "CRONYX_REGISTRY" "";
+  ok
+
 let () =
   (* An empty toolchain directory, so a diagnostic that names what this machine
      has says the same thing on every machine. *)
@@ -525,7 +622,8 @@ let () =
       @ List.map (bad_package_case packages_dir) bad_packages
       @ List.map run_preamble preambles
       @ List.map run_dispatch dispatches
-      @ [ lockfile_cases packages_dir
+      @ [ registry_cases root
+        ; lockfile_cases packages_dir
         ; cache_unchanged packages_dir
         ; cache_meta_read packages_dir
         ; cache_compiler_version packages_dir

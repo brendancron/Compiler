@@ -5,6 +5,7 @@ let usage =
   \  new <name>      create a package skeleton\n\
   \  build           compile the package here, and its dependencies\n\
   \  toolchain …     install <version> <binary>, or list\n\
+  \  publish         upload the package here to a registry\n\
   \  run [file.cx]   compile and execute a program, or the package here\n\n\
    options for `build` and `run`:\n\
   \  --locked        fail if the lockfile would change\n\
@@ -136,6 +137,13 @@ let dispatch () =
      | Cx.Dispatch.Missing version -> Driver.die (Cx.Dispatch.unavailable version)
      | Cx.Dispatch.Mislabelled version -> Driver.die (Cx.Dispatch.mislabelled version))
 
+let publish () =
+  let root = package_root () in
+  match Cx.Publish.publish root with
+  | Error errors -> report root errors
+  | Ok (name, version, checksum) ->
+    Printf.printf "Published %s %s (%s).\n" name version checksum
+
 let () =
   dispatch ();
   match List.tl (Array.to_list Sys.argv) with
@@ -146,6 +154,7 @@ let () =
   | "new" :: args -> new_package args
   | "build" :: args -> build args
   | "toolchain" :: args -> toolchain args
+  | "publish" :: _ -> publish ()
   | "run" :: args ->
     (match parse_run args with
      (* No file named: the package here, through its artifacts. *)

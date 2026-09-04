@@ -120,6 +120,13 @@ Scanner → Parser → Loader → Metaprocess → Desugar → Value monomorphize
 
 ### Key distinctions
 
+**A registry is a root, not a protocol.** `CRONYX_REGISTRY` points at an index
+of releases and a store of archives; it is a directory today and a URL when
+there is a server. `cx publish` writes both, immutably. The client — checksum
+verification before anything is unpacked, the shared cache under
+`~/.cronyx/registry`, and yanks that skip new resolutions but leave a pinned
+lockfile alone — is the same either way.
+
 **Dispatch is a mode of `cx`, not a shim.** On startup `cx` finds the package
 it was invoked in, reads the toolchain it requires with `Preamble` — a reader
 for one frozen key, so a manifest written for a newer compiler is answered with

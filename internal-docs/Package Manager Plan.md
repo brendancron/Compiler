@@ -133,15 +133,25 @@ A build runs from the package root, so every path an artifact carries is relativ
 
 ## 7. The registry
 
-Sparse HTTP index, tarball fetch, checksum verification, `cx publish`. Immutability, yank semantics, and the publishing rules: a `path` dep needs a `version`, tarball contents are declared by `include` / `exclude`, a git dependency locks a commit and a tree hash.
+**A directory, not a server.** A registry is reached through a root: an index saying which versions exist and what each requires, and a store holding the archives. That root is a directory today and a URL when there is something to talk to. Standing up a server is deployment rather than language work, and everything that makes a registry trustworthy — the index, the checksum, the cache, immutability, yanks — is on the client and is real either way. `CRONYX_REGISTRY` points at it.
+
+The archive is ours rather than a tarball, for the same reason and only until there is a transport: entries sorted, no timestamps, no modes, so two packings of one tree are the same bytes and a checksum means something.
 
 **Done when**
 
-- A published package resolves, downloads, verifies, and builds on a machine that has never seen it.
-- Re-publishing an existing version fails.
-- A yanked version still resolves for a lockfile that already selected it.
-- A tarball whose checksum does not match the lockfile is an error before anything is compiled.
-- Publishing a package with a bare `path` dep fails.
+- A published package resolves, downloads, verifies, and builds on a machine that has never seen it. *(`registry/resolves, fetches, verifies and builds`; `registry/takes the newest satisfying version` pins that `greet = "1.0"` chose 1.1.0 over 1.0.0.)*
+- Re-publishing an existing version fails. *(`registry/publish is once only`.)*
+- A yanked version still resolves for a lockfile that already selected it. *(`registry/a yank leaves a pinned version alone`, and `…is skipped by a new resolution` for the other half.)*
+- A tarball whose checksum does not match the lockfile is an error before anything is compiled. *(`registry/a bad checksum stops the build`.)*
+- Publishing a package with a bare `path` dep fails. *(`registry/publishing a path dependency fails`.)*
+
+**Todo, left by this milestone**
+
+- **No transport.** `Registry_source.root` returns a directory. An HTTP client, a sparse index over the same files, and `PUT /api/v1/crates/new` replace it without the client above changing.
+- **Still not PubGrub.** Resolution now has candidates to choose between, and it chooses: the newest version satisfying every requirement anyone made of that name, re-choosing when a later requirement rules out an earlier choice. It reports a conflict with every requirement and who made it, which is the diagnostic PubGrub was wanted for; what it does not do is derive the incompatibility that explains *why* no version can work. That derivation is the upgrade, and it is worth making when a real graph produces a conflict this cannot explain.
+- **No `cx add` or `cx update`.** Both are small now that resolution takes requirements: `add` writes one into the manifest and re-resolves, `update` moves a pin.
+- **No `include` / `exclude` at pack time.** `cx publish` packs the directory minus `target/`; the manifest keys are specified and not read.
+- **No `yank` subcommand.** The index field is read and honoured; setting it is a registry operation with no client for it yet.
 
 ## What is not in the plan
 

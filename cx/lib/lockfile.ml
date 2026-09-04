@@ -23,7 +23,12 @@ let render (r : Resolution.t) =
       Buffer.add_string
         buffer
         (Printf.sprintf "version = \"%s\"\n" (Version.to_string p.Resolution.version));
-      Buffer.add_string buffer (Printf.sprintf "source = \"path+%s\"\n" p.Resolution.source);
+      (match p.Resolution.source with
+       | Resolution.Path path ->
+         Buffer.add_string buffer (Printf.sprintf "source = \"path+%s\"\n" path)
+       | Resolution.From_registry checksum ->
+         Buffer.add_string buffer "source = \"registry\"\n";
+         Buffer.add_string buffer (Printf.sprintf "checksum = \"%s\"\n" checksum));
       Buffer.add_string
         buffer
         (Printf.sprintf
@@ -38,6 +43,39 @@ let read root =
   match In_channel.with_open_bin (path root) In_channel.input_all with
   | text -> Some text
   | exception Sys_error _ -> None
+
+(* What the lockfile already selected, read with a scanner of its own rather
+   than through the manifest parser: this is a generated file with three keys
+   that matter, and keeping the TOML subset small is worth more than reusing
+   it. Yank semantics need this -- a version yanked since is still the version
+   this build was pinned to. *)
+let pins text =
+  let value line key =
+    let key = key ^ " = \"" in
+    let line = String.trim line in
+    if String.length line > String.length key
+       && String.equal (String.sub line 0 (String.length key)) key
+    then (
+      let rest = String.sub line (String.length key) (String.length line - String.length key) in
+      match String.index_opt rest '"' with
+      | Some i -> Some (String.sub rest 0 i)
+      | None -> None)
+    else None
+  in
+  let rec scan name acc = function
+    | [] -> List.rev acc
+    | line :: rest ->
+      (match value line "name" with
+       | Some found -> scan (Some found) acc rest
+       | None ->
+         (match name, value line "version" with
+          | Some name, Some version ->
+            (match Version.of_string version with
+             | Ok version -> scan None ((name, version) :: acc) rest
+             | Error _ -> scan None acc rest)
+          | _ -> scan name acc rest))
+  in
+  scan None [] (String.split_on_char '\n' text)
 
 let write root text =
   Out_channel.with_open_bin (path root) (fun out -> Out_channel.output_string out text)

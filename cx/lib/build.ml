@@ -52,7 +52,12 @@ let unrestricted = { locked = false; offline = false }
 
 (* Resolution, and the lockfile it either writes or is held to. *)
 let lock ~mode root =
-  match Resolution.resolve root with
+  let pinned =
+    match Lockfile.read root with
+    | Some text -> Lockfile.pins text
+    | None -> []
+  in
+  match Resolution.resolve ~pinned root with
   | Error errors -> Error errors
   | Ok resolution ->
     let rendered = Lockfile.render resolution in
@@ -78,7 +83,11 @@ let lock ~mode root =
 (* [compiled] names the packages this build actually ran the compiler over, so
    that "nothing to do" is something a caller can see rather than infer from a
    clock. *)
-let rec compile ~out ~built ~compiled root : (Artifact.t list, Diagnostic.error list) result =
+(* Where a registry dependency was unpacked. Resolution decided the version and
+   verified the archive; this is only the directory it landed in. *)
+let rec compile ~out ~built ~compiled ~located root
+  : (Artifact.t list, Diagnostic.error list) result
+  =
   let ( let* ) = Result.bind in
   let* manifest = manifest_of root in
   match Hashtbl.find_opt built manifest.Manifest.name with
@@ -90,8 +99,22 @@ let rec compile ~out ~built ~compiled root : (Artifact.t list, Diagnostic.error 
           let* acc = acc in
           match d.Manifest.source with
           | Manifest.Path path ->
-            let* transitive = compile ~out ~built ~compiled (Filename.concat root path) in
-            Ok (acc @ transitive))
+            let* transitive =
+              compile ~out ~built ~compiled ~located (Filename.concat root path)
+            in
+            Ok (acc @ transitive)
+          | Manifest.Registry _ ->
+            (match located d.Manifest.name with
+             | None ->
+               Error
+                 [ Diagnostic.at
+                     Diagnostic.Manifest
+                     d.Manifest.span
+                     (Printf.sprintf "'%s' was not resolved." d.Manifest.name)
+                 ]
+             | Some dir ->
+               let* transitive = compile ~out ~built ~compiled ~located dir in
+               Ok (acc @ transitive)))
         (Ok [])
         manifest.Manifest.dependencies
     in
@@ -101,12 +124,12 @@ let rec compile ~out ~built ~compiled root : (Artifact.t list, Diagnostic.error 
     let deps =
       List.map
         (fun (d : Manifest.dependency) ->
-          match d.Manifest.source with
-          | Manifest.Path path ->
-            ( d.Manifest.name
-            , { Loader.dep_root = Filename.concat root path
-              ; compiled = artifact_for d.Manifest.name
-              } ))
+          let dep_root =
+            match d.Manifest.source with
+            | Manifest.Path path -> Filename.concat root path
+            | Manifest.Registry _ -> Option.value (located d.Manifest.name) ~default:root
+          in
+          d.Manifest.name, { Loader.dep_root; compiled = artifact_for d.Manifest.name })
         manifest.Manifest.dependencies
     in
     let roots = { Loader.package = root; std = Toolchain.stdlib (); deps } in
@@ -195,6 +218,38 @@ let rec compile ~out ~built ~compiled root : (Artifact.t list, Diagnostic.error 
 (* Built from the package root, so every path an artifact carries is relative to
    it. Two copies of one tree then compile to the same bytes, which is what
    makes an artifact a function of its inputs rather than of its address. *)
+let materialize (resolution : Resolution.t) =
+  let ( let* ) = Result.bind in
+  let* pairs =
+    List.fold_left
+      (fun acc (p : Resolution.entry) ->
+        let* acc = acc in
+        match p.Resolution.source with
+        | Resolution.Path _ -> Ok acc
+        | Resolution.From_registry checksum ->
+          (match Registry_source.root () with
+           | None ->
+             Error
+               [ Diagnostic.at
+                   Diagnostic.Manifest
+                   Source_map.Span.nowhere
+                   "No registry is configured. Set CRONYX_REGISTRY."
+               ]
+           | Some registry ->
+             let release =
+               { Registry_source.version = p.Resolution.version
+               ; checksum
+               ; yanked = false
+               ; requirements = []
+               }
+             in
+             let* dir = Registry_source.fetch registry p.Resolution.name release in
+             Ok ((p.Resolution.name, dir) :: acc)))
+      (Ok [])
+      resolution.Resolution.packages
+  in
+  Ok (fun name -> List.assoc_opt name pairs)
+
 let package ?(mode = unrestricted) ~out root =
   let compiled = ref [] in
   let here = Sys.getcwd () in
@@ -206,10 +261,15 @@ let package ?(mode = unrestricted) ~out root =
          and a build that disagreed with it would be building something else. *)
       match lock ~mode "." with
       | Error errors -> Error errors
-      | Ok _ ->
-        (match compile ~out ~built:(Hashtbl.create 8) ~compiled "." with
+      | Ok resolution ->
+        (* Fetched and verified before anything is compiled, so a bad archive is
+           an error about the archive rather than about the code in it. *)
+        (match materialize resolution with
          | Error errors -> Error errors
-         | Ok artifacts -> Ok (artifacts, List.rev !compiled)))
+         | Ok located ->
+           (match compile ~out ~built:(Hashtbl.create 8) ~compiled ~located "." with
+            | Error errors -> Error errors
+            | Ok artifacts -> Ok (artifacts, List.rev !compiled))))
 
 (* Each package embeds whatever of the standard library it imported, since the
    library is not itself compiled to an artifact yet. Two of them embedding the

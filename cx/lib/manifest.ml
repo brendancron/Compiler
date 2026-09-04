@@ -5,7 +5,9 @@
 
 open Bootstrap
 
-type source = Path of string
+type source =
+  | Path of string
+  | Registry of Requirement.t
 
 type dependency =
   { name : string
@@ -74,9 +76,14 @@ let package_name span name =
   then fail span "'%s' is not a package name: letters, digits, '-' and '_' only." name
   else name
 
-(* A dependency is a table today, so that the source is named rather than
-   guessed. A bare `http = "1.4"` is a registry requirement, and there is no
-   registry yet to resolve it against. *)
+let requirement_of (entry : Toml.entry) written =
+  match Requirement.of_string written with
+  | Ok requirement -> requirement
+  | Error message -> fail entry.Toml.node.Toml.span "%s" message
+
+(* `http = "1.4"` is a registry requirement and `{ path = … }` is a directory.
+   A table naming both is how a package depends on a local checkout while still
+   publishing a version, which `cx publish` requires. *)
 let dependency (entry : Toml.entry) =
   let span = entry.Toml.node.Toml.span in
   let name = package_name entry.Toml.key_span entry.Toml.key in
@@ -87,14 +94,17 @@ let dependency (entry : Toml.entry) =
       "'std' is the standard library, which ships with the toolchain. A dependency may not take the name.";
   match entry.Toml.node.Toml.value with
   | Toml.Table fields ->
-    reject_unknown ~what:(Printf.sprintf "Dependency '%s'" name) ~known:[ "path" ] fields;
-    let path = required fields "path" span (Printf.sprintf "Dependency '%s'" name) in
-    { name; source = Path (as_string path); span }
-  | Toml.String _ ->
-    fail
-      span
-      "'%s' names a registry dependency, and there is no registry yet. Use { path = \"…\" }."
-      name
+    reject_unknown
+      ~what:(Printf.sprintf "Dependency '%s'" name)
+      ~known:[ "path"; "version" ]
+      fields;
+    (match Toml.find fields "path", Toml.find fields "version" with
+     | Some path, _ -> { name; source = Path (as_string path); span }
+     | None, Some version ->
+       { name; source = Registry (requirement_of version (as_string version)); span }
+     | None, None ->
+       fail span "Dependency '%s' needs a 'path' or a 'version'." name)
+  | Toml.String written -> { name; source = Registry (requirement_of entry written); span }
   | other -> fail span "Dependency '%s' must be a table, not %s." name (Toml.kind other)
 
 let of_file file =

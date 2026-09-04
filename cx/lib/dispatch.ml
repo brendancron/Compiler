@@ -41,7 +41,10 @@ let graph_floor root =
         List.iter
           (fun (d : Manifest.dependency) ->
             match d.Manifest.source with
-            | Manifest.Path path -> walk (Filename.concat root path))
+            | Manifest.Path path -> walk (Filename.concat root path)
+            (* Its floor is in the index, which the resolver reads and this
+               deliberately does not: dispatch is the frozen part. *)
+            | Manifest.Registry _ -> ())
           manifest.Manifest.dependencies)
   in
   walk root;

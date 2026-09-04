@@ -1,1 +1,1 @@
-[7:8] Dependency 'http' needs a 'path' key.
+[7:8] Dependency 'http' needs a 'path' or a 'version'.
