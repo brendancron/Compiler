@@ -108,7 +108,7 @@ let frame ~palette ~entry (e : Diagnostic.error) =
   rule "└─";
   Buffer.contents buf
 
-let colour_wanted channel =
+let color_wanted channel =
   match Sys.getenv_opt "NO_COLOR" with
   | Some value when not (String.equal value "") -> false
   | _ -> Out_channel.isatty channel
@@ -116,7 +116,7 @@ let colour_wanted channel =
 let error ~entry e = frame ~palette:plain ~entry e
 
 let emit ~entry errors =
-  let palette = if colour_wanted stderr then ansi else plain in
+  let palette = if color_wanted stderr then ansi else plain in
   List.iter (fun e -> prerr_string (frame ~palette ~entry e)) errors;
   match errors with
   | [] | [ _ ] -> ()

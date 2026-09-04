@@ -4,7 +4,7 @@ type state =
   { registry : Registry.t
   ; generic : (string, Ast.typed_stmt) Hashtbl.t
   ; copies : (string * Types.ty, string) Hashtbl.t
-  ; (* So a copy asking for another copy of its own template is recognised. *)
+  ; (* So a copy asking for another copy of its own template is recognized. *)
     origin : (string, string) Hashtbl.t
   ; mutable emitted : Ast.typed_stmt list
   ; mutable changed : bool

@@ -22,7 +22,7 @@ Every top-level declaration is exported. Restricting that is [deferred](#five-de
 
 ## Circular imports work
 
-`tests/core/modules/circular` is two files that import each other, and `peer.run()` calls `main.hello()`. This is not a diagnostic to produce — it is behaviour to support.
+`tests/core/modules/circular` is two files that import each other, and `peer.run()` calls `main.hello()`. This is not a diagnostic to produce — it is behavior to support.
 
 That single requirement decides the compilation model.
 

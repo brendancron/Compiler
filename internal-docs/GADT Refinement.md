@@ -207,7 +207,7 @@ so nothing is lost.
 ### C — skolemise and carry equations
 
 The arm's parameters become rigid constants, the refinement becomes an equation
-set, and `unify` normalises against it. Sound and complete. This is what OCaml
+set, and `unify` normalizes against it. Sound and complete. This is what OCaml
 does.
 
 **A deliberate exception to Koka-as-tiebreaker**, rather than an oversight:

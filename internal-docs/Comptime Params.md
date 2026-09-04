@@ -119,7 +119,7 @@ One copy per distinct argument set, so the compiler needs a canonical key for co
 
 **Collection literals.** Same shape: a literal in a generic body has an element type that is only known per instantiation.
 
-**Reflection.** With types as comptime values, `typeof(x)` returning a `type` is more useful than returning a `string`, since the result can be passed straight into a `<>` list. The string form becomes `name_of(typeof(x))`. Worth deciding before fixtures pin the current string behaviour.
+**Reflection.** With types as comptime values, `typeof(x)` returning a `type` is more useful than returning a `string`, since the result can be passed straight into a `<>` list. The string form becomes `name_of(typeof(x))`. Worth deciding before fixtures pin the current string behavior.
 
 ## `type` as a value
 

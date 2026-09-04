@@ -71,7 +71,7 @@ Columns are counted in bytes from the start of the line, which is what
 
 ## The frame
 
-`lib/render.ml` draws it, and holds the only knowledge of colour. Two rules:
+`lib/render.ml` draws it, and holds the only knowledge of color. Two rules:
 
 - **Nothing structural is conditional.** The rows between the rules vary; the
   rules do not. There is no field whose absence removes a line.
@@ -92,7 +92,7 @@ An emoji built from a ZWJ sequence — a family, a flag, a profession — is sti
 counted per component, so an underline after one sits left of its target.
 Terminals do not agree on those either, so there is no width to match.
 
-Colour is ANSI when stderr is a terminal and `NO_COLOR` is unset, and the same
+Color is ANSI when stderr is a terminal and `NO_COLOR` is unset, and the same
 code path otherwise with an empty escape for every entry, so the two cannot
 drift.
 
