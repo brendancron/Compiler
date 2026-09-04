@@ -104,16 +104,22 @@ let run_package ~mode dumps =
 
 let toolchain = function
   | [ "list" ] ->
-    (match Cx.Toolchain_store.list () with
-     | [] -> print_endline "No toolchains installed."
-     | versions ->
-       List.iter
-         (fun version ->
-           Printf.printf
-             "%s%s\n"
-             version
-             (if String.equal version Release.version then " (running)" else ""))
-         versions)
+    (* The one running is a toolchain too, whether or not it was installed
+       under ~/.cronyx: a `cx` from a package manager is the whole thing, not a
+       launcher for it, so reporting nothing installed would be a lie. *)
+    let installed = Cx.Toolchain_store.list () in
+    let versions =
+      if List.exists (String.equal Release.version) installed
+      then installed
+      else Release.version :: installed
+    in
+    List.iter
+      (fun version ->
+        Printf.printf
+          "%s%s\n"
+          version
+          (if String.equal version Release.version then " (running)" else ""))
+      (List.sort compare versions)
   | [ "install"; version; binary ] ->
     (match Cx.Toolchain_store.install ~version ~binary with
      | Error message -> Driver.die message
