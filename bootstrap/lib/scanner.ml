@@ -223,6 +223,7 @@ let scan_token s =
     then line_comment s
     else add_token s (if matches s '=' then Token.Slash_equal else Token.Slash)
   | '%' -> add_token s (if matches s '=' then Token.Percent_equal else Token.Percent)
+  | '@' -> add_token s Token.At
   (* A single `&` or `|` is not an operator at all. *)
   | '&' when matches s '&' -> add_token s Token.Amp_amp
   | '|' when matches s '|' -> add_token s Token.Pipe_pipe

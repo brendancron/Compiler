@@ -19,6 +19,7 @@ type token_type =
   | Colon
   | Colon_colon
   | Dot
+  | At
     (* One or two character tokens. *)
   | Bang
   | Bang_equal
@@ -96,6 +97,7 @@ let token_type_to_string = function
   | Semicolon -> "SEMICOLON"
   | Slash -> "SLASH"
   | Percent -> "PERCENT"
+  | At -> "AT"
   | Dot_dot_dot -> "DOT_DOT_DOT"
   | Amp_amp -> "AMP_AMP"
   | Pipe_pipe -> "PIPE_PIPE"

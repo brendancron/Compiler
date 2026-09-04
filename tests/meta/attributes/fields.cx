@@ -1,0 +1,58 @@
+type Person {
+    @rename("full name")
+    name: string,
+
+    @skip
+    password: string,
+
+    age: int,
+}
+
+trait Show {
+    fn show(self): string;
+}
+
+meta fn derive(shape: TypeShape) for Show {
+    match shape {
+        TypeShape::Product(t, fields) => {
+            var tname = str(t);
+            var text = code(tname);
+            for (f in fields) {
+                var field = f.name;
+                var label = str(f.name);
+                var hidden = false;
+                for (a in f.attrs) {
+                    var attr = str(a.name);
+                    if (attr == "skip") {
+                        hidden = true;
+                    }
+                    if (attr == "rename") {
+                        for (arg in a.args) {
+                            match arg {
+                                AttrArg::Str(v) => { label = v; }
+                                AttrArg::Int(v) => {}
+                                AttrArg::Float(v) => {}
+                                AttrArg::Bool(v) => {}
+                            }
+                        }
+                    }
+                }
+                if (!hidden) {
+                    var head = code(label);
+                    text = code(text + " " + head + "=" + str(self.field));
+                }
+            }
+            gen impl Show for t {
+                fn show(self): string { return text; }
+            }
+        }
+        TypeShape::Sum(t, variants) => {}
+        TypeShape::Scalar => {}
+        TypeShape::Other => {}
+    }
+}
+
+derive Show for Person;
+
+var p = new Person { name: "ada", password: "hunter2", age: 36 };
+print(p.show());

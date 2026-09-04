@@ -22,4 +22,5 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 | [Package Manager Plan.md](Package%20Manager%20Plan.md)       | The order `cx` gets built in, and what "done" means at each step      |
 | [Metaprocessing.md](Metaprocessing.md)                       | `meta` and `gen`, and compilation calling itself                      |
 | [Reify.md](Reify.md)                                         | Turning a compile-time value back into syntax                         |
+| [Attributes.md](Attributes.md)                               | `@name(…)` on a field or a variant, and why it cannot reach runtime   |
 | [GADT Refinement.md](GADT%20Refinement.md)                   | Refining a type parameter in a match arm, and the choice of how       |

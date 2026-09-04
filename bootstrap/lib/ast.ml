@@ -171,6 +171,28 @@ type 'e nominal =
   | `New_variant of string * string * 'e payload
   ]
 
+(* Metadata a deriver reads off a member, and nothing else in the language
+   looks at. It is inert everywhere: no pass changes behaviour on one, and
+   [cps_stmt_kind] does not include [type_defs], so nothing an attribute is
+   attached to survives into the program the interpreter runs. *)
+type attr_arg =
+  | A_str of string
+  | A_int of int
+  | A_float of float
+  | A_bool of bool
+
+type attr =
+  { a_name : string
+  ; a_args : attr_arg list
+  ; a_span : span
+  }
+
+type field =
+  { f_name : string
+  ; f_ty : type_expr
+  ; f_attrs : attr list
+  }
+
 (* [v_params] are the variant's own — `If<A>` holds an `A` the head does not
    mention. [v_result] is what makes it a GADT. *)
 type variant =
@@ -178,10 +200,11 @@ type variant =
   ; v_params : string list
   ; v_payload : type_expr payload
   ; v_result : type_expr option
+  ; v_attrs : attr list
   }
 
 type type_body =
-  | T_fields of (string * type_expr) list
+  | T_fields of field list
   | T_variants of variant list
 
 type type_defs = [ `Type_decl of string * string list * type_body ]

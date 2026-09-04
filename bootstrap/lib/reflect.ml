@@ -26,10 +26,43 @@ let array_at span elem items =
   node span (Types.array elem) (`Array_lit items)
 
 let name_at span text = node span Types.name (`Name text)
-let field_ty = Types.Named (Types.field_name, [], [ "name", Types.name ])
+let attr_arg_ty = Types.Sum (Types.attr_arg_name, [])
+
+let attr_ty =
+  Types.Named
+    (Types.attr_name, [], [ "args", Types.array attr_arg_ty; "name", Types.name ])
+
+let field_ty =
+  Types.Named
+    (Types.field_name, [], [ "attrs", Types.array attr_ty; "name", Types.name ])
 
 let variant_ty =
-  Types.Named (Types.variant_name, [], [ "arity", Types.Int; "name", Types.name ])
+  Types.Named
+    ( Types.variant_name
+    , []
+    , [ "arity", Types.Int; "attrs", Types.array attr_ty; "name", Types.name ] )
+
+let attrs_at span (list : Ast.attr list) =
+  let arg (a : Ast.attr_arg) =
+    let variant, payload =
+      match a with
+      | Ast.A_str text -> "Str", string_at span text
+      | Ast.A_int value -> "Int", node span Types.Int (`Int value)
+      | Ast.A_float value -> "Float", node span Types.Float (`Float value)
+      | Ast.A_bool value -> "Bool", node span Types.Bool (`Bool value)
+    in
+    node span attr_arg_ty (`Variant (variant, [ "0", payload ]))
+  in
+  let one (a : Ast.attr) =
+    record_at
+      span
+      Types.attr_name
+      [ "args", Types.array attr_arg_ty; "name", Types.name ]
+      [ "args", array_at span attr_arg_ty (List.map arg a.Ast.a_args)
+      ; "name", name_at span a.Ast.a_name
+      ]
+  in
+  array_at span attr_ty (List.map one list)
 
 let shape_ty = Types.Sum (Types.shape_name, [])
 
@@ -45,7 +78,13 @@ let shape_of span (ty : Types.ty) =
   | Types.Unit -> one "Scalar"
   | Types.Named (name, _, fields) when not (String.equal name Types.array_name) ->
     let each (label, _) =
-      record_at span Types.field_name [ "name", Types.name ] [ "name", name_at span label ]
+      record_at
+        span
+        Types.field_name
+        [ "attrs", Types.array attr_ty; "name", Types.name ]
+        [ "attrs", attrs_at span (Typecheck.attrs_of name label)
+        ; "name", name_at span label
+        ]
     in
     shape_at
       span
@@ -67,8 +106,11 @@ let shape_of span (ty : Types.ty) =
       record_at
         span
         Types.variant_name
-        [ "arity", Types.Int; "name", Types.name ]
-        [ "arity", node span Types.Int (`Int arity); "name", name_at span label ]
+        [ "arity", Types.Int; "attrs", Types.array attr_ty; "name", Types.name ]
+        [ "arity", node span Types.Int (`Int arity)
+        ; "attrs", attrs_at span (Typecheck.attrs_of name label)
+        ; "name", name_at span label
+        ]
     in
     shape_at
       span

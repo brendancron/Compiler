@@ -176,6 +176,8 @@ let reflection_name = "Type"
 let shape_name = "TypeShape"
 let field_name = "TypeField"
 let variant_name = "TypeVariant"
+let attr_name = "Attr"
+let attr_arg_name = "AttrArg"
 
 let reflection_fields = [ "name", Str; "shape", Sum (shape_name, []) ]
 

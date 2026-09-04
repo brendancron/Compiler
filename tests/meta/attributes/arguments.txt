@@ -1,0 +1,1 @@
+Config max=255 scale=0.5 required=true unit=ms

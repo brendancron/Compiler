@@ -7,8 +7,15 @@ let source =
 // fixed: renaming a field here changes what the compiler emits. The names are
 // long because the prelude is one namespace and a program is free to declare
 // its own Shape; they belong to a reflect module once the prelude is a file.
-type TypeField { name: Name }
-type TypeVariant { name: Name, arity: int }
+type AttrArg {
+    Str(string),
+    Int(int),
+    Float(float),
+    Bool(bool),
+}
+type Attr { name: Name, args: Array<AttrArg> }
+type TypeField { name: Name, attrs: Array<Attr> }
+type TypeVariant { name: Name, arity: int, attrs: Array<Attr> }
 type TypeShape {
     Scalar,
     Product(Name, Array<TypeField>),
