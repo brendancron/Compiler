@@ -1,4 +1,4 @@
 [package]
 name    = "greet"
 version = "0.1.0"
-cronyx  = "0.1.0"
+cronyx  = "0.0.1"

@@ -544,7 +544,7 @@ let registry_cases root =
   Cx.Archive.into_directory later (Cx.Archive.of_directory greet);
   write
     (Filename.concat later Cx.Manifest.file_name)
-    "[package]\nname    = \"greet\"\nversion = \"1.1.0\"\ncronyx  = \"0.1.0\"\n";
+    "[package]\nname    = \"greet\"\nversion = \"1.1.0\"\ncronyx  = \"0.0.1\"\n";
   let published = Cx.Publish.publish greet in
   let ok =
     check "registry/publish" (Result.is_ok published)
