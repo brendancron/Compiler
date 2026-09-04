@@ -1,8 +1,0 @@
-lib: [
-  "_build/install/default/lib/bootstrap/META"
-  "_build/install/default/lib/bootstrap/dune-package"
-  "_build/install/default/lib/bootstrap/opam"
-]
-bin: [
-  "_build/install/default/bin/bootstrap"
-]
