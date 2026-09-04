@@ -351,6 +351,7 @@ let error_cases =
   ; "tests/effects/errors/duplicate_operation"
   ; "tests/types/errors/local_type_escapes"
   ; "tests/types/inference/errors/unspecializable_names_the_caller"
+  ; "tests/core/modules/errors/outside_package/main"
   ]
 
 (* Accepted, then failing while running. Separate from [error_cases], which
@@ -394,7 +395,7 @@ let described path (e : Diagnostic.error) =
 let interpret path =
   let buf = Buffer.create 256 in
   let out = Buffer.add_string buf in
-  match Pipeline.compile ~out path with
+  match Pipeline.compile ~roots:(Driver.roots_for path) ~out path with
   | Error [] -> Error "the program does not compile"
   | Error (e :: _) -> Error (described path e)
   | Ok converted ->
@@ -437,7 +438,7 @@ let known_unsound : string list = []
 
 (* Every diagnostic the checker found, not only the first. *)
 let rejections path =
-  match Pipeline.compile ~out:(fun _ -> ()) path with
+  match Pipeline.compile ~roots:(Driver.roots_for path) ~out:(fun _ -> ()) path with
   | Ok _ -> Error "expected an error, but the program checked"
   | Error errors ->
     Ok

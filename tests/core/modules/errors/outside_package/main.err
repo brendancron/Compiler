@@ -1,0 +1,1 @@
+[1:1] '../helpers' reaches outside its package. A package is the files under one directory, and everything else arrives through a dependency name.

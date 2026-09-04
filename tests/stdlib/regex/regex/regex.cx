@@ -1,4 +1,4 @@
-import "../../../../stdlib/lang/Regex";
+import "std/lang/Regex";
 
 // ── test: literal ─────────────────────────────────────────────────────────────
 var lit = Regex.compile("abc");

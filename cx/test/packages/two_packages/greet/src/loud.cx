@@ -1,0 +1,3 @@
+fn shout(name: string): string {
+  return "HELLO, " + name + "!";
+}

@@ -65,7 +65,13 @@ let dump_front ~entry dumps file =
          print_endline "-- ast --";
          print_string (Printer.string_of_program program)))
 
-let execute ?(dumps = no_dumps) entry =
+(* A file run on its own is its own package: the directory holding it, plus the
+   standard library. *)
+let roots_for entry =
+  { Loader.package = Filename.dirname entry; std = Toolchain.stdlib (); deps = [] }
+
+let execute ?(dumps = no_dumps) ?roots entry =
+  let roots = match roots with Some roots -> roots | None -> roots_for entry in
   dump_front ~entry dumps (read_source entry);
   let on_code processed =
     if dumps.code
@@ -79,7 +85,7 @@ let execute ?(dumps = no_dumps) entry =
       print_endline "-- types --";
       print_string (Printer.string_of_typed_program typed))
   in
-  match Pipeline.compile ~on_code ~on_types ~out:print_string entry with
+  match Pipeline.compile ~on_code ~on_types ~roots ~out:print_string entry with
   | Error errors -> die_at ~entry errors
   | Ok converted ->
     (match Pipeline.run (Builtins.env ~out:print_string) converted with

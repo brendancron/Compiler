@@ -3,7 +3,7 @@ open Bootstrap
 let usage =
   "usage: cx <command> [options]\n\n\
   \  new <name>      create a package skeleton\n\
-  \  run <file.cx>   compile and execute a program\n\n\
+  \  run [file.cx]   compile and execute a program, or the package here\n\n\
    options for `run`:\n\
   \  --dump-source   echo the source before running\n\
   \  --dump-tokens   print the token stream\n\
@@ -38,8 +38,21 @@ let parse_run args =
       | _ -> set_path arg)
     args;
   match !path with
-  | None -> Driver.die ("run needs a file to run.\n" ^ usage)
-  | Some path -> path, !dumps
+  | None -> None, !dumps
+  | Some path -> Some path, !dumps
+
+(* With no file named, run the package the working directory sits in. *)
+let entry_for = function
+  | Some path -> path
+  | None ->
+    (match Cx.Manifest.find_root (Sys.getcwd ()) with
+     | None -> Driver.die ("run needs a file to run.\n" ^ usage)
+     | Some root ->
+       (match Cx.Workspace.entry_of root with
+        | Some entry -> entry
+        | None ->
+          Driver.die
+            (Printf.sprintf "'%s' has no src/main.cx or src/lib.cx to run." root)))
 
 let new_package = function
   | [ name ] ->
@@ -58,5 +71,10 @@ let () =
   | "new" :: args -> new_package args
   | "run" :: args ->
     let path, dumps = parse_run args in
-    Driver.execute ~dumps path
+    let entry = entry_for path in
+    (match Cx.Workspace.roots_for entry with
+     | Error errors ->
+       Render.emit ~entry errors;
+       exit 65
+     | Ok (roots, _) -> Driver.execute ~dumps ~roots entry)
   | command :: _ -> Driver.die ("unknown command: " ^ command ^ "\n" ^ usage)

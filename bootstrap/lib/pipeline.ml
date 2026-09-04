@@ -5,11 +5,11 @@
 let ( let* ) = Result.bind
 
 (* [on_code] sees the program once metaprocessing is done. *)
-let front ?(on_code = fun _ -> ()) ~out path
+let front ?(on_code = fun _ -> ()) ?roots ~out path
   : (Ast.program, Diagnostic.error list) result
   =
   let* loaded =
-    match Loader.program path with
+    match Loader.program ?roots path with
     | linked -> Ok linked
     | exception Loader.Failed e -> Diagnostic.one Diagnostic.Load e.Loader.span e.Loader.message
   in
@@ -21,10 +21,10 @@ let front ?(on_code = fun _ -> ()) ~out path
   on_code processed;
   Ok processed
 
-let compile ?on_code ?on_types ~out path
+let compile ?on_code ?on_types ?roots ~out path
   : (Ast.cps_stmt list, Diagnostic.error list) result
   =
-  let* processed = front ?on_code ~out path in
+  let* processed = front ?on_code ?roots ~out path in
   Compile.program ?on_types processed
 
 let run = Compile.run

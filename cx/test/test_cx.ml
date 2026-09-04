@@ -23,6 +23,12 @@ let rejected =
   ; "trailing_junk"
   ]
 
+(* Package fixtures live in cx/test/packages: a directory holding a manifest,
+   with an expected.txt of what it prints or an expected.err of the diagnostics
+   reading it produced. *)
+let packages = [ "two_packages/app"; "uses_std" ]
+let bad_packages = [ "reaches_out"; "claims_std" ]
+
 let repo_root () =
   let marker = Filename.concat "cx" (Filename.concat "test" "manifests") in
   let rec up dir =
@@ -71,11 +77,11 @@ let diagnostics path errors =
 let compare_case name ~expected ~actual =
   if String.equal (normalize expected) (normalize actual)
   then (
-    Printf.printf "ok   manifest/%s\n" name;
+    Printf.printf "ok   %s\n" name;
     true)
   else (
     Printf.printf
-      "FAIL manifest/%s\n  --- expected ---\n%s\n  --- actual ---\n%s\n"
+      "FAIL %s\n  --- expected ---\n%s\n  --- actual ---\n%s\n"
       name
       (normalize expected)
       (normalize actual);
@@ -88,7 +94,7 @@ let run_accepted dir name =
     Printf.printf "FAIL manifest/%s\n  %s\n" name (diagnostics path errors);
     false
   | Ok manifest ->
-    compare_case name ~expected:(read_file (Filename.concat dir (name ^ ".ok"))) ~actual:(summary manifest)
+    compare_case ("manifest/" ^ name) ~expected:(read_file (Filename.concat dir (name ^ ".ok"))) ~actual:(summary manifest)
 
 let run_rejected dir name =
   let path = Filename.concat dir (name ^ ".toml") in
@@ -98,7 +104,7 @@ let run_rejected dir name =
     false
   | Error errors ->
     compare_case
-      name
+      ("manifest/" ^ name)
       ~expected:(read_file (Filename.concat dir (name ^ ".err")))
       ~actual:(diagnostics path errors)
 
@@ -230,6 +236,97 @@ let run_ordering () =
   if !ok then Printf.printf "ok   pre-release ordering\n";
   !ok
 
+let interpret roots entry =
+  let buf = Buffer.create 256 in
+  let out = Buffer.add_string buf in
+  match Pipeline.compile ~roots ~out entry with
+  | Error errors -> Error errors
+  | Ok converted ->
+    (match Pipeline.run (Builtins.env ~out) converted with
+     | Ok () -> Ok (Buffer.contents buf)
+     | Error e -> Error [ e ])
+
+let package_case dir name =
+  let root = Filename.concat dir name in
+  let expected ext = Filename.concat root ("expected." ^ ext) in
+  let report actual =
+    compare_case ("package/" ^ name) ~expected:(read_file (expected "txt")) ~actual
+  in
+  match Cx.Workspace.roots_for root with
+  | Error errors ->
+    Printf.printf
+      "FAIL package/%s\n  %s\n"
+      name
+      (diagnostics root errors);
+    false
+  | Ok (roots, _) ->
+    (match Cx.Workspace.entry_of root with
+     | None ->
+       Printf.printf "FAIL package/%s\n  no src/main.cx or src/lib.cx\n" name;
+       false
+     | Some entry ->
+       (match interpret roots entry with
+        | Ok output -> report output
+        | Error errors ->
+          Printf.printf "FAIL package/%s\n  %s\n" name (diagnostics entry errors);
+          false))
+
+let bad_package_case dir name =
+  let root = Filename.concat dir name in
+  let expected = read_file (Filename.concat root "expected.err") in
+  let rejected path errors =
+    compare_case ("package/" ^ name) ~expected ~actual:(diagnostics path errors)
+  in
+  match Cx.Workspace.roots_for root with
+  | Error errors -> rejected (Filename.concat root Cx.Manifest.file_name) errors
+  | Ok (roots, _) ->
+    (match Cx.Workspace.entry_of root with
+     | None ->
+       Printf.printf "FAIL package/%s\n  no src/main.cx or src/lib.cx\n" name;
+       false
+     | Some entry ->
+       (match interpret roots entry with
+        | Error errors -> rejected entry errors
+        | Ok _ ->
+          Printf.printf "FAIL package/%s\n  expected a diagnostic, but it ran\n" name;
+          false))
+
+(* A package fixture no list names is a failure of its own, as with the
+   manifests. *)
+let unclaimed_packages dir =
+  let claimed = Hashtbl.create 8 in
+  List.iter (fun name -> Hashtbl.replace claimed name ()) (packages @ bad_packages);
+  let rec walk prefix =
+    let full = if String.equal prefix "" then dir else Filename.concat dir prefix in
+    Sys.readdir full
+    |> Array.to_list
+    |> List.sort String.compare
+    |> List.concat_map (fun entry ->
+      let name = if String.equal prefix "" then entry else Filename.concat prefix entry in
+      let path = Filename.concat dir name in
+      if not (Sys.is_directory path)
+      then []
+      else if Sys.file_exists (Filename.concat path Cx.Manifest.file_name)
+      then
+        if Sys.file_exists (Filename.concat path "expected.txt")
+           || Sys.file_exists (Filename.concat path "expected.err")
+        then if Hashtbl.mem claimed name then [] else [ name ]
+        else []
+      else walk name)
+  in
+  walk ""
+
+let run_package_partition dir =
+  match unclaimed_packages dir with
+  | [] ->
+    Printf.printf "ok   every package fixture is claimed by a list\n";
+    true
+  | missing ->
+    Printf.printf
+      "FAIL package fixtures no list names, so nothing runs them:\n%s\n"
+      (String.concat "\n" (List.map (fun name -> "  " ^ name) missing));
+    false
+
 let () =
   match repo_root () with
   | None ->
@@ -237,9 +334,14 @@ let () =
     exit 1
   | Some root ->
     let dir = Filename.concat root (Filename.concat "cx" (Filename.concat "test" "manifests")) in
+    let packages_dir =
+      Filename.concat root (Filename.concat "cx" (Filename.concat "test" "packages"))
+    in
     let results =
       (run_partition dir :: List.map (run_accepted dir) accepted)
       @ List.map (run_rejected dir) rejected
+      @ (run_package_partition packages_dir :: List.map (package_case packages_dir) packages)
+      @ List.map (bad_package_case packages_dir) bad_packages
       @ List.map run_requirement requirements
       @ List.map run_membership membership
       @ [ run_ordering () ]

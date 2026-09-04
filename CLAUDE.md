@@ -42,9 +42,10 @@ dune test cx
 ```
 
 `cx/test/manifests/` holds `.toml` fixtures paired with a `.ok` of what the
-tool read or a `.err` of the diagnostics it produced, and the same rule as
-`tests/` applies: a fixture no list in `cx/test/test_cx.ml` names is a failure
-of its own.
+tool read or a `.err` of the diagnostics it produced, and `cx/test/packages/`
+holds whole packages paired with an `expected.txt` or an `expected.err`. The
+same rule as `tests/` applies to both: a fixture no list in
+`cx/test/test_cx.ml` names is a failure of its own.
 
 **CLI flags**, each printing one stage and then running:
 - `--dump-source` — the source as the scanner received it
@@ -118,6 +119,13 @@ Scanner → Parser → Loader → Metaprocess → Desugar → Value monomorphize
 ```
 
 ### Key distinctions
+
+**An import never leaves its package.** `Loader` takes the roots it may
+reach — the package, the standard library, and each dependency by name — and
+an import resolving outside the root of the file that wrote it is an error.
+`import "std/…"` comes from the toolchain rather than the filesystem, and a
+dependency is reached by the name the manifest gave it, so `cx` decides what is
+reachable and the compiler only consumes that decision.
 
 **One AST, several stages of it.** `Ast` is parameterized by its annotation and
 by what a statement holds, so `desugared_stmt`, `typed_stmt`, `resolved_stmt`

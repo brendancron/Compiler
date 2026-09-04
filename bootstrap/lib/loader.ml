@@ -19,10 +19,17 @@ type unit_ =
 
 let namespace_of path = Filename.remove_extension (Filename.basename path)
 
-(* Relative to the file holding the import, and never to a root. *)
-let resolve_path ~from path =
-  let path = if Filename.check_suffix path ".cx" then path else path ^ ".cx" in
-  if Filename.is_relative path then Filename.concat (Filename.dirname from) path else path
+(* What a unit is allowed to reach. A package is a set of files under one
+   directory; anything outside it is named in the manifest and arrives here as
+   a root of its own, so that an import the resolver cannot see is impossible
+   rather than merely discouraged. *)
+type roots =
+  { package : string
+  ; std : string option
+  ; deps : (string * string) list
+  }
+
+let anywhere = { package = "/"; std = None; deps = [] }
 
 (* Textual: the visited set only has to agree with itself. *)
 let normalize path =
@@ -40,6 +47,73 @@ let normalize path =
   in
   (if absolute then "/" else "") ^ String.concat "/" parts
 
+let canonical path =
+  normalize (if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path)
+
+let within ~root path =
+  let root = canonical root and path = canonical path in
+  String.equal root "/"
+  || String.equal path root
+  || String.starts_with ~prefix:(root ^ "/") path
+
+(* The root a file belongs to, which is what its own imports are measured
+   against: a dependency's file may move within the dependency, not within
+   whoever imported it. *)
+let owner roots path =
+  let candidates =
+    (match roots.std with Some dir -> [ dir ] | None -> [])
+    @ List.map snd roots.deps
+    @ [ roots.package ]
+  in
+  match List.filter (fun root -> within ~root path) candidates with
+  | [] -> roots.package
+  | roots ->
+    List.fold_left
+      (fun best root -> if String.length root > String.length best then root else best)
+      (List.hd roots)
+      roots
+
+let with_extension path =
+  if Filename.check_suffix path ".cx" then path else path ^ ".cx"
+
+let first_segment path =
+  match String.index_opt path '/' with
+  | None -> path, ""
+  | Some i -> String.sub path 0 i, String.sub path (i + 1) (String.length path - i - 1)
+
+(* A package's own module, reached by name rather than by path. `http` is its
+   root module and `http/client` is a module beside it. *)
+let in_package root rest =
+  Filename.concat root (Filename.concat "src" (if String.equal rest "" then "lib" else rest))
+
+let resolve_import roots span ~from path =
+  let segment, rest = first_segment path in
+  match segment, List.assoc_opt segment roots.deps with
+  | "std", _ ->
+    (match roots.std with
+     | Some dir when not (String.equal rest "") -> with_extension (Filename.concat dir rest)
+     | Some _ -> fail span "'std' is the standard library; import a module inside it."
+     | None -> fail span "Cannot find the standard library.")
+  | _, Some root -> with_extension (in_package root rest)
+  | _, None ->
+    let resolved =
+      let path = with_extension path in
+      if Filename.is_relative path
+      then Filename.concat (Filename.dirname from) path
+      else path
+    in
+    let root = owner roots from in
+    (* Naming the root here would put an absolute path in a diagnostic, which
+       is the one thing Diagnostics.md says a span may not carry. *)
+    if not (within ~root resolved)
+    then
+      fail
+        span
+        "'%s' reaches outside its package. A package is the files under one directory, and \
+         everything else arrives through a dependency name."
+        path;
+    resolved
+
 let parse_unit span path =
   if not (Sys.file_exists path) then fail span "Cannot find module '%s'." path;
   match Source_map.File.load path with
@@ -55,12 +129,13 @@ let parse_unit span path =
         | Ok program -> program))
 
 (* Sorted, so the expansion does not depend on readdir order. *)
-let expand_wildcards ~from (program : Ast.program) =
+let expand_wildcards roots ~from (program : Ast.program) =
   List.concat_map
     (fun (s : Ast.stmt) ->
       match s.Ast.it with
       | `Import (Ast.Wildcard dir) ->
-        let base = Filename.concat (Filename.dirname from) dir in
+        let base = Filename.remove_extension (resolve_import roots s.Ast.span ~from (dir ^ "/x")) in
+        let base = Filename.dirname base in
         if not (Sys.file_exists base && Sys.is_directory base)
         then fail s.Ast.span "Cannot find directory '%s'." dir;
         Sys.readdir base
@@ -87,22 +162,30 @@ let path_of = function
     path
 
 (* A unit already seen is skipped rather than rejected: a cycle is legal. *)
-let load entry =
+let load roots entry =
   let visited = Hashtbl.create 8 in
   let units = ref [] in
-  let rec walk span path =
+  (* The namespace comes from the import as written, not from the file it
+     resolves to: a dependency's root module is `src/lib.cx` and is reached as
+     the package's own name. *)
+  let rec walk span ~namespace path =
     let path = normalize path in
     if not (Hashtbl.mem visited path)
     then (
       Hashtbl.replace visited path ();
-      let program = expand_wildcards ~from:path (parse_unit span path) in
-      units := { path; namespace = namespace_of path; program } :: !units;
+      let program = expand_wildcards roots ~from:path (parse_unit span path) in
+      units := { path; namespace; program } :: !units;
       List.iter
-        (fun (decl, span) -> walk span (resolve_path ~from:path (path_of decl)))
+        (fun (decl, span) ->
+          let written = path_of decl in
+          walk
+            span
+            ~namespace:(namespace_of written)
+            (resolve_import roots span ~from:path written))
         (imports program))
   in
   let root = Source_map.Span.nowhere in
-  walk root entry;
+  walk root ~namespace:(namespace_of entry) entry;
   let all = List.rev !units in
   let entry_path = normalize entry in
   match List.partition (fun u -> String.equal u.path entry_path) all with
@@ -384,8 +467,8 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
   in
   List.map (stmt S.empty) program
 
-let program entry_path =
-  let entry_unit, rest = load entry_path in
+let program ?(roots = anywhere) entry_path =
+  let entry_unit, rest = load roots entry_path in
   let table = Hashtbl.create 8 in
   List.iter check_declarations_only rest;
   List.iter

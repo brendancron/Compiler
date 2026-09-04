@@ -1,5 +1,5 @@
-import "../../../stdlib/collections/HashMap";
-import "../../../stdlib/collections/HashSet";
+import "std/collections/HashMap";
+import "std/collections/HashSet";
 
 var m = HashMap.new();
 m.set("a", 1);

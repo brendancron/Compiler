@@ -1,0 +1,3 @@
+import "std/lang/Math";
+
+print(Math.abs(0 - 7));

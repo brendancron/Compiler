@@ -51,6 +51,8 @@ The test each of these is held to: **does the concept do more than one job?** A 
 
 The loader reads the transitive closure of imports and hands the existing pipeline **one** program. Each unit's top-level declarations are renamed `unit__name`, the convention `Type__method` already uses, and qualified references are rewritten to the resolved name.
 
+The loader is given the roots it may reach: the package being compiled, the standard library, and each dependency under the name the manifest gave it. A path import resolves relative to the file that wrote it and may not leave that file's own root, so a dependency's module can move within the dependency and not within whoever imported it. A unit's namespace comes from the import as written rather than from the file it resolved to, because a dependency's root module is `src/lib.cx` and is reached as the package's name. See [Package Manager.md](Package%20Manager.md).
+
 ```cronyx
 // math.cx
 pub fn add(a, b) { return a + b; }
