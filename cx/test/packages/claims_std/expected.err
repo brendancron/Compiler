@@ -1,1 +1,1 @@
-[7:7] 'std' is the standard library, which ships with the toolchain. A dependency may not take the name.
+[claims_std/cronyx.toml 7:1] 'std' is the standard library, which ships with the toolchain. A dependency may not take the name.

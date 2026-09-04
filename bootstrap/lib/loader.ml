@@ -14,6 +14,10 @@ let fail span fmt =
 type unit_ =
   { path : string (* normalized: what a span reports and what `visited` keys on *)
   ; namespace : string
+  (* Empty for the package being compiled. Two packages may each hold a
+     `parse.cx`, and package names come from a registry rather than from the
+     author, so the name they mangle to has to carry the package. *)
+  ; package : string
   ; program : Ast.program
   }
 
@@ -23,13 +27,22 @@ let namespace_of path = Filename.remove_extension (Filename.basename path)
    directory; anything outside it is named in the manifest and arrives here as
    a root of its own, so that an import the resolver cannot see is impossible
    rather than merely discouraged. *)
+(* A dependency is reached by name. Its source is only opened when nothing has
+   compiled it yet: with an artifact, what crosses the boundary is the names it
+   exports, and its declarations arrive already mangled. *)
+type dependency =
+  { dep_root : string
+  ; compiled : Artifact.t option
+  }
+
 type roots =
   { package : string
   ; std : string option
-  ; deps : (string * string) list
+  ; deps : (string * dependency) list
   }
 
 let anywhere = { package = "/"; std = None; deps = [] }
+let from_source root = { dep_root = root; compiled = None }
 
 (* Textual: the visited set only has to agree with itself. *)
 let normalize path =
@@ -62,7 +75,7 @@ let within ~root path =
 let owner roots path =
   let candidates =
     (match roots.std with Some dir -> [ dir ] | None -> [])
-    @ List.map snd roots.deps
+    @ List.map (fun (_, d) -> d.dep_root) roots.deps
     @ [ roots.package ]
   in
   match List.filter (fun root -> within ~root path) candidates with
@@ -86,15 +99,28 @@ let first_segment path =
 let in_package root rest =
   Filename.concat root (Filename.concat "src" (if String.equal rest "" then "lib" else rest))
 
+(* Where an import lands: a file to read, or a package already compiled, whose
+   names are known without reading anything. *)
+type target =
+  | File of string
+  | Compiled of string * Artifact.unit_interface
+
 let resolve_import roots span ~from path =
   let segment, rest = first_segment path in
   match segment, List.assoc_opt segment roots.deps with
   | "std", _ ->
     (match roots.std with
-     | Some dir when not (String.equal rest "") -> with_extension (Filename.concat dir rest)
+     | Some dir when not (String.equal rest "") ->
+       File (with_extension (Filename.concat dir rest))
      | Some _ -> fail span "'std' is the standard library; import a module inside it."
      | None -> fail span "Cannot find the standard library.")
-  | _, Some root -> with_extension (in_package root rest)
+  | _, Some { compiled = Some artifact; _ } ->
+    let namespace = if String.equal rest "" then segment else namespace_of rest in
+    (match Artifact.interface artifact namespace with
+     | Some interface -> Compiled (segment, interface)
+     | None -> fail span "'%s' has no module '%s'." segment namespace)
+  | _, Some { dep_root = root; compiled = None } ->
+    File (with_extension (in_package root rest))
   | _, None ->
     let resolved =
       let path = with_extension path in
@@ -112,7 +138,7 @@ let resolve_import roots span ~from path =
         "'%s' reaches outside its package. A package is the files under one directory, and \
          everything else arrives through a dependency name."
         path;
-    resolved
+    File resolved
 
 let parse_unit span path =
   if not (Sys.file_exists path) then fail span "Cannot find module '%s'." path;
@@ -134,8 +160,12 @@ let expand_wildcards roots ~from (program : Ast.program) =
     (fun (s : Ast.stmt) ->
       match s.Ast.it with
       | `Import (Ast.Wildcard dir) ->
-        let base = Filename.remove_extension (resolve_import roots s.Ast.span ~from (dir ^ "/x")) in
-        let base = Filename.dirname base in
+        let base =
+          match resolve_import roots s.Ast.span ~from (dir ^ "/x") with
+          | File path -> Filename.dirname (Filename.remove_extension path)
+          | Compiled _ ->
+            fail s.Ast.span "A wildcard import reaches a directory, not a dependency."
+        in
         if not (Sys.file_exists base && Sys.is_directory base)
         then fail s.Ast.span "Cannot find directory '%s'." dir;
         Sys.readdir base
@@ -161,8 +191,22 @@ let path_of = function
   | Ast.Qualified path | Ast.Aliased (path, _) | Ast.Selective (_, path) | Ast.Wildcard path ->
     path
 
+(* Which package a file belongs to, by the root it sits under. *)
+let package_of roots path =
+  let owned name root = if within ~root path then Some name else None in
+  let candidates =
+    (match roots.std with Some dir -> [ owned "std" dir ] | None -> [])
+    @ List.map (fun (name, d) -> owned name d.dep_root) roots.deps
+  in
+  match List.filter_map Fun.id candidates with
+  | name :: _ -> name
+  | [] -> ""
+
 (* A unit already seen is skipped rather than rejected: a cycle is legal. *)
-let load roots entry =
+(* [seeds] are the package's other files. A library's `src/lib.cx` need not
+   import every module beside it, and an artifact that held only what the entry
+   reached would be missing the rest. *)
+let load roots ?namespace:entry_namespace ?(seeds = []) entry =
   let visited = Hashtbl.create 8 in
   let units = ref [] in
   (* The namespace comes from the import as written, not from the file it
@@ -174,18 +218,20 @@ let load roots entry =
     then (
       Hashtbl.replace visited path ();
       let program = expand_wildcards roots ~from:path (parse_unit span path) in
-      units := { path; namespace; program } :: !units;
+      units := { path; namespace; package = package_of roots path; program } :: !units;
       List.iter
         (fun (decl, span) ->
           let written = path_of decl in
-          walk
-            span
-            ~namespace:(namespace_of written)
-            (resolve_import roots span ~from:path written))
+          match resolve_import roots span ~from:path written with
+          | File resolved -> walk span ~namespace:(namespace_of written) resolved
+          (* Nothing to read: the package was compiled, and what it exports came
+             with it. *)
+          | Compiled _ -> ())
         (imports program))
   in
   let root = Source_map.Span.nowhere in
-  walk root ~namespace:(namespace_of entry) entry;
+  walk root ~namespace:(Option.value entry_namespace ~default:(namespace_of entry)) entry;
+  List.iter (fun path -> walk root ~namespace:(namespace_of path) path) seeds;
   let all = List.rev !units in
   let entry_path = normalize entry in
   match List.partition (fun u -> String.equal u.path entry_path) all with
@@ -218,8 +264,15 @@ let check_declarations_only unit_ =
       then fail s.Ast.span "A module may only hold declarations.")
     unit_.program
 
-let renamed unit_ ~entry name =
-  if entry then name else Ast.generated [ unit_.namespace; name ]
+let renamed (unit_ : unit_) ~entry name =
+  if entry
+  then name
+  else if String.equal unit_.package ""
+  then Ast.generated [ unit_.namespace; name ]
+  else if String.equal unit_.package unit_.namespace
+  then (* A package's root module is reached as the package. *)
+    Ast.generated [ unit_.package; name ]
+  else Ast.generated [ unit_.package; unit_.namespace; name ]
 
 (* So a rename never touches a local spelled like a top-level function. *)
 let rec bound_by (s : Ast.stmt) =
@@ -467,13 +520,31 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
   in
   List.map (stmt S.empty) program
 
-let program ?(roots = anywhere) entry_path =
-  let entry_unit, rest = load roots entry_path in
+(* The declarations, and what each unit of this package exports so that a
+   consumer can bind the names without reading the source again. *)
+(* [entry_namespace] is the name a consumer reaches this package by, which is
+   the package's own rather than its entry file's: `src/lib.cx` is imported as
+   the package. *)
+let package ?(roots = anywhere) ?entry_namespace ?seeds entry_path =
+  let entry_unit, rest = load roots ?namespace:entry_namespace ?seeds entry_path in
+  (* A file run on its own keeps its declarations under the names it wrote; a
+     package carries them under its own, because a consumer will link them
+     beside somebody else's. *)
+  let plain_entry = Option.is_none entry_namespace in
+  (* Every unit of the package being compiled, not only its entry. A unit that
+     already names a package came from somewhere else. *)
+  let owned (u : unit_) =
+    match entry_namespace with
+    | Some package when String.equal u.package "" -> { u with package }
+    | _ -> u
+  in
+  let entry_unit = owned entry_unit in
+  let rest = List.map owned rest in
   let table = Hashtbl.create 8 in
   List.iter check_declarations_only rest;
-  List.iter
-    (fun u -> Hashtbl.replace table u.namespace (u, exports u))
-    (entry_unit :: rest);
+  (* Keyed by file rather than by namespace: two packages may each hold a unit
+     of the same name, and only the path tells them apart. *)
+  List.iter (fun u -> Hashtbl.replace table u.path (u, exports u)) (entry_unit :: rest);
   let resolve_unit u ~entry =
     let own = Hashtbl.create 8 in
     List.iter (fun name -> Hashtbl.replace own name ()) (exports u);
@@ -481,11 +552,31 @@ let program ?(roots = anywhere) entry_path =
     let direct = Hashtbl.create 4 in
     List.iter
       (fun (decl, span) ->
-        let target = namespace_of (path_of decl) in
-        match Hashtbl.find_opt table target with
+        let written = path_of decl in
+        let target = namespace_of written in
+        let found =
+          match resolve_import roots span ~from:u.path written with
+          | File path ->
+            (match Hashtbl.find_opt table (normalize path) with
+             | Some (unit_, exports) -> Some (unit_, exports)
+             | None -> None)
+          | Compiled (package, interface) ->
+            (* The declarations are already in the program, mangled by whoever
+               compiled them; only the names have to be bound here. *)
+            Some
+              ( { path = ""
+                ; namespace = interface.Artifact.namespace
+                ; package
+                ; program = []
+                }
+              , interface.Artifact.exports )
+        in
+        match found with
         | None -> fail span "Module '%s' was not loaded." target
-        | Some (target_unit, _) ->
-          let is_entry = String.equal target_unit.path entry_unit.path in
+        | Some (target_unit, target_exports) ->
+          let is_entry =
+            plain_entry && String.equal target_unit.path entry_unit.path
+          in
           let bind under =
             if Hashtbl.mem aliases under
             then fail span "'%s' is already bound. Import one of them with `as`." under;
@@ -497,7 +588,7 @@ let program ?(roots = anywhere) entry_path =
            | Ast.Selective (names, _) ->
              List.iter
                (fun name ->
-                 if not (List.mem name (snd (Hashtbl.find table target)))
+                 if not (List.mem name target_exports)
                  then fail span "Module '%s' does not export '%s'." target name;
                  if Hashtbl.mem direct name
                  then fail span "'%s' is already imported." name;
@@ -513,8 +604,14 @@ let program ?(roots = anywhere) entry_path =
       ~from:u.path
       u.program
   in
-  let declarations_of u ~entry =
-    resolve_unit u ~entry |> List.filter (fun s -> is_declaration s || entry)
+  (* [entry] says whose names stay plain; [keep] says whose statements run. *)
+  let declarations_of u ~entry ~keep =
+    resolve_unit u ~entry |> List.filter (fun s -> is_declaration s || keep)
   in
-  List.concat_map (fun u -> declarations_of u ~entry:false) rest
-  @ declarations_of entry_unit ~entry:true
+  ( List.concat_map (fun u -> declarations_of u ~entry:false ~keep:false) rest
+    @ declarations_of entry_unit ~entry:plain_entry ~keep:true
+  , List.map
+      (fun u -> { Artifact.namespace = u.namespace; exports = exports u })
+      (entry_unit :: rest) )
+
+let program ?roots entry_path = fst (package ?roots entry_path)

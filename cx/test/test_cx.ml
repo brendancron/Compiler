@@ -26,8 +26,8 @@ let rejected =
 (* Package fixtures live in cx/test/packages: a directory holding a manifest,
    with an expected.txt of what it prints or an expected.err of the diagnostics
    reading it produced. *)
-let packages = [ "two_packages/app"; "uses_std" ]
-let bad_packages = [ "reaches_out"; "claims_std" ]
+let packages = [ "two_packages/app"; "uses_std"; "same_unit_name"; "generic_dep" ]
+let bad_packages = [ "reaches_out"; "claims_std"; "overlapping_impls" ]
 
 let repo_root () =
   let marker = Filename.concat "cx" (Filename.concat "test" "manifests") in
@@ -63,16 +63,29 @@ let summary (m : Cx.Manifest.t) =
            | Cx.Manifest.Path path -> Printf.sprintf "dep %s = path %s" d.Cx.Manifest.name path)
          m.Cx.Manifest.dependencies)
 
-let diagnostics path errors =
-  String.concat
-    "\n"
-    (List.map
-       (fun (e : Diagnostic.error) ->
-         Printf.sprintf
-           "%s %s"
-           (Ast.locate ~entry:path e.Diagnostic.span)
-           e.Diagnostic.message)
-       errors)
+(* A diagnostic about a file other than the entry renders that file's path, and
+   here that path is absolute. The fixtures are read on more than one machine,
+   so the repo root comes back off. *)
+let relative root text =
+  let prefix = root ^ "/" in
+  let width = String.length prefix in
+  let buffer = Buffer.create (String.length text) in
+  let i = ref 0 in
+  while !i < String.length text do
+    if !i + width <= String.length text && String.equal (String.sub text !i width) prefix
+    then i := !i + width
+    else (
+      Buffer.add_char buffer text.[!i];
+      incr i)
+  done;
+  Buffer.contents buffer
+
+let diagnostics ?(root = "") path errors =
+  let render (e : Diagnostic.error) =
+    Printf.sprintf "%s %s" (Ast.locate ~entry:path e.Diagnostic.span) e.Diagnostic.message
+  in
+  let text = String.concat "\n" (List.map render errors) in
+  if String.equal root "" then text else relative root text
 
 let compare_case name ~expected ~actual =
   if String.equal (normalize expected) (normalize actual)
@@ -246,50 +259,71 @@ let interpret roots entry =
      | Ok () -> Ok (Buffer.contents buf)
      | Error e -> Error [ e ])
 
+let rec remove path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Array.iter (fun entry -> remove (Filename.concat path entry)) (Sys.readdir path);
+      Sys.rmdir path)
+    else Sys.remove path
+
+(* Every `target/` under the fixture tree, so a run starts from no artifacts at
+   all and the first build is the one that writes them. *)
+let clean dir =
+  let rec walk path =
+    if Sys.is_directory path
+    then
+      Array.iter
+        (fun entry ->
+          let child = Filename.concat path entry in
+          if String.equal entry "target" then remove child else walk child)
+        (Sys.readdir path)
+  in
+  walk dir
+
+(* Through artifacts: every package compiled to a file, the files concatenated,
+   and the result run. *)
+let built root =
+  let buf = Buffer.create 256 in
+  let out = Buffer.add_string buf in
+  match Cx.Build.package ~out root with
+  | Error errors -> Error errors
+  | Ok artifacts ->
+    (match Compile.program (Cx.Build.link artifacts) with
+     | Error errors -> Error errors
+     | Ok converted ->
+       (match Pipeline.run (Builtins.env ~out) converted with
+        | Ok () -> Ok (Buffer.contents buf)
+        | Error e -> Error [ e ]))
+
+(* Built from nothing, then built again over the artifacts the first run left.
+   Both have to agree with the expectation, which is what makes `target/` a
+   cache rather than part of the program. *)
 let package_case dir name =
   let root = Filename.concat dir name in
-  let expected ext = Filename.concat root ("expected." ^ ext) in
-  let report actual =
-    compare_case ("package/" ^ name) ~expected:(read_file (expected "txt")) ~actual
-  in
-  match Cx.Workspace.roots_for root with
-  | Error errors ->
-    Printf.printf
-      "FAIL package/%s\n  %s\n"
-      name
-      (diagnostics root errors);
+  let expected = read_file (Filename.concat root "expected.txt") in
+  clean dir;
+  match built root, built root with
+  | Ok cold, Ok warm ->
+    compare_case ("package/" ^ name) ~expected ~actual:cold
+    && compare_case ("package/" ^ name ^ " (again)") ~expected ~actual:warm
+  | Error errors, _ | _, Error errors ->
+    Printf.printf "FAIL package/%s\n  %s\n" name (diagnostics ~root:dir root errors);
     false
-  | Ok (roots, _) ->
-    (match Cx.Workspace.entry_of root with
-     | None ->
-       Printf.printf "FAIL package/%s\n  no src/main.cx or src/lib.cx\n" name;
-       false
-     | Some entry ->
-       (match interpret roots entry with
-        | Ok output -> report output
-        | Error errors ->
-          Printf.printf "FAIL package/%s\n  %s\n" name (diagnostics entry errors);
-          false))
 
 let bad_package_case dir name =
   let root = Filename.concat dir name in
   let expected = read_file (Filename.concat root "expected.err") in
   let rejected path errors =
-    compare_case ("package/" ^ name) ~expected ~actual:(diagnostics path errors)
+    compare_case ("package/" ^ name) ~expected ~actual:(diagnostics ~root:dir path errors)
   in
-  match Cx.Workspace.roots_for root with
-  | Error errors -> rejected (Filename.concat root Cx.Manifest.file_name) errors
-  | Ok (roots, _) ->
-    (match Cx.Workspace.entry_of root with
-     | None ->
-       Printf.printf "FAIL package/%s\n  no src/main.cx or src/lib.cx\n" name;
-       false
-     | Some entry ->
-       (match interpret roots entry with
-        | Error errors -> rejected entry errors
-        | Ok _ ->
-          Printf.printf "FAIL package/%s\n  expected a diagnostic, but it ran\n" name;
-          false))
+  clean dir;
+  match built root with
+  | Error errors -> rejected (Option.value (Cx.Workspace.entry_of root) ~default:root) errors
+  | Ok _ ->
+    Printf.printf "FAIL package/%s\n  expected a diagnostic, but it ran\n" name;
+    false
 
 (* A package fixture no list names is a failure of its own, as with the
    manifests. *)

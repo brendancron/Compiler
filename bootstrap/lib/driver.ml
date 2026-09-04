@@ -70,6 +70,26 @@ let dump_front ~entry dumps file =
 let roots_for entry =
   { Loader.package = Filename.dirname entry; std = Toolchain.stdlib (); deps = [] }
 
+(* A program already linked: what `cx` hands over once every package has been
+   compiled and the artifacts concatenated. *)
+let execute_linked ?(dumps = no_dumps) ~entry program =
+  let on_types typed =
+    if dumps.types
+    then (
+      print_endline "-- types --";
+      print_string (Printer.string_of_typed_program typed))
+  in
+  if dumps.code
+  then (
+    print_endline "-- code --";
+    print_string (Source.program program));
+  match Compile.program ~on_types program with
+  | Error errors -> die_at ~entry errors
+  | Ok converted ->
+    (match Pipeline.run (Builtins.env ~out:print_string) converted with
+     | Ok () -> ()
+     | Error e -> die_at ~entry [ e ])
+
 let execute ?(dumps = no_dumps) ?roots entry =
   let roots = match roots with Some roots -> roots | None -> roots_for entry in
   dump_front ~entry dumps (read_source entry);

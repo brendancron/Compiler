@@ -52,17 +52,22 @@ This is the milestone that makes the design real. Until the boundary is enforced
 
 The point of the project and the item [Package Manager.md](Package%20Manager.md) calls "a design rather than a task". A dependency stops being source the consumer recompiles and becomes an artifact it loads.
 
-The format is settled — serialize the compiler's own types, tag with the compiler version, key the cache on the tag, rebuild everything when the types change. The contents are not: which declarations cross (everything, until a visibility system exists), whether a typed generic body is self-contained or needs its defining package's type environment, and whether a dependency's post-CPS form is stable under a consumer that handles its effects differently.
+The format is settled — serialize the compiler's own types, tag with the compiler version, key the cache on the tag, rebuild everything when the types change.
 
-Two questions the design doc records as open become blocking here rather than before: mangling across packages (`pkg__unit__name` and the separator collision it worsens) and coherence across a package boundary, where two dependencies each defining `impl Display for Value` compile alone and collide only in the consumer.
+**What an artifact holds today** is the package's declarations after loading and metaprocessing, mangled under the package's own name, plus the names each of its units exports. It stops before the checker: a consumer typechecks and monomorphizes the whole graph at once, which is what lets a generic from a dependency be instantiated at a type the dependency never saw. Shipping *typed* IR — so a consumer need not re-check a dependency's bodies — is the next step and is what makes the artifact an interface rather than a shortcut.
+
+Two consequences of stopping there, both worth knowing before they are discovered:
+
+- **A `meta` block sees only its own package.** Each package is metaprocessed alone, so a `meta` block cannot reach a dependency's declarations. Nothing needs it yet.
+- **The standard library is embedded, not linked.** `stdlib` is not compiled to an artifact, so each package that imports it carries what it used, and the link keeps the first declaration of each name. Compiling `std` like any other package retires that.
 
 **Done when**
 
-- A dependency compiled once and consumed from cache produces output identical to the same tree compiled from source.
-- A generic exported by a dependency is instantiated at a type the dependency never saw.
-- Two packages declaring the same unit name link without collision.
-- Two dependencies defining an overlapping impl are rejected, with both sites in the diagnostic.
-- Deleting `target/` changes nothing but the wall clock.
+- A dependency compiled once and consumed from cache produces output identical to the same tree compiled from source. *(`cx/test/packages`, every fixture built cold and then again over its own artifacts.)*
+- A generic exported by a dependency is instantiated at a type the dependency never saw. *(`generic_dep`.)*
+- Two packages declaring the same unit name link without collision. *(`same_unit_name`.)*
+- Two dependencies defining an overlapping impl are rejected, with both sites in the diagnostic. *(`overlapping_impls`.)*
+- Deleting `target/` changes nothing but the wall clock. *(The suite deletes every `target/` before each fixture.)*
 
 ## 4. The cache
 

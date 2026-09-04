@@ -1,0 +1,8 @@
+[package]
+name    = "same_unit_name"
+version = "0.1.0"
+cronyx  = "0.1.0"
+
+[dependencies]
+alpha = { path = "../alpha" }
+beta  = { path = "../beta" }

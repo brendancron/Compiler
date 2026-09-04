@@ -1,0 +1,5 @@
+import "alpha/parse" as a;
+import "beta/parse" as b;
+
+print(a.tokens("x"));
+print(b.tokens("x"));

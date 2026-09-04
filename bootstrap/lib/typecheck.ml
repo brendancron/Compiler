@@ -138,7 +138,10 @@ let with_type_params assoc f =
     f
 
 (* Two impls of one trait at different arguments are told apart here. *)
-let ctx_entries : (string, unit) Hashtbl.t = Hashtbl.create 32
+(* The span is kept so that a second impl of the same method can name the first
+   one. Coherence is global after concatenation, so the two are often in
+   different packages and the other site is the half a reader is missing. *)
+let ctx_entries : (string, Ast.span) Hashtbl.t = Hashtbl.create 32
 
 let ctx_associated : (string * string, unit) Hashtbl.t = Hashtbl.create 8
 
@@ -261,6 +264,22 @@ let env_free_field_vars env =
     ~free:Types.free_field_vars
     ~quantified:(fun (s : Types.scheme) -> s.Types.quantified_fields)
     env
+
+(* The other end of a two-site diagnostic. The tail of the path rather than the
+   whole of it: a span renders relative to the entry and the entry is not this
+   one, so an absolute path would leak the machine it was built on -- but a
+   basename alone reads as `lib.cx` for every package there is. *)
+let where span =
+  match Source_map.Span.view span with
+  | Source_map.Span.Located l ->
+    let path = Source_map.File.path l.Source_map.Span.file in
+    let tail =
+      match List.rev (String.split_on_char '/' path) with
+      | file :: directory :: package :: _ -> String.concat "/" [ package; directory; file ]
+      | segments -> String.concat "/" (List.rev segments)
+    in
+    Printf.sprintf "%s:%d" tail l.Source_map.Span.line
+  | Source_map.Span.Nowhere_in_source -> "elsewhere"
 
 let fail span fmt =
   Printf.ksprintf (fun message -> raise (Located { span; message })) fmt
@@ -1534,14 +1553,16 @@ and declare_impls registry (body : Ast.desugared_stmt list) =
             (* Keyed by the mangled name, so `Index<int>` and `Index<Range>`
                each bring a `get` without colliding. *)
             let mangled = Ast.impl_method_name trait type_name m.Ast.md_name in
-            if Hashtbl.mem ctx_entries mangled
-            then
-              fail
-                span
-                "Type '%s' already has a method '%s'."
-                type_name
-                m.Ast.md_name;
-            Hashtbl.replace ctx_entries mangled ();
+            (match Hashtbl.find_opt ctx_entries mangled with
+             | Some first ->
+               fail
+                 span
+                 "Type '%s' already has a method '%s', from %s."
+                 type_name
+                 m.Ast.md_name
+                 (where first)
+             | None -> ());
+            Hashtbl.replace ctx_entries mangled span;
             Registry.register_entry registry type_name m.Ast.md_name mangled;
             Hashtbl.replace ctx_methods (type_name, m.Ast.md_name) ())
           methods;

@@ -1,0 +1,3 @@
+fn tokens(src: string): string {
+    return "beta:" + src;
+}

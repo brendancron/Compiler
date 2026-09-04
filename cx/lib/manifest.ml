@@ -80,6 +80,11 @@ let package_name span name =
 let dependency (entry : Toml.entry) =
   let span = entry.Toml.node.Toml.span in
   let name = package_name entry.Toml.key_span entry.Toml.key in
+  if String.equal name "std"
+  then
+    fail
+      entry.Toml.key_span
+      "'std' is the standard library, which ships with the toolchain. A dependency may not take the name.";
   match entry.Toml.node.Toml.value with
   | Toml.Table fields ->
     reject_unknown ~what:(Printf.sprintf "Dependency '%s'" name) ~known:[ "path" ] fields;

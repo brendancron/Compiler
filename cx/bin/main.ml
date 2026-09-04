@@ -3,6 +3,7 @@ open Bootstrap
 let usage =
   "usage: cx <command> [options]\n\n\
   \  new <name>      create a package skeleton\n\
+  \  build           compile the package here, and its dependencies\n\
   \  run [file.cx]   compile and execute a program, or the package here\n\n\
    options for `run`:\n\
   \  --dump-source   echo the source before running\n\
@@ -41,19 +42,6 @@ let parse_run args =
   | None -> None, !dumps
   | Some path -> Some path, !dumps
 
-(* With no file named, run the package the working directory sits in. *)
-let entry_for = function
-  | Some path -> path
-  | None ->
-    (match Cx.Manifest.find_root (Sys.getcwd ()) with
-     | None -> Driver.die ("run needs a file to run.\n" ^ usage)
-     | Some root ->
-       (match Cx.Workspace.entry_of root with
-        | Some entry -> entry
-        | None ->
-          Driver.die
-            (Printf.sprintf "'%s' has no src/main.cx or src/lib.cx to run." root)))
-
 let new_package = function
   | [ name ] ->
     (match Cx.Skeleton.create ~directory:name ~name with
@@ -62,6 +50,32 @@ let new_package = function
   | [] -> Driver.die ("new needs a name.\n" ^ usage)
   | _ -> Driver.die ("new takes one name.\n" ^ usage)
 
+let package_root () =
+  match Cx.Manifest.find_root (Sys.getcwd ()) with
+  | Some root -> root
+  | None -> Driver.die "There is no cronyx.toml here or above."
+
+let report entry errors =
+  Render.emit ~entry errors;
+  exit 65
+
+let build () =
+  let root = package_root () in
+  match Cx.Build.package ~out:print_string root with
+  | Error errors -> report root errors
+  | Ok artifacts ->
+    List.iter
+      (fun (a : Artifact.t) -> Printf.printf "checked %s\n" a.Artifact.package)
+      artifacts
+
+let run_package dumps =
+  let root = package_root () in
+  match Cx.Build.package ~out:print_string root with
+  | Error errors -> report root errors
+  | Ok artifacts ->
+    let entry = Option.value (Cx.Workspace.entry_of root) ~default:root in
+    Driver.execute_linked ~dumps ~entry (Cx.Build.link artifacts)
+
 let () =
   match List.tl (Array.to_list Sys.argv) with
   | [] -> Driver.die usage
@@ -69,12 +83,13 @@ let () =
     print_endline usage;
     exit 0
   | "new" :: args -> new_package args
+  | "build" :: _ -> build ()
   | "run" :: args ->
-    let path, dumps = parse_run args in
-    let entry = entry_for path in
-    (match Cx.Workspace.roots_for entry with
-     | Error errors ->
-       Render.emit ~entry errors;
-       exit 65
-     | Ok (roots, _) -> Driver.execute ~dumps ~roots entry)
+    (match parse_run args with
+     (* No file named: the package here, through its artifacts. *)
+     | None, dumps -> run_package dumps
+     | Some path, dumps ->
+       (match Cx.Workspace.roots_for path with
+        | Error errors -> report path errors
+        | Ok (roots, _) -> Driver.execute ~dumps ~roots path))
   | command :: _ -> Driver.die ("unknown command: " ^ command ^ "\n" ^ usage)

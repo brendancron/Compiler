@@ -120,6 +120,15 @@ Scanner → Parser → Loader → Metaprocess → Desugar → Value monomorphize
 
 ### Key distinctions
 
+**A package compiles to an artifact.** `cx build` compiles each package in the
+graph to `target/debug/<name>.cxa` — its declarations, mangled under the
+package's own name, plus what each unit exports — and links the artifacts
+rather than reading a dependency's source. `Artifact` is `Marshal` of the
+compiler's own types with the version that wrote them, which is sound because
+the compiler that reads one is always the compiler that wrote it. The artifact
+stops before the checker, so a consumer still typechecks and monomorphizes the
+whole graph.
+
 **An import never leaves its package.** `Loader` takes the roots it may
 reach — the package, the standard library, and each dependency by name — and
 an import resolving outside the root of the file that wrote it is an error.

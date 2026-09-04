@@ -5,11 +5,13 @@
 let ( let* ) = Result.bind
 
 (* [on_code] sees the program once metaprocessing is done. *)
-let front ?(on_code = fun _ -> ()) ?roots ~out path
-  : (Ast.program, Diagnostic.error list) result
+(* One package: its own units, loaded and metaprocessed. A dependency of it
+   arrives as an artifact and is not read here. *)
+let package ?(on_code = fun _ -> ()) ?roots ?entry_namespace ?seeds ~out path
+  : (Ast.program * Artifact.unit_interface list, Diagnostic.error list) result
   =
-  let* loaded =
-    match Loader.program ?roots path with
+  let* loaded, units =
+    match Loader.package ?roots ?entry_namespace ?seeds path with
     | linked -> Ok linked
     | exception Loader.Failed e -> Diagnostic.one Diagnostic.Load e.Loader.span e.Loader.message
   in
@@ -19,6 +21,10 @@ let front ?(on_code = fun _ -> ()) ?roots ~out path
     | Error e -> Diagnostic.one Diagnostic.Meta e.Metaprocess.span e.Metaprocess.message
   in
   on_code processed;
+  Ok (processed, units)
+
+let front ?on_code ?roots ~out path : (Ast.program, Diagnostic.error list) result =
+  let* processed, _ = package ?on_code ?roots ~out path in
   Ok processed
 
 let compile ?on_code ?on_types ?roots ~out path
