@@ -56,6 +56,7 @@ let cases =
   ; "tests/effects/log/log"
   ; "tests/effects/ask/ask"
   ; "tests/effects/multi_handle/multi_handle"
+  ; "tests/effects/multi_handle/differing_arms"
   ; "tests/effects/exception/exception"
   ; "tests/effects/delim/delim"
   ; "tests/effects/flip/flip"
@@ -186,6 +187,7 @@ let cases =
   ; "tests/effects/suspend_in_logical_nested"
   ; "tests/effects/return_in_inner_run"
   ; "tests/effects/return_in_inner_ctl_run"
+  ; "tests/effects/return_past_outer_ctl_run"
   ; "tests/effects/two_runs_one_expr"
   ; "tests/effects/return_past_arm_defer"
   ; "tests/effects/return_out_of_run"
@@ -425,20 +427,6 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m6/apply", Parked
   ; "tests/compile/m7/safe_div", Parked
   ; "tests/compile/m8/gadt", Parked
-    (* One function whose effect two handlers discharge differently. An arm
-       resuming in tail position is passed evidence; one that never resumes is
-       passed a continuation, which is a second argument. `Cps` gives the
-       function a single arity, so whichever handler it was not compiled for
-       calls it wrong. *)
-  ; ( "tests/effects/multi_handle/differing_arms"
-    , Waiting "`Cps` choosing evidence arity per handler, as `Type_mono` copies per row" )
-    (* A `return` out of a converted function, reached while a handler is
-       resuming into it. Converted code leaves by calling its return
-       continuation, and a call comes back, so the arm carries on afterwards
-       instead of being unwound past. The unconverted case works because there
-       the `return` is a real return. *)
-  ; ( "tests/effects/return_past_outer_ctl_run"
-    , Waiting "an unwind for `return` in converted code, not a call to the return continuation" )
   ]
 
 (* Ought to be rejected and are not, paired with the `.err` they should

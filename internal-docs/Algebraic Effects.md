@@ -6,7 +6,7 @@ Status: **implemented.**
 |-------|-------|
 | Effect rows, inference, discharge | `lib/types.ml`, `lib/typecheck.ml` |
 | `fn` operations | evidence passing (`lib/cps.ml`) |
-| Tail-resumptive `ctl` | compiled as `fn
+| `ctl` operations | continuation passing, whatever a handler does with them
 | Aborting `ctl`, multi-shot `resume` | continuation passing |
 | Effect inside a loop | the loop is its own continuation, re-entered per iteration |
 | Effect inside `&&`/`\|\|` | the operand it sits in becomes a branch |
@@ -31,7 +31,15 @@ A `ctl` operation may be answered by a `fn` arm: the caller was compiled holding
 
 The rule is what lets a compiled dependency exist at all. Under it, whether `yield`'s caller needs continuations is settled by the file that declared `task` — so a package can ship `work` already transformed, and no consumer can demand a different transform of it by writing a different handler. Without it, a dependency's function has as many machine forms as its consumers have handler shapes.
 
-`Cps` does not yet read the rule: it still decides from the arms it finds rather than from the declaration, which means a handler that resumes in tail position keeps a `ctl` effect out of the continuation-passing translation. Making that switch is what a compiled dependency waits on, and it is not free — see [Package Manager Plan.md](Package%20Manager%20Plan.md).
+`Cps` reads the declaration and nothing else. An effect with a `ctl` operation is compiled with continuations everywhere; one with only `fn` and `final ctl` operations is compiled with evidence. A handler that happens to resume in tail position no longer changes what its callee was compiled into, which is what `tests/effects/multi_handle/differing_arms` demonstrates: one `range`, used by a handler that resumes and by one that never does, in the same program.
+
+Three things had to hold for that.
+
+**A `run` installs its own evidence.** Evidence used to be named per operation, so `run { … } + run { … }` declared the same frame twice and the second answered for both. Each block now binds the operation to a fresh name while compiling its body, and arms are compiled outside that binding — so an operation performed inside its own arm reaches the handler outside the block rather than itself.
+
+**A block keeps each effect's shape.** One `run` may handle a delimited effect beside an undelimited one. Its arms are built in whichever shape the effect's own declaration asked for, since a caller of an undelimited operation passes no continuation whatever else the block handles.
+
+**A `return` crossing a `run` leaves it.** Converted code hands its result to a continuation, and a call comes back — so a `return` reached while an arm was resuming would let that arm carry on. A converted function is therefore a wrapper around its own body: the `return` stores its value and leaves the body, unwinding runs whatever the arms deferred, and the wrapper hands the value on once there is nothing left to leave. Ordering is the reason for the wrapper rather than a direct call: `tests/effects/return_past_arm_defer` wants the `defer` to have run before the caller sees the value.
 
 ## Planned: `print` is an effect
 
