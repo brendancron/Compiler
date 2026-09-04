@@ -11,6 +11,13 @@
 # does not is one `cx` refuses to hand a job to, and nothing would have caught
 # it before someone installed the toolchain.
 #
+# The bump lands the way every other change does. If `release.ml` does not
+# already say what the tag says, this writes it on a branch, opens the pull
+# request, and stops: `main` takes no direct pushes, so a script that tried to
+# push one would fail after running the whole suite. Merge it and run the same
+# command again — the second time the version already matches, and it tags and
+# publishes.
+#
 # `--dry-run` builds and packages, prints the archive and its checksum, and
 # stops before tagging, pushing or publishing. The version is set for the build
 # and put back afterwards, so the archive is exactly what a real run would ship.
@@ -81,6 +88,29 @@ if [ "$current" != "$bare" ]; then
   restore=true
   sed -i.bak "s/^let version = \".*\"$/let version = \"$bare\"/" "$stamp"
   rm -f "$stamp.bak"
+
+  # A dry run wants the version only for the build, and puts it back. A real
+  # one has to record it first, and that is a pull request like anything else.
+  if ! $dry; then
+    onto=release-$bare
+    git rev-parse -q --verify "refs/heads/$onto" >/dev/null \
+      && die "branch '$onto' already exists — merge or delete it, then run this again"
+    echo "==> Opening the pull request that records it"
+    git checkout -q -b "$onto"
+    git add "$stamp"
+    git commit -q -m "release: $bare"
+    git push -q -u origin "$onto"
+    restore=false
+    gh pr create \
+      --title "release: $bare" \
+      --body "Sets \`$stamp\` to \`$bare\`, so that the binary tagged \`$version\` reports the version its tag names.
+
+Cut with \`scripts/release.sh $version\`, which opens this rather than pushing to \`$branch\` — merge it and run the same command again to tag and publish." \
+      >/dev/null
+    echo
+    echo "==> Merge it, then run: scripts/release.sh $version"
+    exit 0
+  fi
 fi
 
 echo "==> Testing"
