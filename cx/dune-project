@@ -1,0 +1,21 @@
+(lang dune 3.24)
+
+(name cx)
+
+(generate_opam_files true)
+
+(source
+ (github brendancron/CronyxLang))
+
+(authors "Brendan Cron <brendancron@gmail.com>")
+
+(maintainers "Brendan Cron <brendancron@gmail.com>")
+
+(package
+ (name cx)
+ (synopsis "The Cronyx package manager")
+ (description
+  "cx resolves dependencies, drives the compiler as a library, and installs the toolchain a package asks for.")
+ (depends ocaml bootstrap)
+ (tags
+  ("package manager" cronyx)))

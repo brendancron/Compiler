@@ -35,3 +35,8 @@ jobs:
       - name: Test
         working-directory: bootstrap
         run: opam exec -- dune test
+
+      # `cx` links the compiler as a library, so the two drivers must not drift.
+      # The script builds the whole workspace, which is what covers `cx/`.
+      - name: cx parity
+        run: opam exec -- ./scripts/cx-parity.sh

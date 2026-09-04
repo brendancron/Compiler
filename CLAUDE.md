@@ -4,11 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-`bootstrap/` (OCaml) is the compiler. `legacy-bootstrap/` (Rust) is the one it
-replaced — it is kept for reference, is not in CI, and no longer compiles the
-current `stdlib/` or `tests/`.
+`bootstrap/` (OCaml) is the compiler and `cx/` is the package manager, which
+links the compiler as a library rather than shelling out to it. They are two
+dune projects under one `dune-workspace` at the repo root.
+`legacy-bootstrap/` (Rust) is the one `bootstrap/` replaced — it is kept for
+reference, is not in CI, and no longer compiles the current `stdlib/` or
+`tests/`.
 
-All commands run from `bootstrap/` unless noted.
+Compiler commands run from `bootstrap/`; anything touching `cx` runs from the
+repo root, so that the workspace is in scope.
 
 ```bash
 # Build
@@ -20,6 +24,16 @@ dune test --force            # again, ignoring dune's cache
 
 # Run a program (paths are relative to the repo root)
 dune exec --root . bin/main.exe -- ../tests/core/print/hello.cx
+```
+
+```bash
+# From the repo root: build both projects, and run a program through `cx`
+dune build
+dune exec cx -- run tests/core/print/hello.cx
+
+# `cx run` and `bootstrap` must agree on every fixture, both streams and the
+# exit code. This is what milestone 0 of the package manager is checked by.
+./scripts/cx-parity.sh
 ```
 
 **CLI flags**, each printing one stage and then running:
