@@ -73,7 +73,9 @@ let values ~out =
       match v with
       | Value.Str path ->
         let written = Utf8.encode path in
-        (match In_channel.with_open_bin (beside span written) In_channel.input_all with
+        let resolved = beside span written in
+        Inputs.record resolved;
+        (match In_channel.with_open_bin resolved In_channel.input_all with
          | contents -> Value.Str (Utf8.decode contents)
          (* The path as written, the way `embed` reports one: what the reader
             has in front of them is not where it resolved to. *)

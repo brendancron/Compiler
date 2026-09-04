@@ -13,12 +13,41 @@ type unit_interface =
   ; exports : string list
   }
 
+(* Every file this artifact was built from, and what it held. A `meta` block
+   reaches files nobody declared, so the list is recorded during the build
+   rather than guessed from the manifest. *)
+type input =
+  { path : string
+  ; digest : string
+  }
+
 type t =
   { compiler : string
   ; package : string
   ; units : unit_interface list
   ; program : Ast.program
+  ; inputs : input list
+  ; fingerprint : string
   }
+
+let digest_of path = try Some (Digest.to_hex (Digest.file path)) with _ -> None
+
+(* One string over everything the build depended on. The compiler version is in
+   it because an artifact is only readable by the compiler that wrote it, and
+   the dependencies' own fingerprints are in it so that a change deep in the
+   graph reaches everything above it. *)
+let fingerprint_of ~compiler ~profile ~inputs ~dependencies =
+  Digest.to_hex
+    (Digest.string
+       (String.concat
+          "\n"
+          ((compiler :: profile :: List.sort String.compare dependencies)
+           @ List.map (fun i -> i.path ^ " " ^ i.digest) inputs)))
+
+let inputs_of paths =
+  List.sort String.compare paths
+  |> List.map (fun path ->
+    { path; digest = (match digest_of path with Some d -> d | None -> "missing") })
 
 let extension = ".cxa"
 

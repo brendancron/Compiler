@@ -63,16 +63,20 @@ let build () =
   let root = package_root () in
   match Cx.Build.package ~out:print_string root with
   | Error errors -> report root errors
-  | Ok artifacts ->
+  | Ok (artifacts, compiled) ->
     List.iter
-      (fun (a : Artifact.t) -> Printf.printf "checked %s\n" a.Artifact.package)
+      (fun (a : Artifact.t) ->
+        Printf.printf
+          "%s %s\n"
+          (if List.mem a.Artifact.package compiled then "checked" else "cached")
+          a.Artifact.package)
       artifacts
 
 let run_package dumps =
   let root = package_root () in
   match Cx.Build.package ~out:print_string root with
   | Error errors -> report root errors
-  | Ok artifacts ->
+  | Ok (artifacts, _) ->
     let entry = Option.value (Cx.Workspace.entry_of root) ~default:root in
     Driver.execute_linked ~dumps ~entry (Cx.Build.link artifacts)
 

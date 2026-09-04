@@ -26,7 +26,8 @@ let rejected =
 (* Package fixtures live in cx/test/packages: a directory holding a manifest,
    with an expected.txt of what it prints or an expected.err of the diagnostics
    reading it produced. *)
-let packages = [ "two_packages/app"; "uses_std"; "same_unit_name"; "generic_dep" ]
+let packages =
+  [ "two_packages/app"; "uses_std"; "same_unit_name"; "generic_dep"; "reads_data" ]
 let bad_packages = [ "reaches_out"; "claims_std"; "overlapping_impls" ]
 
 let repo_root () =
@@ -289,7 +290,7 @@ let built root =
   let out = Buffer.add_string buf in
   match Cx.Build.package ~out root with
   | Error errors -> Error errors
-  | Ok artifacts ->
+  | Ok (artifacts, _) ->
     (match Compile.program (Cx.Build.link artifacts) with
      | Error errors -> Error errors
      | Ok converted ->
@@ -361,6 +362,65 @@ let run_package_partition dir =
       (String.concat "\n" (List.map (fun name -> "  " ^ name) missing));
     false
 
+let write path contents =
+  Out_channel.with_open_bin path (fun out -> Out_channel.output_string out contents)
+
+let compiled_by root =
+  match Cx.Build.package ~out:(fun _ -> ()) root with
+  | Error _ -> None
+  | Ok (_, compiled) -> Some compiled
+
+let expect_compiled what root expected =
+  match compiled_by root with
+  | None -> Printf.printf "FAIL %s\n  the build failed\n" what; false
+  | Some compiled ->
+    if List.equal String.equal compiled expected
+    then (
+      Printf.printf "ok   %s\n" what;
+      true)
+    else (
+      Printf.printf
+        "FAIL %s\n  expected [%s]\n  compiled [%s]\n"
+        what
+        (String.concat "; " expected)
+        (String.concat "; " compiled);
+      false)
+
+(* Built once, and then not again: a second build with nothing changed must run
+   the compiler over nothing at all. *)
+let cache_unchanged dir =
+  let root = Filename.concat dir "two_packages/app" in
+  clean dir;
+  expect_compiled "cache/cold" root [ "greet"; "app" ]
+  && expect_compiled "cache/unchanged" root []
+
+(* A file a `meta` block read is a build input like any other, and it belongs to
+   the package that read it. *)
+let cache_meta_read dir =
+  let root = Filename.concat dir "reads_data" in
+  let data = Filename.concat root (Filename.concat "src" "banner.txt") in
+  let original = read_file data in
+  clean dir;
+  let ok =
+    expect_compiled "cache/meta cold" root [ "greet"; "reads_data" ]
+    && (write data "a different banner\n";
+        expect_compiled "cache/meta changed" root [ "reads_data" ])
+  in
+  write data original;
+  ok
+
+(* An artifact is only readable by the compiler that wrote it, so one that names
+   another compiler is not a cache hit but a rebuild. *)
+let cache_compiler_version dir =
+  let root = Filename.concat dir "two_packages/app" in
+  clean dir;
+  let ok = expect_compiled "cache/version cold" root [ "greet"; "app" ] in
+  let path = Cx.Build.artifact_path root "app" in
+  (match Artifact.load path with
+   | Ok artifact -> Artifact.save path { artifact with Artifact.compiler = "0.0.0-elsewhere" }
+   | Error _ -> ());
+  ok && expect_compiled "cache/version changed" root [ "app" ]
+
 let () =
   match repo_root () with
   | None ->
@@ -376,6 +436,10 @@ let () =
       @ List.map (run_rejected dir) rejected
       @ (run_package_partition packages_dir :: List.map (package_case packages_dir) packages)
       @ List.map (bad_package_case packages_dir) bad_packages
+      @ [ cache_unchanged packages_dir
+        ; cache_meta_read packages_dir
+        ; cache_compiler_version packages_dir
+        ]
       @ List.map run_requirement requirements
       @ List.map run_membership membership
       @ [ run_ordering () ]

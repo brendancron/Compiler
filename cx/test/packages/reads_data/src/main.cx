@@ -1,0 +1,11 @@
+import "greet";
+
+meta {
+    var banner = readfile("banner.txt");
+    gen fn shout_banner() {
+        print(banner.trim());
+    }
+}
+
+shout_banner();
+print(greet.hello("World"));

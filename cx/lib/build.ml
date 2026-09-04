@@ -26,8 +26,6 @@ let sources root =
   let src = Filename.concat root "src" in
   if Sys.file_exists src && Sys.is_directory src then walk src else []
 
-let modified path = try (Unix.stat path).Unix.st_mtime with _ -> 0.0
-
 let manifest_of root =
   Manifest.load (Filename.concat root Manifest.file_name)
 
@@ -40,9 +38,13 @@ let missing root =
 
 (* Depth first, so a dependency is compiled before whoever needs it, and a
    package reached twice through a diamond is compiled once. *)
-let rec compile ~out ~built root : (Artifact.t list, Diagnostic.error list) result =
+let profile = "debug"
+
+(* [compiled] names the packages this build actually ran the compiler over, so
+   that "nothing to do" is something a caller can see rather than infer from a
+   clock. *)
+let rec compile ~out ~built ~compiled root : (Artifact.t list, Diagnostic.error list) result =
   let ( let* ) = Result.bind in
-  let root = if Filename.is_relative root then Filename.concat (Sys.getcwd ()) root else root in
   let* manifest = manifest_of root in
   match Hashtbl.find_opt built manifest.Manifest.name with
   | Some existing -> Ok existing
@@ -53,12 +55,12 @@ let rec compile ~out ~built root : (Artifact.t list, Diagnostic.error list) resu
           let* acc = acc in
           match d.Manifest.source with
           | Manifest.Path path ->
-            let* transitive = compile ~out ~built (Filename.concat root path) in
+            let* transitive = compile ~out ~built ~compiled (Filename.concat root path) in
             Ok (acc @ transitive))
         (Ok [])
         manifest.Manifest.dependencies
     in
-    let compiled name =
+    let artifact_for name =
       List.find_opt (fun (a : Artifact.t) -> String.equal a.Artifact.package name) dependencies
     in
     let deps =
@@ -68,30 +70,48 @@ let rec compile ~out ~built root : (Artifact.t list, Diagnostic.error list) resu
           | Manifest.Path path ->
             ( d.Manifest.name
             , { Loader.dep_root = Filename.concat root path
-              ; compiled = compiled d.Manifest.name
+              ; compiled = artifact_for d.Manifest.name
               } ))
         manifest.Manifest.dependencies
     in
     let roots = { Loader.package = root; std = Toolchain.stdlib (); deps } in
     let path = artifact_path root manifest.Manifest.name in
-    (* Crude, and deliberately so: whether an artifact is still good is the
-       build cache's question, and the cache keys on an input hash rather than
-       on a clock. Until it exists, an artifact older than an input it was
-       built from is rebuilt. *)
+    let dependency_prints =
+      List.map (fun (d : Artifact.t) -> d.Artifact.fingerprint) dependencies
+    in
+    (* An artifact is still good when everything it read still hashes to what it
+       hashed then, and when the files it would read now are the same ones. The
+       second half is what catches a source file added since: its own digest
+       would be missing from the list rather than different. *)
     let fresh =
       match Artifact.load path with
       | Error _ -> None
       | Ok artifact ->
-        let built = modified path in
-        let inputs =
-          (Filename.concat root Manifest.file_name :: sources root)
-          @ List.map
-              (fun (d : Artifact.t) -> artifact_path root d.Artifact.package)
-              dependencies
+        let declared =
+          Filename.concat root Manifest.file_name :: sources root |> List.sort String.compare
         in
-        if List.for_all (fun input -> modified input <= built) inputs
-        then Some artifact
-        else None
+        let recorded = List.map (fun (i : Artifact.input) -> i.Artifact.path) artifact.Artifact.inputs in
+        let unchanged =
+          List.for_all
+            (fun (i : Artifact.input) ->
+              match Artifact.digest_of i.Artifact.path with
+              | Some digest -> String.equal digest i.Artifact.digest
+              | None -> false)
+            artifact.Artifact.inputs
+        in
+        let same_files =
+          List.for_all (fun declared -> List.mem declared recorded) declared
+        in
+        let same_graph =
+          String.equal
+            artifact.Artifact.fingerprint
+            (Artifact.fingerprint_of
+               ~compiler:Release.version
+               ~profile
+               ~inputs:artifact.Artifact.inputs
+               ~dependencies:dependency_prints)
+        in
+        if unchanged && same_files && same_graph then Some artifact else None
     in
     (match fresh with
      | Some artifact ->
@@ -102,6 +122,7 @@ let rec compile ~out ~built root : (Artifact.t list, Diagnostic.error list) resu
        (match Workspace.entry_of root with
         | None -> Error (missing root)
         | Some entry ->
+       Inputs.reset ();
        let* program, units =
          Pipeline.package
            ~roots
@@ -110,21 +131,45 @@ let rec compile ~out ~built root : (Artifact.t list, Diagnostic.error list) resu
            ~out
            entry
        in
+       let inputs =
+         Artifact.inputs_of
+           ((Filename.concat root Manifest.file_name :: sources root) @ Inputs.taken ())
+       in
        let artifact =
          { Artifact.compiler = Release.version
          ; package = manifest.Manifest.name
          ; units
          ; program
+         ; inputs
+         ; fingerprint =
+             Artifact.fingerprint_of
+               ~compiler:Release.version
+               ~profile
+               ~inputs
+               ~dependencies:dependency_prints
          }
        in
        ensure (target_dir root);
        ensure (debug_dir root);
        Artifact.save path artifact;
+       compiled := manifest.Manifest.name :: !compiled;
        let all = dependencies @ [ artifact ] in
        Hashtbl.replace built manifest.Manifest.name all;
        Ok all))
 
-let package ~out root = compile ~out ~built:(Hashtbl.create 8) root
+(* Built from the package root, so every path an artifact carries is relative to
+   it. Two copies of one tree then compile to the same bytes, which is what
+   makes an artifact a function of its inputs rather than of its address. *)
+let package ~out root =
+  let compiled = ref [] in
+  let here = Sys.getcwd () in
+  Sys.chdir root;
+  Fun.protect
+    ~finally:(fun () -> Sys.chdir here)
+    (fun () ->
+      match compile ~out ~built:(Hashtbl.create 8) ~compiled "." with
+      | Error errors -> Error errors
+      | Ok artifacts -> Ok (artifacts, List.rev !compiled))
 
 (* Each package embeds whatever of the standard library it imported, since the
    library is not itself compiled to an artifact yet. Two of them embedding the

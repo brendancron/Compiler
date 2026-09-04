@@ -346,6 +346,7 @@ let rewrite ~aliases ~direct ~own ~rename ~from (program : Ast.program) =
           then Filename.concat (Filename.dirname from) path
           else path
         in
+        Inputs.record full;
         (match In_channel.with_open_bin full In_channel.input_all with
          | contents -> `Bytes contents
          | exception Sys_error _ -> fail e.Ast.span "Cannot embed '%s'." path)

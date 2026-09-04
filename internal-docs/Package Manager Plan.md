@@ -73,16 +73,25 @@ Two consequences of stopping there, both worth knowing before they are discovere
 
 Content-addressed, keyed on an input hash covering: the compiler version, every source file, the manifest, the feature set, the profile, every path a `meta` block read through `readfile` or `embed`, and each dependency's artifact hash.
 
-That `meta` clause is why this milestone is not free. `readfile` runs at meta time in `builtins.ml` and `embed` resolves in `loader.ml`; neither records what it touched. Both hooks land in this change rather than after it — a cache whose hash misses a build input is silently wrong, which is the worst failure a build tool has, and the retrofit invalidates every cache in existence.
+That `meta` clause is why this milestone is not free. `readfile` runs at meta time in `builtins.ml` and `embed` resolves in `loader.ml`; neither recorded what it touched. `Inputs` is where they record it now, rather than at the call sites, so that a third way to read a file cannot forget to.
 
-For the same reason, `meta` gets no clock and no RNG. A nondeterministic `meta` makes the hash a lie that no amount of tracking repairs.
+An artifact carries every path it read and what that path hashed to, so freshness is a question about content rather than about a clock: touching a file changes nothing, editing one rebuilds the package that read it and everything above it. The paths are recorded rather than derived from the manifest, which is the only way a `meta` block's reads can be in the key at all.
+
+A build runs from the package root, so every path an artifact carries is relative to it and two copies of one tree compile to the same bytes.
 
 **Done when**
 
-- A second `cx build` with no change does no compiler work.
-- Touching a file a `meta` block read invalidates the package that read it and nothing else.
-- Changing the compiler version invalidates everything.
-- Two builds of the same tree in different directories produce byte-identical artifacts.
+- A second `cx build` with no change does no compiler work. *(`cache/unchanged`, which asserts the compiled list is empty.)*
+- Touching a file a `meta` block read invalidates the package that read it and nothing else. *(`cache/meta changed`, over `reads_data`.)*
+- Changing the compiler version invalidates everything. *(`cache/version changed`.)*
+- Two builds of the same tree in different directories produce byte-identical artifacts. *(Built from the package root; verified by hand across two locations.)*
+
+**Todo, left by this milestone**
+
+- **`meta` still has a clock.** `builtins.ml` has `clock`, and `writefile` besides. A `meta` block calling either makes the input hash a lie that no amount of recording repairs, and the cache will serve a stale answer with a straight face. Denying both at meta time belongs with the sandbox section the design doc still needs.
+- **Nothing bounds a `meta` block.** It can loop forever or eat the machine. Out of scope for the cache, but it is the other half of "the environment the build sees is empty".
+- **The artifact stops before the checker.** A consumer re-checks a dependency's bodies, so the cache saves parsing and metaprocessing but not inference. Turning the artifact into a real interface needs five things that do not exist: generalized schemes for exported names (generalization happens in `infer_stmt`, not `hoist`), `Desugar`'s whole-program `handler` and variadic tables, a serializable snapshot of `Typecheck`'s global tables, the `Registry` entries a dependency registered, and the prelude split out of package compilation so it is not carried by every artifact. Worth doing when `pub` arrives or when re-checking is measurably the slow part; neither is true yet.
+- **The standard library is embedded per package.** Compiling `std` like any other package retires both that and the first-wins dedup at link.
 
 ## 5. Toolchains and dispatch
 
