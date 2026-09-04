@@ -61,7 +61,7 @@ member       parser → typecheck (ctx_attrs) → reflect (TypeField / TypeVaria
 declaration  parser → desugar (decl_attrs, wrapper dropped) → reflect (typeof(T).attrs)
 ```
 
-Only a **type** declaration is recorded. `typeof(T).attrs` is the one reader and it keys by type name, so a function or a variable recorded under the same key would collide rather than answer. Nothing can ask for those anyway: `typeof` takes a value, and a function value's type — `(int, int) -> int` — names no declaration to look up. Reaching a function's attributes needs a walk over declarations, not reflection on a value.
+Only a **type** declaration is recorded in `decl_attrs`. `typeof(T).attrs` is its one reader and it keys by type name, so a function or a variable recorded under the same key would collide rather than answer. Nothing can ask for those anyway: `typeof` takes a value, and a function value's type — `(int, int) -> int` — names no declaration to look up. Reaching a function's attributes needs a walk over declarations rather than reflection on a value, which is what `Discover.carrying` is and what `@test` uses — see [Testing](Testing.md).
 
 ## Arguments are literals
 
@@ -87,8 +87,6 @@ for (a in f.attrs) {
 **A named payload's fields do not.** `Circle { r: float }` is a variant's payload, not a member of the type, and reflection reports a variant's arity rather than its fields. Nothing can read an attribute there, so nothing may write one.
 
 ## Open
-
-**A function's attributes are parsed and then dropped.** `@test fn f()` is legal and records nothing, because there is no way to ask for it. Discovery — "every declaration carrying `@test`" — is a compile-time walk over the program that does not exist yet, and it is what `cx test` waits on.
 
 **Nothing rejects an attribute no deriver reads.** `@renmae("x")` compiles and does nothing, which is Go's bug. The fix is Rust's: a deriver declares the attributes it consumes, and an attribute belonging to no declaration is an error. That needs syntax on the deriver — a `uses` clause or similar — and is worth having before attributes are used for anything real.
 

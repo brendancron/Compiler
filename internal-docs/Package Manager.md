@@ -14,7 +14,7 @@ Seven subcommands cover the whole model. Each one is small; extra flags earn the
 cx new <name>            create a package skeleton
 cx build                 resolve, fetch, check, cache
 cx run [-- args…]        build then execute the entry
-cx test [filter]         run the fixture suite
+cx test [filter]         run the package's @test functions
 cx add <pkg>[@<req>]     record a dependency, resolve, lock
 cx publish               upload to a registry
 cx toolchain <cmd>       install, list, and pin compiler versions
@@ -33,14 +33,14 @@ CronyxLang/
   bootstrap/              the compiler: library + `cronyxc` binary
   cx/                      the package manager, links `bootstrap` as a library
   stdlib/                  shared
-  tests/                   shared: `cx test` and `dune test` read the same fixtures
+  tests/                   the compiler's own fixtures, run by `dune test`
   internal-docs/
 ```
 
 Three consequences.
 
 - **One release ships one artifact.** The toolchain tarball carries `cronyxc` and `cx` together; a split repo means two release trains that must stay in sync anyway, and every mismatch is a bug report.
-- **Fixtures are not duplicated.** `tests/` is the same set of `.cx` files under both `dune test` (the compiler's own suite) and `cx test` (the package tool driving the compiler as a library). A split would need a submodule or a copy, both worse.
+- **One suite of fixtures, and `cx` is held to it.** `tests/` is the compiler's, run by `dune test`; `scripts/cx-parity.sh` then requires `cx run` to agree with `bootstrap` on every one of them, both streams and the exit code. That is what a split repo could not keep honest. `cx test` is a different thing entirely — the in-language framework a package author uses, see [Testing](Testing.md) — and the two share a name rather than a mechanism.
 - **The Cargo / Rust split is historical.** Cargo predates `rustup` and predates being part of the release train; the seam is one the Rust project has spent effort papering over rather than defending. Go, Deno, Bun, and Zig keep the tool in-tree, and none regret it.
 
 **When to split.** `cx` self-hosts in Cronyx *and* has enough users that its release cadence needs to decouple from the compiler's. Neither is close, and the split at that point is a mechanical `git filter-repo`, not a design change.

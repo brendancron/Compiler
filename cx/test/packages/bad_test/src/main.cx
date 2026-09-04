@@ -1,0 +1,4 @@
+@test
+fn needs_a_value(n: int) {
+    assert(n == 1, "n is 1");
+}

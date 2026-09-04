@@ -23,4 +23,5 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 | [Metaprocessing.md](Metaprocessing.md)                       | `meta` and `gen`, and compilation calling itself                      |
 | [Reify.md](Reify.md)                                         | Turning a compile-time value back into syntax                         |
 | [Attributes.md](Attributes.md)                               | `@name(…)` on a field or a variant, and why it cannot reach runtime   |
+| [Testing.md](Testing.md)                                     | `cx test`, and why a failed assertion is an effect                    |
 | [GADT Refinement.md](GADT%20Refinement.md)                   | Refining a type parameter in a match arm, and the choice of how       |

@@ -30,6 +30,10 @@ let packages =
 let bad_packages =
   [ "reaches_out"; "claims_std"; "overlapping_impls"; "version_conflict"; "needs_future_compiler" ]
 
+(* Run through `cx test` rather than `cx run`: the expectation is the report,
+   not what the program prints. *)
+let test_packages = [ "tested"; "bad_test" ]
+
 let repo_root () =
   let marker = Filename.concat "cx" (Filename.concat "test" "manifests") in
   let rec up dir =
@@ -318,6 +322,28 @@ let package_case dir name =
     Printf.printf "FAIL package/%s\n  %s\n" name (diagnostics ~root:dir root errors);
     false
 
+let test_package_case dir name =
+  let root = Filename.concat dir name in
+  let failing = Filename.concat root "expected.err" in
+  clean dir;
+  match Cx.Test.run root, Sys.file_exists failing with
+  | Error errors, true ->
+    compare_case
+      ("test/" ^ name)
+      ~expected:(read_file failing)
+      ~actual:(diagnostics ~root:dir root errors)
+  | Error errors, false ->
+    Printf.printf "FAIL test/%s\n  %s\n" name (diagnostics ~root:dir root errors);
+    false
+  | Ok (rendered, _), false ->
+    compare_case
+      ("test/" ^ name)
+      ~expected:(read_file (Filename.concat root "expected.txt"))
+      ~actual:rendered
+  | Ok _, true ->
+    Printf.printf "FAIL test/%s\n  expected the diagnostics in expected.err\n" name;
+    false
+
 let bad_package_case dir name =
   let root = Filename.concat dir name in
   let expected = read_file (Filename.concat root "expected.err") in
@@ -335,7 +361,9 @@ let bad_package_case dir name =
    manifests. *)
 let unclaimed_packages dir =
   let claimed = Hashtbl.create 8 in
-  List.iter (fun name -> Hashtbl.replace claimed name ()) (packages @ bad_packages);
+  List.iter
+    (fun name -> Hashtbl.replace claimed name ())
+    (packages @ bad_packages @ test_packages);
   let rec walk prefix =
     let full = if String.equal prefix "" then dir else Filename.concat dir prefix in
     Sys.readdir full
@@ -620,6 +648,7 @@ let () =
       @ List.map (run_rejected dir) rejected
       @ (run_package_partition packages_dir :: List.map (package_case packages_dir) packages)
       @ List.map (bad_package_case packages_dir) bad_packages
+      @ List.map (test_package_case packages_dir) test_packages
       @ List.map run_preamble preambles
       @ List.map run_dispatch dispatches
       @ [ registry_cases root

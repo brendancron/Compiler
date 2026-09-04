@@ -241,17 +241,22 @@ let load roots ?namespace:entry_namespace ?(seeds = []) entry =
 (* ---- resolution ---- *)
 
 (* An `impl` exports nothing: its methods are reached through its type. *)
-let declared_name (s : Ast.stmt) =
+(* An attribute wraps the declaration it is written on, so both of these look
+   through one: what a unit exports and what linking deduplicates are questions
+   about the declaration, not about how it was marked. *)
+let rec declared_name (s : Ast.stmt) =
   match s.Ast.it with
   | `Fn (name, _, _, _) -> Some name
   | `Type_decl (name, _, _) -> Some name
   | `Trait_decl (name, _, _) -> Some name
+  | `Attributed (_, inner) -> declared_name inner
   | _ -> None
 
-let is_declaration (s : Ast.stmt) =
+let rec is_declaration (s : Ast.stmt) =
   match s.Ast.it with
   | `Fn _ | `Type_decl _ | `Trait_decl _ | `Impl_decl _ | `Effect_decl _
   | `Handler_decl _ | `Import _ | `Meta _ | `Gen _ | `Meta_fn _ | `Derive _ -> true
+  | `Attributed (_, inner) -> is_declaration inner
   | _ -> false
 
 let exports unit_ = List.filter_map declared_name unit_.program
