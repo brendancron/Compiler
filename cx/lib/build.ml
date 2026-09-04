@@ -40,6 +40,41 @@ let missing root =
    package reached twice through a diamond is compiled once. *)
 let profile = "debug"
 
+(* Three flags on two axes, not two points on one. `--locked` says nothing
+   about the network and `--offline` says nothing about the lockfile;
+   `--frozen` is both, and is the one CI types. *)
+type mode =
+  { locked : bool
+  ; offline : bool
+  }
+
+let unrestricted = { locked = false; offline = false }
+
+(* Resolution, and the lockfile it either writes or is held to. *)
+let lock ~mode root =
+  match Resolution.resolve root with
+  | Error errors -> Error errors
+  | Ok resolution ->
+    let rendered = Lockfile.render resolution in
+    let existing = Lockfile.read root in
+    let refuse message =
+      Error [ Diagnostic.at Diagnostic.Manifest Source_map.Span.nowhere message ]
+    in
+    (match mode.locked, existing with
+     | true, None ->
+       refuse
+         "--locked was given and there is no cronyx.lock. Run `cx build` once without it, and \
+          check the lockfile in."
+     | true, Some current when not (String.equal current rendered) ->
+       refuse
+         "--locked was given and the lockfile would change. Run `cx build` without it to see \
+          what moved."
+     | true, Some _ -> Ok resolution
+     | false, Some current when String.equal current rendered -> Ok resolution
+     | false, _ ->
+       Lockfile.write root rendered;
+       Ok resolution)
+
 (* [compiled] names the packages this build actually ran the compiler over, so
    that "nothing to do" is something a caller can see rather than infer from a
    clock. *)
@@ -160,16 +195,21 @@ let rec compile ~out ~built ~compiled root : (Artifact.t list, Diagnostic.error 
 (* Built from the package root, so every path an artifact carries is relative to
    it. Two copies of one tree then compile to the same bytes, which is what
    makes an artifact a function of its inputs rather than of its address. *)
-let package ~out root =
+let package ?(mode = unrestricted) ~out root =
   let compiled = ref [] in
   let here = Sys.getcwd () in
   Sys.chdir root;
   Fun.protect
     ~finally:(fun () -> Sys.chdir here)
     (fun () ->
-      match compile ~out ~built:(Hashtbl.create 8) ~compiled "." with
+      (* Resolution first: the lockfile is what says the graph is what it was,
+         and a build that disagreed with it would be building something else. *)
+      match lock ~mode "." with
       | Error errors -> Error errors
-      | Ok artifacts -> Ok (artifacts, List.rev !compiled))
+      | Ok _ ->
+        (match compile ~out ~built:(Hashtbl.create 8) ~compiled "." with
+         | Error errors -> Error errors
+         | Ok artifacts -> Ok (artifacts, List.rev !compiled)))
 
 (* Each package embeds whatever of the standard library it imported, since the
    library is not itself compiled to an artifact yet. Two of them embedding the

@@ -6,6 +6,10 @@ let usage =
   \  build           compile the package here, and its dependencies\n\
   \  toolchain …     install <version> <binary>, or list\n\
   \  run [file.cx]   compile and execute a program, or the package here\n\n\
+   options for `build` and `run`:\n\
+  \  --locked        fail if the lockfile would change\n\
+  \  --offline       no network; the cache or nothing\n\
+  \  --frozen        both\n\n\
    options for `run`:\n\
   \  --dump-source   echo the source before running\n\
   \  --dump-tokens   print the token stream\n\
@@ -35,6 +39,8 @@ let parse_run args =
       | "-h" | "--help" ->
         print_endline usage;
         exit 0
+      (* Read by [mode_of], which sees the same list. *)
+      | "--locked" | "--offline" | "--frozen" -> ()
       | _ when String.length arg > 1 && arg.[0] = '-' ->
         Driver.die ("unknown option: " ^ arg ^ "\n" ^ usage)
       | _ -> set_path arg)
@@ -60,9 +66,22 @@ let report entry errors =
   Render.emit ~entry errors;
   exit 65
 
-let build () =
+let mode_of args =
+  List.fold_left
+    (fun mode arg ->
+      match arg with
+      | "--locked" -> { mode with Cx.Build.locked = true }
+      | "--offline" -> { mode with Cx.Build.offline = true }
+      | "--frozen" -> { Cx.Build.locked = true; offline = true }
+      | _ when String.length arg > 1 && Char.equal arg.[0] '-' ->
+        Driver.die ("unknown option: " ^ arg ^ "\n" ^ usage)
+      | _ -> mode)
+    Cx.Build.unrestricted
+    args
+
+let build args =
   let root = package_root () in
-  match Cx.Build.package ~out:print_string root with
+  match Cx.Build.package ~mode:(mode_of args) ~out:print_string root with
   | Error errors -> report root errors
   | Ok (artifacts, compiled) ->
     List.iter
@@ -73,9 +92,9 @@ let build () =
           a.Artifact.package)
       artifacts
 
-let run_package dumps =
+let run_package ~mode dumps =
   let root = package_root () in
-  match Cx.Build.package ~out:print_string root with
+  match Cx.Build.package ~mode ~out:print_string root with
   | Error errors -> report root errors
   | Ok (artifacts, _) ->
     let entry = Option.value (Cx.Workspace.entry_of root) ~default:root in
@@ -125,12 +144,12 @@ let () =
     print_endline usage;
     exit 0
   | "new" :: args -> new_package args
-  | "build" :: _ -> build ()
+  | "build" :: args -> build args
   | "toolchain" :: args -> toolchain args
   | "run" :: args ->
     (match parse_run args with
      (* No file named: the package here, through its artifacts. *)
-     | None, dumps -> run_package dumps
+     | None, dumps -> run_package ~mode:(mode_of args) dumps
      | Some path, dumps ->
        (match Cx.Workspace.roots_for path with
         | Error errors -> report path errors

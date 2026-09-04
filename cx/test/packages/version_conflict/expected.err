@@ -1,0 +1,5 @@
+[unknown] no version of 'alpha' satisfies every requirement.
+  ─ version_conflict 0.1.0 requires alpha 0.1.0
+  ─ version_conflict 0.1.0 → uses_alpha_v2 0.1.0 requires alpha 0.2.0
+
+  A `path` dependency is whatever version its own manifest names, so the two cannot be reconciled by choosing: one of the paths points somewhere it should not.

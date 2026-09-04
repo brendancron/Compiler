@@ -1,0 +1,5 @@
+[unknown] no compiler satisfies every requirement.
+  ─ the graph requires cronyx >=9.9.9
+  ─ this machine has 0.1.0
+
+  A compiler requirement is a floor and never a ceiling, so the newest available would do; there is no version this high.

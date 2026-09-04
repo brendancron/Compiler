@@ -28,7 +28,8 @@ let rejected =
    reading it produced. *)
 let packages =
   [ "two_packages/app"; "uses_std"; "same_unit_name"; "generic_dep"; "reads_data" ]
-let bad_packages = [ "reaches_out"; "claims_std"; "overlapping_impls" ]
+let bad_packages =
+  [ "reaches_out"; "claims_std"; "overlapping_impls"; "version_conflict"; "needs_future_compiler" ]
 
 let repo_root () =
   let marker = Filename.concat "cx" (Filename.concat "test" "manifests") in
@@ -479,7 +480,35 @@ let run_dispatch (running, wanted, expected) =
       actual;
     false)
 
+(* The lockfile is what says a green build stays green, so it has to be the
+   same file every time and `--locked` has to mean what it says. *)
+let lockfile_cases dir =
+  let root = Filename.concat dir "two_packages/app" in
+  let lock = Filename.concat root Cx.Lockfile.file_name in
+  clean dir;
+  if Sys.file_exists lock then Sys.remove lock;
+  let check what ok =
+    if ok then Printf.printf "ok   %s\n" what else Printf.printf "FAIL %s\n" what;
+    ok
+  in
+  let build ?(mode = Cx.Build.unrestricted) () =
+    match Cx.Build.package ~mode ~out:(fun _ -> ()) root with
+    | Ok _ -> true
+    | Error _ -> false
+  in
+  let locked = { Cx.Build.locked = true; offline = false } in
+  check "lock/absent under --locked" (not (build ~mode:locked ()))
+  && check "lock/written" (build () && Sys.file_exists lock)
+  && (let first = read_file lock in
+      Sys.remove lock;
+      ignore (build ());
+      check "lock/byte-identical when written again" (String.equal first (read_file lock)))
+  && check "lock/holds under --locked" (build ~mode:locked ())
+
 let () =
+  (* An empty toolchain directory, so a diagnostic that names what this machine
+     has says the same thing on every machine. *)
+  Unix.putenv "CRONYX_HOME" (Filename.concat (Filename.get_temp_dir_name ()) "cx-test-home");
   match repo_root () with
   | None ->
     prerr_endline "cannot find the repo root; set CRONYX_REPO_ROOT";
@@ -496,7 +525,8 @@ let () =
       @ List.map (bad_package_case packages_dir) bad_packages
       @ List.map run_preamble preambles
       @ List.map run_dispatch dispatches
-      @ [ cache_unchanged packages_dir
+      @ [ lockfile_cases packages_dir
+        ; cache_unchanged packages_dir
         ; cache_meta_read packages_dir
         ; cache_compiler_version packages_dir
         ]

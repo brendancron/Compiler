@@ -1,0 +1,8 @@
+[package]
+name    = "version_conflict"
+version = "0.1.0"
+cronyx  = "0.1.0"
+
+[dependencies]
+alpha         = { path = "../alpha" }
+uses_alpha_v2 = { path = "../uses_alpha_v2" }

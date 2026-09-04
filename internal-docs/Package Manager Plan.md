@@ -113,17 +113,23 @@ A build runs from the package root, so every path an artifact carries is relativ
 
 ## 6. Resolution and the lockfile
 
-PubGrub over a real requirement graph, with `cronyx` as a lower-bound-only node. `cronyx.lock` written deterministically — sorted, stable, no incidental ordering — because the alternative is diff churn in every user's repository forever.
+`cronyx.lock` written deterministically — sorted, stable, no incidental ordering — because the alternative is diff churn in every user's repository forever. `cronyx` resolves as a lower-bound-only node: the maximum over the graph, which is the version dispatch hands to and therefore the one to pin.
 
-`cx add`, `cx update`, and the `--locked` / `--offline` / `--frozen` triad, which are three points on two axes and not two points on one.
+**Not PubGrub, yet.** PubGrub chooses between candidate versions, and with `path` dependencies there is nothing to choose: a package is whatever version its own manifest names. What resolution has to catch today is a graph that disagrees with itself — two paths reaching one name at two versions — and a compiler floor nothing on this machine reaches. Both are reported in the shape the design doc asks for. PubGrub arrives with the registry, which is where a name first has more than one candidate.
 
 **Done when**
 
-- A conflict renders the requirement chain in the shape the design doc shows.
-- A floor no released compiler reaches is reported as an unsatisfiable requirement, in the same shape as any other.
-- The same graph resolves identically on two machines, and re-resolving rewrites the lockfile byte-for-byte.
-- `--locked` fails rather than writing; `--locked` with no lockfile is an error rather than a generation.
-- `cx build` reads no index. It may fetch an artifact the lockfile names, whose checksum is already pinned.
+- A conflict renders the requirement chain in the shape the design doc shows. *(`version_conflict`, where two paths reach `alpha` at 0.1.0 and 0.2.0.)*
+- A floor no released compiler reaches is reported as an unsatisfiable requirement, in the same shape as any other. *(`needs_future_compiler`.)* In the CLI, dispatch answers first with the more actionable message, naming where to get the toolchain; resolution's is what a caller past dispatch sees.
+- The same graph resolves identically on two machines, and re-resolving rewrites the lockfile byte-for-byte. *(`lock/byte-identical when written again`; the paths in it are relative to the root, as artifacts are.)*
+- `--locked` fails rather than writing; `--locked` with no lockfile is an error rather than a generation. *(`lock/absent under --locked`, `lock/holds under --locked`.)*
+- `cx build` reads no index — there is none to read, and the lockfile is written before anything is compiled.
+
+**Todo, left by this milestone**
+
+- **`--offline` is inert.** It parses and it is carried through `Build.mode`, and there is no network for it to refuse. It becomes real with the registry, and the point of shipping it now is that `--frozen` means both axes from the start rather than being widened later.
+- **No `cx add` or `cx update`.** Both are about a registry: `add` writes a requirement and re-resolves, `update` moves a pin. Neither has anything to do until there are versions to pick.
+- **The lockfile records no checksum.** A `path` dependency has no tarball to hash. The field arrives with the registry, alongside the `source = "registry+…"` it belongs to.
 
 ## 7. The registry
 
