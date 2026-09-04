@@ -101,10 +101,15 @@ A build runs from the package root, so every path an artifact carries is relativ
 
 **Done when**
 
-- A package pinned to a version the machine lacks installs it and builds, with no prior step.
-- Installing an older toolchain leaves `bin/cx` alone.
-- A `cx` too old to satisfy a manifest fails naming the version and where to get it, never with a parse error.
-- Dispatch execs at most twice, and the second exec is provably bounded by the lockfile.
+- A package pinned to a version the machine lacks installs it and builds, with no prior step. **Half done.** Dispatch finds an installed toolchain and hands the job to it; there is no download, so a version the machine lacks is a diagnostic naming it and where it would come from rather than a fetch. `cx toolchain install <version> <binary>` installs from a file, which is what a release would put there.
+- Installing an older toolchain leaves `bin/cx` alone. *(`cx toolchain install` reports which of the two happened.)*
+- A `cx` too old to satisfy a manifest fails naming the version and where to get it, never with a parse error. *(`preamble` cases, including a manifest carrying an `edition`, an inline table, and a `[profile.release]` this compiler knows nothing about.)*
+- Dispatch execs at most twice. *(`CRONYX_DISPATCHED` is set across the exec: a toolchain installed under a version it does not report stops the job rather than passing it back.)* The lockfile is not what bounds it yet — the second floor is the maximum over the manifests the graph reaches, read with the frozen reader, and it becomes the lockfile's answer in the next milestone.
+
+**Todo, left by this milestone**
+
+- **No download.** `toolchains.cronyx.dev` is a URL in a diagnostic and nothing else. The seam is `Toolchain_store.install`, which takes a file today and would take a fetched-and-verified one instead; the checksum belongs there with it.
+- **No `default` toolchain outside a package.** `~/.cronyx/config.toml`'s `default = "…"` is in the design and not in the code; outside a package `cx` is simply whichever one ran.
 
 ## 6. Resolution and the lockfile
 

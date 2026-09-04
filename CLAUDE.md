@@ -120,6 +120,13 @@ Scanner → Parser → Loader → Metaprocess → Desugar → Value monomorphize
 
 ### Key distinctions
 
+**Dispatch is a mode of `cx`, not a shim.** On startup `cx` finds the package
+it was invoked in, reads the toolchain it requires with `Preamble` — a reader
+for one frozen key, so a manifest written for a newer compiler is answered with
+a version rather than a syntax error — and hands the job to that toolchain's
+`cx`. `~/.cronyx/bin/cx` only ever moves forward, and `CRONYX_HOME` points the
+whole thing somewhere else for a test.
+
 **A package compiles to an artifact.** `cx build` compiles each package in the
 graph to `target/debug/<name>.cxa` — its declarations, mangled under the
 package's own name, plus what each unit exports — and links the artifacts

@@ -421,6 +421,64 @@ let cache_compiler_version dir =
    | Error _ -> ());
   ok && expect_compiled "cache/version changed" root [ "app" ]
 
+(* The dispatch preamble is frozen grammar: every `cx` there will ever be has to
+   read the version out of a manifest written for a compiler it has never heard
+   of, and say so rather than failing to parse it. *)
+let preambles =
+  [ "[package]\ncronyx = \"0.1.1\"\n", Some "0.1.1"
+  ; "[package]\ncronyx='0.2.0'\n", Some "0.2.0"
+  ; "[package]\ncronyx = \"0.1.1\"  # the floor\n", Some "0.1.1"
+  ; "package.cronyx = \"0.3.0\"\n", Some "0.3.0"
+  ; "# nothing but a comment\n", None
+  ; "[package]\nname = \"x\"\n", None
+    (* The key is only the key under [package]. *)
+  ; "[other]\ncronyx = \"9.9.9\"\n", None
+    (* Written for a compiler this one has never met, and still readable. *)
+  ; "[package]\ncronyx = \"0.9.0\"\nedition = 2031\ncaps = { net = true }\n\n[profile.release]\nopt = 3\n"
+    , Some "0.9.0"
+  ]
+
+let run_preamble (text, expected) =
+  let actual = Cx.Preamble.required text in
+  let show = function Some v -> v | None -> "-" in
+  if Option.equal String.equal actual expected
+  then (
+    Printf.printf "ok   preamble %s\n" (show expected);
+    true)
+  else (
+    Printf.printf "FAIL preamble\n  expected %s\n  actual   %s\n" (show expected) (show actual);
+    false)
+
+(* A `cx` runs the job itself when it is new enough, hands it on once when it is
+   not, and says where to get one when the machine has none. *)
+let dispatches =
+  [ "0.1.0", None, "here"
+  ; "0.1.0", Some "0.1.0", "here"
+  ; "0.2.0", Some "0.1.0", "here"
+  ; "0.1.0", Some "9.9.9", "missing"
+  ]
+
+let run_dispatch (running, wanted, expected) =
+  let actual =
+    match Cx.Dispatch.decide ~running ~wanted with
+    | Cx.Dispatch.Run_here -> "here"
+    | Cx.Dispatch.Hand_to _ -> "hand"
+    | Cx.Dispatch.Missing _ -> "missing"
+    | Cx.Dispatch.Mislabelled _ -> "mislabelled"
+  in
+  if String.equal actual expected
+  then (
+    Printf.printf "ok   dispatch %s wanting %s\n" running (Option.value wanted ~default:"-");
+    true)
+  else (
+    Printf.printf
+      "FAIL dispatch %s wanting %s\n  expected %s\n  actual   %s\n"
+      running
+      (Option.value wanted ~default:"-")
+      expected
+      actual;
+    false)
+
 let () =
   match repo_root () with
   | None ->
@@ -436,6 +494,8 @@ let () =
       @ List.map (run_rejected dir) rejected
       @ (run_package_partition packages_dir :: List.map (package_case packages_dir) packages)
       @ List.map (bad_package_case packages_dir) bad_packages
+      @ List.map run_preamble preambles
+      @ List.map run_dispatch dispatches
       @ [ cache_unchanged packages_dir
         ; cache_meta_read packages_dir
         ; cache_compiler_version packages_dir

@@ -4,6 +4,7 @@ let usage =
   "usage: cx <command> [options]\n\n\
   \  new <name>      create a package skeleton\n\
   \  build           compile the package here, and its dependencies\n\
+  \  toolchain …     install <version> <binary>, or list\n\
   \  run [file.cx]   compile and execute a program, or the package here\n\n\
    options for `run`:\n\
   \  --dump-source   echo the source before running\n\
@@ -80,7 +81,44 @@ let run_package dumps =
     let entry = Option.value (Cx.Workspace.entry_of root) ~default:root in
     Driver.execute_linked ~dumps ~entry (Cx.Build.link artifacts)
 
+let toolchain = function
+  | [ "list" ] ->
+    (match Cx.Toolchain_store.list () with
+     | [] -> print_endline "No toolchains installed."
+     | versions ->
+       List.iter
+         (fun version ->
+           Printf.printf
+             "%s%s\n"
+             version
+             (if String.equal version Release.version then " (running)" else ""))
+         versions)
+  | [ "install"; version; binary ] ->
+    (match Cx.Toolchain_store.install ~version ~binary with
+     | Error message -> Driver.die message
+     | Ok { Cx.Toolchain_store.version; promoted } ->
+       Printf.printf
+         "Installed %s%s.\n"
+         version
+         (if promoted then "" else " (an older toolchain, so `cx` stays where it was)"))
+  | _ -> Driver.die ("usage: cx toolchain install <version> <binary> | cx toolchain list\n" ^ usage)
+
+(* Before anything else: the package may want a compiler this is not. Reading
+   the requirement is the one thing every `cx` must be able to do, whatever age
+   it is, so it is read by the frozen reader rather than by the manifest
+   parser. *)
+let dispatch () =
+  match Cx.Manifest.find_root (Sys.getcwd ()) with
+  | None -> ()
+  | Some root ->
+    (match Cx.Dispatch.decide ~running:Release.version ~wanted:(Cx.Dispatch.graph_floor root) with
+     | Cx.Dispatch.Run_here -> ()
+     | Cx.Dispatch.Hand_to (version, path) -> Cx.Dispatch.hand_to version path Sys.argv
+     | Cx.Dispatch.Missing version -> Driver.die (Cx.Dispatch.unavailable version)
+     | Cx.Dispatch.Mislabelled version -> Driver.die (Cx.Dispatch.mislabelled version))
+
 let () =
+  dispatch ();
   match List.tl (Array.to_list Sys.argv) with
   | [] -> Driver.die usage
   | ("-h" | "--help") :: _ ->
@@ -88,6 +126,7 @@ let () =
     exit 0
   | "new" :: args -> new_package args
   | "build" :: _ -> build ()
+  | "toolchain" :: args -> toolchain args
   | "run" :: args ->
     (match parse_run args with
      (* No file named: the package here, through its artifacts. *)
