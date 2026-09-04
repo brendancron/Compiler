@@ -4,4 +4,290 @@ sidebar_position: 5
 
 # Generators
 
-Coming soon. Builds a generator-style stream using a `yield` effect — `ctl` operations called inside a loop, with the handler resuming after each value to drive the producer forward. Comparison to Python/JS generators and Rust iterators, showing that "yield" is just a particular use of resumable effects.
+A generator is a producer that hands out values one at a time and pauses in between. In Python and JavaScript that needs a `yield` keyword and a special kind of function; in Rust it needs an `Iterator` impl with the loop turned inside out into a state machine.
+
+In Cronyx it's an effect whose arm resumes once per value.
+
+## Yield as an operation
+
+```cronyx
+effect stream {
+    ctl yield(value: int): unit;
+}
+
+fn range(low: int, high: int, step: int) {
+    for (var i = low; i < high; i += step) {
+        yield(i);
+    }
+}
+
+run {
+    range(5, 15, 2);
+} handle stream {
+    ctl yield(value) {
+        print(value);
+        resume;
+    }
+}
+```
+
+```
+5
+7
+9
+11
+13
+```
+
+`range` is an ordinary loop. It doesn't return a list, doesn't build one, and doesn't know that anything is consuming it — it performs `yield` and continues. The arm gets each value, does something with it, and calls `resume` to let the loop take its next step.
+
+`resume` with no argument is the right form here because `yield` produces `unit`: there's nothing to hand back to the call site, we just want the producer to keep going.
+
+## The producer stays readable
+
+The reason to care is what happens to a producer with real control flow in it. A hand-written iterator has to encode its loop state in a struct; here the state is just local variables, because the function really is paused mid-loop:
+
+```cronyx
+effect stream {
+    ctl yield(value: int): unit;
+}
+
+fn fibonacci(n: int) {
+    var a = 0;
+    var b = 1;
+    for (var count = 0; count < n; count++) {
+        yield(a);
+        var temp = a + b;
+        a = b;
+        b = temp;
+    }
+}
+
+run {
+    fibonacci(10);
+} handle stream {
+    ctl yield(value) {
+        print(value);
+        resume;
+    }
+}
+```
+
+```
+0
+1
+1
+2
+3
+5
+8
+13
+21
+34
+```
+
+`a`, `b` and `count` live across every suspension. Nothing was rewritten into a state machine by hand — the compiler does that transformation, and only for the functions that need it.
+
+## The handler is the consumer
+
+Printing is the least interesting thing an arm can do. Since the arm is ordinary code closing over its surroundings, a consumer that collects, filters or counts is a change to the handler alone:
+
+```cronyx
+effect stream {
+    ctl yield(value: int): unit;
+}
+
+fn range(low: int, high: int, step: int) {
+    for (var i = low; i < high; i += step) {
+        yield(i);
+    }
+}
+
+var evens: List<int> = [];
+run {
+    range(0, 10, 1);
+} handle stream {
+    ctl yield(value) {
+        if (value % 2 == 0) { evens.push(value); }
+        resume;
+    }
+}
+for (x in evens) { print(x); }
+
+var total = 0;
+run {
+    range(0, 10, 1);
+} handle stream {
+    ctl yield(value) {
+        total += value;
+        resume;
+    }
+}
+print(total);
+```
+
+```
+0
+2
+4
+6
+8
+45
+```
+
+One producer, three consumers so far, and no `Iterator` trait between them.
+
+## Stopping early
+
+A consumer that has seen enough simply doesn't resume:
+
+```cronyx
+effect stream {
+    ctl yield(value: int): unit;
+}
+
+fn range(low: int, high: int, step: int) {
+    for (var i = low; i < high; i += step) {
+        yield(i);
+    }
+}
+
+var first = run { range(100, 200, 1) } handle stream {
+    ctl yield(value) { return value; }
+} return (nothing) { -1 };
+
+print(first);
+```
+
+```
+100
+```
+
+The arm answers for the whole block with `return`, so `range` is abandoned mid-loop after one value. `break` in the consumer, expressed as the absence of `resume` in the producer's handler. The `return (nothing) { -1 }` clause is the value the block takes when the producer finishes on its own — an empty range would give `-1`.
+
+## One effect, many element types
+
+An effect can take type parameters, so a single `Yield` serves every element type. Each instantiation is a distinct effect to handle:
+
+```cronyx
+effect Yield<T> {
+    ctl yield(value: T): unit;
+}
+
+fn range(low: int, high: int) {
+    var i = low;
+    while (i < high) {
+        yield(i);
+        i = i + 1;
+    }
+}
+
+fn each_word(text: string) {
+    for (word in text.split(' ')) {
+        yield(word);
+    }
+}
+
+run {
+    range(1, 4);
+} handle Yield {
+    ctl yield(x) { print(x); resume; }
+}
+
+run {
+    each_word("hello world foo");
+} handle Yield {
+    ctl yield(w) { print(w); resume; }
+}
+```
+
+```
+1
+2
+3
+hello
+world
+foo
+```
+
+This is `Yield<T>` from `stdlib/effects/Yield.cx`, and it's all the standard library needs to declare — the handler at each use site is what makes it a printer, a collector, or a limit.
+
+## Push, and how to get pull
+
+One honest difference from Python's generators: what you've written here is *push*. The producer runs, the consumer's arm is called per value, and the consumer doesn't say "give me the next one" — it's given one.
+
+Pull is the same machinery with the continuation kept rather than called immediately. An arm can store `resume` somewhere and return, leaving the producer parked until someone asks for more:
+
+```cronyx
+effect deferred {
+    ctl todo(): unit;
+}
+
+var pending: List<() -> unit> = [];
+
+run {
+    print("before");
+    todo();
+    print("after");
+} handle deferred {
+    ctl todo() { pending.push(() => { resume; }); }
+}
+
+print("run finished");
+pending[0]();
+print("done");
+```
+
+```
+before
+run finished
+after
+done
+```
+
+The `run` block finished while the code inside it was still suspended, and calling the stored closure later ran the rest. That is the whole trick behind schedulers and `await`, and it's the subject of the [async chapter](./async.mdx).
+
+## Try it
+
+Write a producer `countdown(from: int)` that yields `from`, `from - 1`, … down to 1, then handle it twice: once printing each value, once collecting them into a list and printing the list.
+
+A working answer:
+
+```cronyx
+effect stream {
+    ctl yield(value: int): unit;
+}
+
+fn countdown(from: int) {
+    var i = from;
+    while (i > 0) {
+        yield(i);
+        i -= 1;
+    }
+}
+
+run {
+    countdown(3);
+} handle stream {
+    ctl yield(value) { print(value); resume; }
+}
+
+var collected: List<int> = [];
+run {
+    countdown(3);
+} handle stream {
+    ctl yield(value) { collected.push(value); resume; }
+}
+print(collected.len());
+```
+
+```
+3
+2
+1
+3
+```
+
+## What's next
+
+Every handler so far has been written inline on the `run` block that needed it, and every block has handled exactly one effect. Next up: **composing handlers** — naming a handler so it can be reused, and stacking several over one block.

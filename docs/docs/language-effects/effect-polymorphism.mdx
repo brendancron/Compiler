@@ -183,3 +183,7 @@ fn fold<T, A, E>(items: List<T>, start: A, f: (A, T) -> <E> A): <E> A
 ```
 
 This is why you can `map` a function that logs, or `filter` with a predicate that asks a handler for a threshold. Without the row variable each of those would be pure-only, and the effectful case would need a parallel copy of every combinator.
+
+## What's next
+
+That's the whole effect system: three parts, one keyword each, and a row the compiler tracks for you. The [metaprogramming section](../language-metaprogramming/metaprocessing.mdx) is the other half of the language — code that runs at compile time and produces the declarations the checker then sees.

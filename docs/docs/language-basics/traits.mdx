@@ -176,7 +176,7 @@ You'll see this pattern everywhere. A function with a trait bound is the standar
 
 ## Try it
 
-Define a trait `Area` with one method, `area(self) -> int`. Implement it for `Circle { radius: int }` and `Rectangle { width: int, height: int }`. Then write a generic function `print_area<T: Area>(shape: T)` that prints the area of any shape, and call it with one of each.
+Define a trait `Area` with one method, `area(self): int`. Implement it for `Circle { radius: int }` and `Rectangle { width: int, height: int }`. Then write a generic function `print_area<T: Area>(shape: T)` that prints the area of any shape, and call it with one of each.
 
 A working answer:
 

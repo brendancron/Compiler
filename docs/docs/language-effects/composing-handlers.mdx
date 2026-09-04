@@ -4,4 +4,249 @@ sidebar_position: 6
 
 # Composing handlers
 
-Coming soon. Two related concepts in one chapter: **named handlers** with `handler N : Effect { ... }` and `with N` for reuse, and **chained handlers** with `} handle E1 { ... } handle E2 { ... }` for blocks that perform multiple independent effects. Includes a worked example combining a logging effect with a counting effect to demonstrate composition.
+Two small things stand between the examples so far and a real program: handlers have been written inline at every `run` block, and every block has handled exactly one effect. Both are fixable without new machinery.
+
+## Naming a handler
+
+`handler <name> : <effect> { ... }` gives a handler a name, and `with <name>` installs it:
+
+```cronyx
+effect log {
+    fn log(msg: string): unit;
+}
+
+fn greet(name: string): unit {
+    log("Hello, " + name);
+}
+
+run {
+    greet("Brendan");
+} handle log {
+    fn log(msg: string) {
+        print("From inline handler: " + msg);
+    }
+}
+
+handler basic_log_handler : log {
+    fn log(msg: string) {
+        print("From handler definition: " + msg);
+    }
+}
+
+run {
+    greet("Brendan");
+} with basic_log_handler;
+```
+
+```
+From inline handler: Hello, Brendan
+From handler definition: Hello, Brendan
+```
+
+The two `run` blocks are equivalent; the second one names its policy instead of restating it. A named handler is the unit you'd share across a program — `console_log`, `null_log`, `capturing_log` for tests — so that installing one is a single line at each site.
+
+A named handler can be declared inside a function, next to the code that uses it:
+
+```cronyx
+effect log {
+    fn log(msg: string): unit;
+}
+
+fn quietly(name: string) {
+    handler drop_log : log {
+        fn log(msg) { }
+    }
+
+    run {
+        log("noise from " + name);
+        print("did the work");
+    } with drop_log;
+}
+
+quietly("worker");
+```
+
+```
+did the work
+```
+
+## Handling several effects over one block
+
+A `run` block takes as many `handle` clauses as it needs:
+
+```cronyx
+effect logger {
+    fn log(msg: string): unit;
+}
+
+effect counter {
+    ctl tick(): unit;
+}
+
+fn greet(name: string) {
+    log("Hello, " + name);
+    tick();
+    log("Bye, " + name);
+}
+
+run {
+    greet("Alice");
+    greet("Bob");
+} handle logger {
+    fn log(msg) {
+        print("[LOG] " + msg);
+    }
+} handle counter {
+    ctl tick() {
+        print("[TICK]");
+        resume;
+    }
+}
+```
+
+```
+[LOG] Hello, Alice
+[TICK]
+[LOG] Bye, Alice
+[LOG] Hello, Bob
+[TICK]
+[LOG] Bye, Bob
+```
+
+`greet` performs two unrelated effects, declared separately by whoever needed them, and the block discharges both. Nothing had to anticipate the combination: there's no `LoggingAndCounting` interface, and the two effects never mention each other.
+
+`with` mixes freely with `handle` in the same chain, so a shared logging handler and a one-off counter arm can sit side by side.
+
+## Stacking, and which handler wins
+
+Handlers nest. An inner `run` handles the operations performed inside it; anything it doesn't handle passes outward to whichever enclosing handler does:
+
+```cronyx
+effect log { fn log(msg: string): unit; }
+effect ask { fn ask(): int; }
+
+fn work() {
+    log("asking");
+    return ask();
+}
+
+run {
+    run {
+        print(work());
+    } handle ask {
+        fn ask() { return 42; }
+    }
+} handle log {
+    fn log(msg) { print("[outer] " + msg); }
+}
+```
+
+```
+[outer] asking
+42
+```
+
+`work` performs both effects. The inner block discharges `ask`; `log` travels past it to the outer one. If two handlers for the *same* effect are in scope, the innermost enclosing one takes the operation — the usual dynamic scoping rule, and the reason a nested block can locally override a policy set further out:
+
+```cronyx
+effect log { fn log(msg: string): unit; }
+
+fn greet(name: string) {
+    log("hello " + name);
+}
+
+run {
+    greet("outer");
+    run {
+        greet("inner");
+    } handle log {
+        fn log(msg) { print("[inner] " + msg); }
+    }
+    greet("outer again");
+} handle log {
+    fn log(msg) { print("[outer] " + msg); }
+}
+```
+
+```
+[outer] hello outer
+[inner] hello inner
+[outer] hello outer again
+```
+
+## An arm may perform effects of its own
+
+A handler arm is ordinary code, so it can perform an effect — one its own `run` block doesn't handle, which then has to be handled further out:
+
+```cronyx
+effect log { fn log(msg: string): unit; }
+effect audit { fn record(what: string): unit; }
+
+fn transfer(amount: int) {
+    log("transferring " + str(amount));
+}
+
+run {
+    run {
+        transfer(100);
+    } handle log {
+        fn log(msg) {
+            record(msg);
+            print(msg);
+        }
+    }
+} handle audit {
+    fn record(what) { print("AUDIT: " + what); }
+}
+```
+
+```
+AUDIT: transferring 100
+transferring 100
+```
+
+The `log` arm performs `audit`, which is discharged by the enclosing block. This is how you layer policy — a handler that adds tracing, retries, or rate limiting on top of another effect, rather than one that has to do everything itself.
+
+## Try it
+
+Declare `metrics` with `fn count(name: string): unit` and reuse a named handler for it across two `run` blocks, one of which also handles a `log` effect inline.
+
+A working answer:
+
+```cronyx
+effect metrics { fn count(name: string): unit; }
+effect log { fn log(msg: string): unit; }
+
+handler print_metrics : metrics {
+    fn count(name) { print("count " + name); }
+}
+
+fn checkout() {
+    count("checkout");
+}
+
+fn checkout_verbose() {
+    log("starting checkout");
+    count("checkout");
+}
+
+run {
+    checkout();
+} with print_metrics;
+
+run {
+    checkout_verbose();
+} with print_metrics handle log {
+    fn log(msg) { print("[log] " + msg); }
+}
+```
+
+```
+count checkout
+[log] starting checkout
+count checkout
+```
+
+## What's next
+
+Every arm so far has resumed at most once. Next up: **multiple resumption** — an arm that calls `resume` twice, running the rest of the program more than once, which is the point where effects stop resembling anything else in a mainstream language.
