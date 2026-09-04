@@ -1,1 +1,1 @@
-[9:1] Type 'Bag' already has a method 'from_array'.
+[9:1] Type 'Bag' already has a method 'from_array', from collections/errors/duplicate_container.cx:3.

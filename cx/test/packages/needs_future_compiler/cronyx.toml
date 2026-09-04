@@ -1,0 +1,4 @@
+[package]
+name    = "needs_future_compiler"
+version = "0.1.0"
+cronyx  = "9.9.9"

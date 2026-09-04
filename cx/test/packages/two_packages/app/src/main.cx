@@ -1,0 +1,5 @@
+import "greet";
+import "greet/loud";
+
+print(greet.hello("World"));
+print(loud.shout("World"));

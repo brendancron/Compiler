@@ -1,1 +1,1 @@
-[9:1] Type 'Vec2' already has a method 'add'.
+[9:1] Type 'Vec2' already has a method 'add', from operators/errors/duplicate.cx:3.

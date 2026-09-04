@@ -1,0 +1,4 @@
+[package]
+name    = "mypkg"
+version = "0.3"
+cronyx  = "0.1.1"

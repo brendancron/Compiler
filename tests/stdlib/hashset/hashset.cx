@@ -1,4 +1,4 @@
-import "../../../stdlib/collections/HashSet";
+import "std/collections/HashSet";
 
 var s = HashSet.new();
 

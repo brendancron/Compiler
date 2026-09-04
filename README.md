@@ -50,11 +50,26 @@ brew update
 brew upgrade cronyx
 ```
 
-# Installing the toolchain
+This installs one complete toolchain: `cx`, which links the compiler rather
+than shelling out to it, and the standard library it resolves `import "std/…"`
+against. There is nothing further to install to start writing Cronyx.
+
+What `cx` installs later is *other* toolchains. A package names the compiler it
+needs in `cronyx.toml`, and opening one that wants a version you do not have
+makes `cx` fetch that toolchain and hand the job to it — so a repository builds
+on a machine that has never seen its compiler, without a step before it.
+
+# Starting a package
 
 ```
-cronyx toolchain instal vX.X.X
+cx new hello
+cd hello
+cx run
 ```
+
+`cx build` compiles the package and its dependencies, `cx publish` uploads it,
+and `cx toolchain list` says which compilers are installed. A package names the
+compiler it needs in `cronyx.toml`, and `cx` hands the job to that one.
 
 # Running a program
 

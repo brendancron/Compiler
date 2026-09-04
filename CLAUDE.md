@@ -4,11 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-`bootstrap2/` (OCaml) is the compiler. `bootstrap/` (Rust) is the one it
-replaced — it is kept for reference, is not in CI, and no longer compiles the
-current `stdlib/` or `tests/`.
+`bootstrap/` (OCaml) is the compiler and `cx/` is the package manager, which
+links the compiler as a library rather than shelling out to it. They are two
+dune projects under one `dune-workspace` at the repo root.
+`legacy-bootstrap/` (Rust) is the one `bootstrap/` replaced — it is kept for
+reference, is not in CI, and no longer compiles the current `stdlib/` or
+`tests/`.
 
-All commands run from `bootstrap2/` unless noted.
+Compiler commands run from `bootstrap/`; anything touching `cx` runs from the
+repo root, so that the workspace is in scope.
 
 ```bash
 # Build
@@ -21,6 +25,27 @@ dune test --force            # again, ignoring dune's cache
 # Run a program (paths are relative to the repo root)
 dune exec --root . bin/main.exe -- ../tests/core/print/hello.cx
 ```
+
+```bash
+# From the repo root: build both projects, and run a program through `cx`
+dune build
+dune exec cx -- run tests/core/print/hello.cx
+dune exec cx -- new mypkg
+
+# The package manager's own suite: manifest fixtures, and the version and
+# requirement tables
+dune test cx
+
+# `cx run` and `bootstrap` must agree on every fixture, both streams and the
+# exit code.
+./scripts/cx-parity.sh
+```
+
+`cx/test/manifests/` holds `.toml` fixtures paired with a `.ok` of what the
+tool read or a `.err` of the diagnostics it produced, and `cx/test/packages/`
+holds whole packages paired with an `expected.txt` or an `expected.err`. The
+same rule as `tests/` applies to both: a fixture no list in
+`cx/test/test_cx.ml` names is a failure of its own.
 
 **CLI flags**, each printing one stage and then running:
 - `--dump-source` — the source as the scanner received it
@@ -47,7 +72,7 @@ is stale the moment the first lands.
 
 ## Code style
 
-Applies to `bootstrap/` (Rust), `bootstrap2/` (OCaml), and the `.cx` fixtures in `tests/`. A fixture is read alongside its `.txt`, which already says what the program produces, so a header explaining what it demonstrates is the same noise as anywhere else.
+Applies to `legacy-bootstrap/` (Rust), `bootstrap/` (OCaml), and the `.cx` fixtures in `tests/`. A fixture is read alongside its `.txt`, which already says what the program produces, so a header explaining what it demonstrates is the same noise as anywhere else.
 
 **A comment is the exception.** Start from the assumption that it should not exist and make it earn its place. Two kinds do:
 
@@ -86,7 +111,7 @@ Rewriting a comment to be more insightful is usually the wrong fix. Deleting it 
 Cronyx is a statically-typed, metaprogramming-first language.
 [internal-docs/Architecture.md](internal-docs/Architecture.md) is the authority
 on the pipeline and carries a heading per pass; the order itself lives in
-`bootstrap2/lib/compile.ml` and nowhere else.
+`bootstrap/lib/compile.ml` and nowhere else.
 
 ```
 Scanner → Parser → Loader → Metaprocess → Desugar → Value monomorphize
@@ -94,6 +119,36 @@ Scanner → Parser → Loader → Metaprocess → Desugar → Value monomorphize
 ```
 
 ### Key distinctions
+
+**A registry is a root, not a protocol.** `CRONYX_REGISTRY` points at an index
+of releases and a store of archives; it is a directory today and a URL when
+there is a server. `cx publish` writes both, immutably. The client — checksum
+verification before anything is unpacked, the shared cache under
+`~/.cronyx/registry`, and yanks that skip new resolutions but leave a pinned
+lockfile alone — is the same either way.
+
+**Dispatch is a mode of `cx`, not a shim.** On startup `cx` finds the package
+it was invoked in, reads the toolchain it requires with `Preamble` — a reader
+for one frozen key, so a manifest written for a newer compiler is answered with
+a version rather than a syntax error — and hands the job to that toolchain's
+`cx`. `~/.cronyx/bin/cx` only ever moves forward, and `CRONYX_HOME` points the
+whole thing somewhere else for a test.
+
+**A package compiles to an artifact.** `cx build` compiles each package in the
+graph to `target/debug/<name>.cxa` — its declarations, mangled under the
+package's own name, plus what each unit exports — and links the artifacts
+rather than reading a dependency's source. `Artifact` is `Marshal` of the
+compiler's own types with the version that wrote them, which is sound because
+the compiler that reads one is always the compiler that wrote it. The artifact
+stops before the checker, so a consumer still typechecks and monomorphizes the
+whole graph.
+
+**An import never leaves its package.** `Loader` takes the roots it may
+reach — the package, the standard library, and each dependency by name — and
+an import resolving outside the root of the file that wrote it is an error.
+`import "std/…"` comes from the toolchain rather than the filesystem, and a
+dependency is reached by the name the manifest gave it, so `cx` decides what is
+reachable and the compiler only consumes that decision.
 
 **One AST, several stages of it.** `Ast` is parameterized by its annotation and
 by what a statement holds, so `desugared_stmt`, `typed_stmt`, `resolved_stmt`
@@ -119,11 +174,11 @@ its handlers resume in tail position.
 
 ### Test fixtures
 
-`tests/` (repo root, not `bootstrap2/test/`) holds `.cx` sources paired with
+`tests/` (repo root, not `bootstrap/test/`) holds `.cx` sources paired with
 what they must produce: a `.txt` of expected stdout, a `.err` of expected
 diagnostics, or a `.rt` for one that runs and then fails.
 
-Every fixture must be named by a list in `bootstrap2/test/test_bootstrap2.ml`,
+Every fixture must be named by a list in `bootstrap/test/test_bootstrap.ml`,
 and a fixture no list names is a test failure of its own. A feature that does
 not work yet goes in `expected_failing` with the work it waits on — the suite
 asserts it still fails, and says so the moment it starts passing. Write the

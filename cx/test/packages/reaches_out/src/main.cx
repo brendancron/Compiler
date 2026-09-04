@@ -1,0 +1,3 @@
+import "../../two_packages/greet/src/lib";
+
+print(lib.hello("World"));

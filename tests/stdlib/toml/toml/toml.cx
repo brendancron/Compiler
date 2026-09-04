@@ -1,4 +1,4 @@
-import "../../../../stdlib/lang/Toml";
+import "std/lang/Toml";
 
 var src = "[alpha]\nfoo = \"hello\"\nbar = true\nbaz = 42\n\n[beta]\nx = { key = \"val\", flag = false }\ny = \"world\"\n";
 

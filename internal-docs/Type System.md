@@ -1,10 +1,10 @@
 Status: **implemented.** `lib/types.ml` and `lib/typecheck.ml` run after `Desugar`; every program goes through the checker. See [Architecture](Architecture.md) for where that sits now.
 
-This records the design of the OCaml bootstrap's static type system, what was carried over from the Rust bootstrap's checker (`bootstrap/src/semantics/types/`), what was done differently, and what is still missing.
+This records the design of the OCaml bootstrap's static type system, what was carried over from the Rust bootstrap's checker (`legacy-bootstrap/src/semantics/types/`), what was done differently, and what is still missing.
 
 ## Context
 
-Before this, `bootstrap2` was a tree-walking interpreter over a dynamically typed language and no stage consulted a type.
+Before this, `bootstrap` was a tree-walking interpreter over a dynamically typed language and no stage consulted a type.
 
 Types are needed downstream, not merely for error reporting. That decides several things below — most importantly that the checker must *produce* an annotated tree rather than just validate and discard. Known consumers:
 
@@ -70,7 +70,7 @@ and  typed_expr_kind =
 
 The fragments in `ast.ml` are already parameterized over their child type, so the typed AST costs about six lines instead of a re-declaration of every constructor — the same payoff that made `desugared_expr` cheap. `at` gains `ann = ()`; untyped stages are otherwise unchanged.
 
-A side table keyed by node id (what the Rust bootstrap uses) is the wrong choice here specifically because `bootstrap2` has no node ids. Adopting one would mean inventing an `IdProvider` solely to serve the type checker.
+A side table keyed by node id (what the Rust bootstrap uses) is the wrong choice here specifically because `bootstrap` has no node ids. Adopting one would mean inventing an `IdProvider` solely to serve the type checker.
 
 Annotate expressions. Statements are all `Unit` except `` `Return ``, which is checked against the enclosing signature — so inference threads a "current return type" downward, the way the evaluator threads `Return_value`.
 
@@ -126,7 +126,7 @@ Consequence to plan for: inferred polymorphism means LLVM codegen will need **mo
 
 ## Lessons from the Rust bootstrap
 
-`bootstrap/src/semantics/types/` is textbook Algorithm W with an **explicit substitution map**: `Type::Var(TypeVar { id })` is immutable and all state lives in `TypeSubst { map: HashMap<TypeVar, Type> }` (`type_subst.rs:5`), threaded as `&mut` through every inference call. `unify` (`type_subst.rs:60`) applies the substitution to both sides, matches structurally, and occurs-checks via `contains`. `TypeEnv` is a scope stack of `HashMap<String, TypeScheme>` plus the fresh-variable counter. Results land in side tables keyed by node id.
+`legacy-bootstrap/src/semantics/types/` is textbook Algorithm W with an **explicit substitution map**: `Type::Var(TypeVar { id })` is immutable and all state lives in `TypeSubst { map: HashMap<TypeVar, Type> }` (`type_subst.rs:5`), threaded as `&mut` through every inference call. `unify` (`type_subst.rs:60`) applies the substitution to both sides, matches structurally, and occurs-checks via `contains`. `TypeEnv` is a scope stack of `HashMap<String, TypeScheme>` plus the fresh-variable counter. Results land in side tables keyed by node id.
 
 ### Carry over
 
@@ -137,13 +137,13 @@ Consequence to plan for: inferred polymorphism means LLVM codegen will need **mo
 ### Change
 
 - **Mutable unification variables instead of a threaded substitution.** `IVar of tv ref` with path compression lets `unify` mutate in place: no substitution parameter on every function, no `apply` at every node, no repeated chain-walking (today `unify` applies the substitution to *both* arguments on every recursive call). It also removes an entire bug class — phase 1's `TypeTable` records `ty.apply(subst)` at visit time (`type_checker.rs:492`) and is never re-substituted afterward, so it holds whatever was known then. Benign only because `debug_sink.rs:72` is its sole reader.
-- **One checker, not two.** `type_checker.rs` and `runtime_type_checker.rs` are ~1,680 lines of near-duplicate inference, and the duplication exists only because `MetaAst` and `RuntimeAst` are distinct types. `bootstrap2` has a single post-desugar AST.
+- **One checker, not two.** `type_checker.rs` and `runtime_type_checker.rs` are ~1,680 lines of near-duplicate inference, and the duplication exists only because `MetaAst` and `RuntimeAst` are distinct types. `bootstrap` has a single post-desugar AST.
 - **No permissive fallbacks.** `env.lookup(name).unwrap_or_else(|| Type::Var(env.fresh()))` (`type_checker.rs:252-259`) and the struct escape hatches (`:271-280`) each inject an unresolved variable that something downstream must then compensate for. An unbound variable should be a hard error.
 - **Keep `TypeScheme`, but add the value restriction.** `generalize`/`instantiate` (`type_utils.rs:73-100`) port over almost directly, and `TypeEnv::lookup` instantiating on every lookup is the right ergonomic. What is missing there is any value restriction — acceptable in the Rust bootstrap only because nothing yet exercises the unsound case.
 
 ### Latent issues worth not reproducing
 
-- **Effect rows are carried but never unified.** `Type::Func` holds an `EffectRow`, but `unify`'s function case destructures with `..` (`type_subst.rs:84-87`) and unifies only parameters and return type, while `apply` clones the row through unchanged. Effects are really computed by a separate `collect_body_effects` walk. That is a defensible design, but storing the row inside the type implies a checking discipline that does not exist. If `bootstrap2` grows effects, decide explicitly whether they participate in unification or are a separate analysis with their own representation.
+- **Effect rows are carried but never unified.** `Type::Func` holds an `EffectRow`, but `unify`'s function case destructures with `..` (`type_subst.rs:84-87`) and unifies only parameters and return type, while `apply` clones the row through unchanged. Effects are really computed by a separate `collect_body_effects` walk. That is a defensible design, but storing the row inside the type implies a checking discipline that does not exist. If `bootstrap` grows effects, decide explicitly whether they participate in unification or are a separate analysis with their own representation.
 - **Call-site signatures standing in for monomorphization.** `runtime_type_checker.rs:118-126` stores one concrete signature per `FnDecl` for codegen and, when a polymorphic function is called at two different concrete types, warns and keeps the first. Either monomorphize properly or do not generalize; the middle ground produced this wart.
 
 ## What shipped

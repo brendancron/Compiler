@@ -1,4 +1,4 @@
-import { ToString } from "../../../stdlib/ops/ToString";
+import { ToString } from "std/ops/ToString";
 
 print(0.to_string());
 print(42.to_string());

@@ -1,4 +1,4 @@
-import { map, filter, fold } from "../../../stdlib/collections/List";
+import { map, filter, fold } from "std/collections/List";
 
 effect log {
     fn emit(msg: string): unit;

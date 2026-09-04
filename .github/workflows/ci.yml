@@ -25,13 +25,21 @@ jobs:
           opam-pin: false
 
       - name: Install dependencies
-        working-directory: bootstrap2
+        working-directory: bootstrap
         run: opam install . --deps-only --with-test --yes
 
       - name: Build
-        working-directory: bootstrap2
+        working-directory: bootstrap
         run: opam exec -- dune build
 
       - name: Test
-        working-directory: bootstrap2
+        working-directory: bootstrap
         run: opam exec -- dune test
+
+      - name: Test cx
+        run: opam exec -- dune test cx
+
+      # `cx` links the compiler as a library, so the two drivers must not drift.
+      # The script builds the whole workspace, which is what covers `cx/`.
+      - name: cx parity
+        run: opam exec -- ./scripts/cx-parity.sh

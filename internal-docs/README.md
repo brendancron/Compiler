@@ -6,8 +6,8 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 
 | Document                                                     | Subject                                                               |
 | ------------------------------------------------------------ | --------------------------------------------------------------------- |
-| [Architecture.md](Architecture.md)                           | `bootstrap2` pipeline, a heading per pass                             |
-| [Type System.md](Type%20System.md)                           | Type system and type checking for `bootstrap2` (OCaml)                |
+| [Architecture.md](Architecture.md)                           | `bootstrap` pipeline, a heading per pass                              |
+| [Type System.md](Type%20System.md)                           | Type system and type checking for `bootstrap` (OCaml)                 |
 | [Algebraic Effects.md](Algebraic%20Effects.md)               | Effect rows and the selective CPS pass                                |
 | [Row Polymorphism.md](Row%20Polymorphism.md)                 | Abstracting over the effects a callback performs                      |
 | [Continuations and Tasks.md](Continuations%20and%20Tasks.md) | Why a continuation is pure and a task is not, and what a scheduler owes to it |
@@ -18,6 +18,8 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 | [Comptime Params.md](Comptime%20Params.md)                   | `<>` parameters, and why they are not just generics                   |
 | [Diagnostics.md](Diagnostics.md)                             | Spans, and why a frame cannot render half-drawn                       |
 | [Modules.md](Modules.md)                                     | `import`, and why several files become one program                    |
+| [Package Manager.md](Package%20Manager.md)                   | `cx`, packages, resolution, and where the module boundary hardens     |
+| [Package Manager Plan.md](Package%20Manager%20Plan.md)       | The order `cx` gets built in, and what "done" means at each step      |
 | [Metaprocessing.md](Metaprocessing.md)                       | `meta` and `gen`, and compilation calling itself                      |
 | [Reify.md](Reify.md)                                         | Turning a compile-time value back into syntax                         |
 | [GADT Refinement.md](GADT%20Refinement.md)                   | Refining a type parameter in a match arm, and the choice of how       |

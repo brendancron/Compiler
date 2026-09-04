@@ -1,0 +1,37 @@
+# Cargo build artifacts
+target/
+Cargo.lock
+
+# Rust compiled files
+*.pdb
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Coverage & profiling
+*.profraw
+*.profdata
+coverage/
+tarpaulin-report.html
+
+# Logs and dumps
+*.log
+
+# Editor / OS files
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+rust-project.json
+
+# Backup files
+*.bak
+*.tmp
+

@@ -1,4 +1,4 @@
-import "../../../stdlib/lang/Math";
+import "std/lang/Math";
 
 print(Math.min(3, 7));
 print(Math.min(7, 3));

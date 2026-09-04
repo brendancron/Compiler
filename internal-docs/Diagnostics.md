@@ -14,7 +14,7 @@ half a frame.
 
 ## What the Rust compiler got wrong
 
-`bootstrap/src/error.rs` built a `Diagnostic` whose location, source line,
+`legacy-bootstrap/src/error.rs` built a `Diagnostic` whose location, source line,
 underline column, underline length, label and help were each an `Option`, and
 rendered every section under an `if let`. Every combination of those six
 compiled, and most of them draw something broken. Two showed up constantly:
@@ -71,7 +71,7 @@ Columns are counted in bytes from the start of the line, which is what
 
 ## The frame
 
-`lib/render.ml` draws it, and holds the only knowledge of colour. Two rules:
+`lib/render.ml` draws it, and holds the only knowledge of color. Two rules:
 
 - **Nothing structural is conditional.** The rows between the rules vary; the
   rules do not. There is no field whose absence removes a line.
@@ -92,7 +92,7 @@ An emoji built from a ZWJ sequence — a family, a flag, a profession — is sti
 counted per component, so an underline after one sits left of its target.
 Terminals do not agree on those either, so there is no width to match.
 
-Colour is ANSI when stderr is a terminal and `NO_COLOR` is unset, and the same
+Color is ANSI when stderr is a terminal and `NO_COLOR` is unset, and the same
 code path otherwise with an empty escape for every entry, so the two cannot
 drift.
 
@@ -114,6 +114,6 @@ design that is not already here.
 The fixture suite compares `[line:col] message` against a `.err` file, which
 would not notice a frame missing its source line or its closing rule. The
 renderer is pinned separately by `run_rendering` in
-`bootstrap2/test/test_bootstrap2.ml`: a span inside a line, a two-digit line
+`bootstrap/test/test_bootstrap.ml`: a span inside a line, a two-digit line
 number for the gutter, a line carrying a tab and a wide character, and a span
 with no source behind it.

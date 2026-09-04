@@ -1,0 +1,1 @@
+[src/main.cx 1:1] '../../two_packages/greet/src/lib' reaches outside its package. A package is the files under one directory, and everything else arrives through a dependency name.

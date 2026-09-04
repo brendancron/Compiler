@@ -1,3 +1,0 @@
-(test
- (name test_bootstrap2)
- (libraries bootstrap2))
