@@ -663,6 +663,14 @@ and primary s : Ast.expr =
 
 (* ---- statements ---- *)
 
+(* A `meta fn` and a `derive` are read by the metaprocessor before anything
+   records an attribute, and an `import` names nothing to hang one on. *)
+and attachable (s : Ast.stmt) =
+  match s.Ast.it with
+  | `Fn _ | `Type_decl _ | `Trait_decl _ | `Impl_decl _ | `Effect_decl _
+  | `Handler_decl _ | `Var_decl _ -> true
+  | _ -> false
+
 and declaration s : Ast.stmt option =
   try
     let tok = peek s in
@@ -683,9 +691,14 @@ and declaration s : Ast.stmt option =
     | Token.Type ->
       ignore (advance s);
       Some (type_decl s sp)
-    (* Only a member carries one, so the whole feature is per-field locality —
-       anything a whole type would say is an argument to the deriver instead. *)
-    | Token.At -> raise (error s tok "An attribute belongs to a field or a variant.")
+    | Token.At ->
+      let list = attributes s in
+      (match declaration s with
+       | None -> None
+       | Some inner ->
+         if not (attachable inner)
+         then raise (error s tok "An attribute belongs to a declaration.");
+         Some (Ast.at sp (`Attributed (list, inner))))
     | Token.Trait ->
       ignore (advance s);
       Some (trait_decl s sp)

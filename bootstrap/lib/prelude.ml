@@ -23,6 +23,19 @@ type TypeShape {
     Other,
 }
 
+// A failed assertion leaves the test it is in and nothing else, which is what
+// `final ctl` says: the handler cannot resume, so no value is owed and the call
+// is usable wherever it stands. `cx test` is the handler.
+effect Assertion {
+    final ctl failed(msg: string);
+}
+
+fn assert(cond: bool, msg: string) {
+    if (!cond) {
+        failed(msg);
+    }
+}
+
 // An operator is a trait, so generic code can be bounded by one. The impls for
 // the primitives are the compiler's and emit a machine operation rather than a
 // call; only a type declared in a program reaches the method written here.

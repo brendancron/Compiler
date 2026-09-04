@@ -12,10 +12,11 @@ let fail span fmt =
   Printf.ksprintf (fun message -> raise (Failed { span; message })) fmt
 
 (* Narrower than [Loader.is_declaration], which counts the meta forms too. *)
-let is_visible_to_meta (s : Ast.stmt) =
+let rec is_visible_to_meta (s : Ast.stmt) =
   match s.Ast.it with
   | `Fn _ | `Type_decl _ | `Trait_decl _ | `Impl_decl _ | `Effect_decl _
   | `Handler_decl _ -> true
+  | `Attributed (_, inner) -> is_visible_to_meta inner
   | _ -> false
 
 (* The interpreter already compares two values of any shape, so a derived `Eq`
@@ -174,6 +175,7 @@ let substitution (bound : (string, Value.value) Hashtbl.t) =
     let expr = expr shadowed in
     let it : Ast.stmt_kind =
       match s.Ast.it with
+      | `Attributed (attrs, inner) -> `Attributed (attrs, stmt shadowed inner)
       | `Fn (name, params, sg, body) ->
         `Fn
           ( named name
@@ -479,6 +481,7 @@ let expand context ~meta_fns ~named ~seen (root : Ast.stmt) : Ast.stmt =
       | #Ast.loops as l -> (Ast.map_loops expr stmt l :> Ast.stmt_kind)
       | #Ast.matching as m -> (Ast.map_matching expr stmt m :> Ast.stmt_kind)
       | #Ast.method_defs as m -> (Ast.map_method_defs stmt Fun.id m :> Ast.stmt_kind)
+      | `Attributed (attrs, inner) -> `Attributed (attrs, stmt inner)
       | other -> other
     in
     { s with Ast.it }

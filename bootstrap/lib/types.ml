@@ -176,25 +176,42 @@ let reflection_name = "Type"
 let shape_name = "TypeShape"
 let field_name = "TypeField"
 let variant_name = "TypeVariant"
+
+let name_name = "Name"
+let iname = INamed (name_name, [], FEmpty)
+let name = Named (name_name, [], [])
 let attr_name = "Attr"
 let attr_arg_name = "AttrArg"
 
-let reflection_fields = [ "name", Str; "shape", Sum (shape_name, []) ]
+let attr_fields =
+  [ "args", Named (array_name, [ Sum (attr_arg_name, []) ], []); "name", name ]
+
+let iattr_fields =
+  FCons
+    ( "args"
+    , INamed (array_name, [ ISum (attr_arg_name, []) ], FEmpty)
+    , FCons ("name", iname, FEmpty) )
+
+let attr_ty = Named (attr_name, [], attr_fields)
+let attrs_ty = Named (array_name, [ attr_ty ], [])
+
+let reflection_fields =
+  [ "attrs", attrs_ty; "name", Str; "shape", Sum (shape_name, []) ]
 
 let ireflected =
   INamed
     ( reflection_name
     , []
-    , FCons ("name", IStr, FCons ("shape", ISum (shape_name, []), FEmpty)) )
+    , FCons
+        ( "attrs"
+        , INamed (array_name, [ INamed (attr_name, [], iattr_fields) ], FEmpty)
+        , FCons ("name", IStr, FCons ("shape", ISum (shape_name, []), FEmpty)) ) )
 
 let reflected = Named (reflection_name, [], reflection_fields)
 
 let code_name = "Code"
 let icode = INamed (code_name, [], FEmpty)
 
-let name_name = "Name"
-let iname = INamed (name_name, [], FEmpty)
-let name = Named (name_name, [], [])
 let string_name = "string"
 
 let array_len = "len"

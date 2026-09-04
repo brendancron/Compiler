@@ -22,11 +22,31 @@ type Person {
 
 A deriver is the common consumer, not the channel. Attributes arrive on `TypeField` and `TypeVariant`, which come from `typeof(T).shape`, so anything that can write that reads them — a deriver, a bare `meta` block, or ordinary code. The third looks like runtime reflection and is not: `Reflect` folds the projection into a literal before CPS, so the loop runs over constants the compiler wrote down and the declaration it came from is already gone.
 
+## Two attachments, two mechanisms
+
+A **member** — a field or a variant — carries its attributes on the member itself, in `Ast.field.f_attrs` and `Ast.variant.v_attrs`.
+
+A **declaration** carries them on a wrapper that only the parse stage has:
+
+```ocaml
+type 's attributed = [ `Attributed of attr list * 's ]
+```
+
+It is in `stmt_kind` and in no later stage, so `Desugar` unwinding one is what erases it. A field is not a statement, which is why the two cannot be one mechanism.
+
 ## Erasure is the whole design
 
 An attribute exists so that generated or reflecting code can read it. Nothing else in the language looks at one: no pass changes behaviour on an attribute, and there is no way to ask for one at runtime.
 
-That is enforced by the shape of the tree rather than by a rule anyone has to remember. `type_defs` appears in `stmt_kind`, `desugared_stmt_kind`, `typed_stmt_kind`, `resolved_stmt_kind` and `reflected_stmt_kind` — and not in `cps_stmt_kind`. A `Type_decl` is therefore already gone by the time `Interp` runs, so an attribute riding on one cannot reach the program. A pass that tried to read an attribute after CPS would not compile.
+That is enforced by the shape of the tree rather than by a rule anyone has to remember, and at a different point for each attachment.
+
+A declaration's attributes die at **`Desugar`**: `attributed` is in `stmt_kind` alone, so no later stage has a type that can hold one.
+
+A member's die at **CPS**: `type_defs` appears in `stmt_kind`, `desugared_stmt_kind`, `typed_stmt_kind`, `resolved_stmt_kind` and `reflected_stmt_kind` — and not in `cps_stmt_kind`. A `Type_decl` is therefore already gone by the time `Interp` runs.
+
+Either way a pass that tried to read an attribute after its erasure point would not compile.
+
+`Fn` is why a declaration needs the wrapper rather than a field of its own. It lives in `('e, 's) stmts`, which *every* stage includes, `cps_stmt_kind` among them — so a function survives to the interpreter, and an attribute hung on one directly would survive with it.
 
 This is the same question Java answered with `@Retention` and answered badly: `RUNTIME` retention puts metadata in every artifact, makes reflection the way frameworks work, and defeats static reachability badly enough that ahead-of-time compilers need hand-written configuration to recover it. Go's struct tags make the smaller version of the mistake — a tag is a string nobody validates, so a typo compiles and misbehaves. Rust, D and C++26 keep attributes to compile time, and this follows them.
 
@@ -37,11 +57,11 @@ Attributes are on the AST node, in `Ast.field.f_attrs` and `Ast.variant.v_attrs`
 They stay out of `Typecheck.decl`. Unification and both monomorphizers walk that, and none of them has a reason to carry inert data. `Typecheck` copies attributes into `ctx_attrs`, keyed by type name and member label, and `Reflect` is the only reader — the same arrangement `ctx_types` already had for a sum's variants, which `Reflect` reads for the same reason.
 
 ```
-parser      attaches to the field or variant
-typecheck   records in ctx_attrs
-reflect     folds into the TypeField / TypeVariant record
-cps         drops the declaration, and the attribute with it
+member       parser → typecheck (ctx_attrs) → reflect (TypeField / TypeVariant) → cps drops it
+declaration  parser → desugar (decl_attrs, wrapper dropped) → reflect (typeof(T).attrs)
 ```
+
+Only a **type** declaration is recorded in `decl_attrs`. `typeof(T).attrs` is its one reader and it keys by type name, so a function or a variable recorded under the same key would collide rather than answer. Nothing can ask for those anyway: `typeof` takes a value, and a function value's type — `(int, int) -> int` — names no declaration to look up. Reaching a function's attributes needs a walk over declarations rather than reflection on a value, which is what `Discover.carrying` is and what `@test` uses — see [Testing](Testing.md).
 
 ## Arguments are literals
 
@@ -62,7 +82,7 @@ for (a in f.attrs) {
 
 ## Settled
 
-**Only a member carries one.** `@json("people") type Person` is rejected. Whatever a whole type would say is an argument to the deriver — `derive_json(Person, table: "people")` needs no new syntax and is already more expressive. Locality on a field is the one thing a meta function's parameters cannot reach, and that is the entire case for the feature.
+**A declaration carries them too, and `derive` still should not read them.** The earlier rule was that only a member may carry an attribute, on the grounds that whatever a whole type would say is better written as an argument to the deriver — `derive_json(Person, table: "people")`. That reasoning holds for *derivers* and no longer holds as a grammar rule, because a function has to be able to carry an attribute for anything to mark one. So the restriction moved from the parser to taste.
 
 **A named payload's fields do not.** `Circle { r: float }` is a variant's payload, not a member of the type, and reflection reports a variant's arity rather than its fields. Nothing can read an attribute there, so nothing may write one.
 

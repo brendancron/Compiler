@@ -32,6 +32,16 @@ let attr_ty =
   Types.Named
     (Types.attr_name, [], [ "args", Types.array attr_arg_ty; "name", Types.name ])
 
+(* Only a named type can be asked: `typeof` takes a value, and a function
+   value's type names no declaration to look the attributes up under. *)
+let declared_attrs (ty : Types.ty) =
+  match ty with
+  | Types.Named (name, _, _) | Types.Sum (name, _) ->
+    (match Hashtbl.find_opt Desugar.decl_attrs name with
+     | Some attrs -> attrs
+     | None -> [])
+  | _ -> []
+
 let field_ty =
   Types.Named
     (Types.field_name, [], [ "attrs", Types.array attr_ty; "name", Types.name ])
@@ -125,11 +135,13 @@ let rec expr (e : Ast.resolved_expr) : Ast.reflected_expr =
       (string_at e.Ast.span (Types.string_of_ty inner.Ast.ann)).Ast.it
     | `Field ({ Ast.it = `Typeof inner; _ }, "shape") ->
       (shape_of e.Ast.span inner.Ast.ann).Ast.it
+    | `Field ({ Ast.it = `Typeof inner; _ }, "attrs") ->
+      (attrs_at e.Ast.span (declared_attrs inner.Ast.ann)).Ast.it
     | `Typeof _ ->
       fail
         e.Ast.span
         "A type is not a value here. Ask for what you need of it, as \
-         'typeof(x).name' or 'typeof(x).shape'."
+         'typeof(x).name', 'typeof(x).shape' or 'typeof(x).attrs'."
     | #Ast.lit as l -> l
     | #Ast.arrays as a -> (Ast.map_arrays expr a :> Ast.reflected_expr_kind)
     | #Ast.strings as s -> (Ast.map_strings expr s :> Ast.reflected_expr_kind)

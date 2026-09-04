@@ -7,7 +7,8 @@ let usage =
   \  toolchain …     install <version> <binary>, or list\n\
   \  publish         upload the package here to a registry\n\
   \  version         print the toolchain version\n\
-  \  run [file.cx]   compile and execute a program, or the package here\n\n\
+  \  run [file.cx]   compile and execute a program, or the package here\n\
+  \  test [filter]   run the package's @test functions\n\n\
    options for `build` and `run`:\n\
   \  --locked        fail if the lockfile would change\n\
   \  --offline       no network; the cache or nothing\n\
@@ -102,6 +103,22 @@ let run_package ~mode dumps =
     let entry = Option.value (Cx.Workspace.entry_of root) ~default:root in
     Driver.execute_linked ~dumps ~entry (Cx.Build.link artifacts)
 
+(* Each test is one `run` block, so a failure leaves that block and the next
+   test still runs: the isolation is the effect system's. *)
+let test args =
+  let filter =
+    match List.filter (fun a -> not (String.length a > 0 && Char.equal a.[0] '-')) args with
+    | [] -> None
+    | [ one ] -> Some one
+    | _ -> Driver.die ("test takes at most one filter.\n" ^ usage)
+  in
+  let root = package_root () in
+  match Cx.Test.run ~mode:(mode_of args) ?filter root with
+  | Error errors -> report root errors
+  | Ok (rendered, failed) ->
+    print_string rendered;
+    if failed > 0 then exit 1
+
 let toolchain = function
   | [ "list" ] ->
     (* The one running is a toolchain too, whether or not it was installed
@@ -162,6 +179,7 @@ let () =
   | "build" :: args -> build args
   | "toolchain" :: args -> toolchain args
   | "publish" :: _ -> publish ()
+  | "test" :: args -> test args
   | "version" :: _ -> print_endline ("cx " ^ Release.version)
   | "run" :: args ->
     (match parse_run args with

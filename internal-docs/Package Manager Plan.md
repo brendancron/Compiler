@@ -154,7 +154,7 @@ The archive is ours rather than a tarball, for the same reason and only until th
 
 ## What is not in the plan
 
-**`cx test`.** The subcommand currently promises per-test reporting and failure isolation that the language cannot express — there is no test attribute and no assertion mechanism. Either it means "run the golden-file suite the way `dune test` does" and says so plainly, or it waits on a language design. It is not blocked on anything in this plan and it should not block anything either.
+**`cx test`.** Built — see [Testing](Testing.md). What this entry said the language could not express, it now can: `@test` is an attribute, a failed assertion is `Assertion::failed`, and `final ctl` gives per-test isolation without a process boundary. It was never blocked on anything in this plan and it still blocks nothing.
 
 **Features.** They arrive with the registry and not before; a feature is not observable in a tree of `path` dependencies. The design doc's §Features still contains a contradiction to resolve first — a feature set cannot both be part of the resolution key and be unioned into a single build — and the correct model is a fixpoint over version resolution and feature unification, because enabling a feature can add an edge that adds a package that requests features.
 

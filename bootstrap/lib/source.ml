@@ -184,6 +184,7 @@ and stmt depth (s : Ast.stmt) : string =
   let line = line depth in
   let braced head body = line (Printf.sprintf "%s {" head) ^ block (depth + 1) body ^ line "}" in
   match s.Ast.it with
+  | `Attributed (list, inner) -> line (String.trim (attrs list)) ^ stmt depth inner
   (* Printed back as it was written, rather than as the expression it is. *)
   | `Expr { Ast.it = `Run_expr (body, handlers, None); _ } when body.Ast.vb_value = None ->
     line "run {" ^ block (depth + 1) body.Ast.vb_stmts ^ handlers_of depth handlers

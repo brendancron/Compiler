@@ -148,6 +148,10 @@ let rec write_stmt buf indent (s : Ast.stmt) =
     line "%s)\n" pad
   in
   match s.Ast.it with
+  | `Attributed (list, inner) ->
+    nested
+      (String.concat " " (List.map (fun (a : Ast.attr) -> "@" ^ a.Ast.a_name) list))
+      [ inner ]
   | `Expr e -> line "%s%s\n" pad (string_of_expr e)
   | `Defer s -> nested "defer" [ s ]
   | `Meta body -> nested "meta" body

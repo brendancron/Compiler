@@ -209,6 +209,12 @@ type type_body =
 
 type type_defs = [ `Type_decl of string * string list * type_body ]
 
+(* Only [stmt_kind] carries this, so `Desugar` unwrapping one is what erases
+   every declaration attribute: no later stage's type can hold one, and a pass
+   that tried to read one would not compile. A member's attributes cannot use
+   this — a field is not a statement — so they stay on the field itself. *)
+type 's attributed = [ `Attributed of attr list * 's ]
+
 type method_sig =
   { ms_name : string
   ; ms_params : param list
@@ -388,6 +394,7 @@ and stmt = (stmt_kind, unit) node
 
 and stmt_kind =
   [ (expr, stmt) stmts
+  | stmt attributed
   | imports
   | stmt meta_blocks
   | (expr, stmt) loops

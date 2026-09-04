@@ -1,0 +1,7 @@
+ok   adds
+FAIL reports_its_output
+  1 + 2 is not 4
+  | printed by a failing test
+ok   keeps_going_after_a_failure
+
+2/3 passed
