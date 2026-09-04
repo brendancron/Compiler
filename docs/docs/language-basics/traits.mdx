@@ -14,7 +14,7 @@ Use the `trait` keyword followed by a name and a block of method signatures:
 
 ```cronyx
 trait Describe {
-    fn describe(self) -> string;
+    fn describe(self): string;
 }
 ```
 
@@ -33,7 +33,7 @@ Use `impl <Trait> for <Type>` to provide the methods for a specific type:
 
 ```cronyx
 trait Describe {
-    fn describe(self) -> string;
+    fn describe(self): string;
 }
 
 type Circle {
@@ -46,13 +46,13 @@ type Rectangle {
 }
 
 impl Describe for Circle {
-    fn describe(self) -> string {
+    fn describe(self): string {
         return "circle with radius " + str(self.radius);
     }
 }
 
 impl Describe for Rectangle {
-    fn describe(self) -> string {
+    fn describe(self): string {
         return "rectangle " + str(self.width) + "x" + str(self.height);
     }
 }
@@ -83,7 +83,7 @@ A trait pays off when you have *several* types that share an interface. Here's t
 
 ```cronyx
 trait Show {
-    fn show(self) -> string;
+    fn show(self): string;
 }
 
 type Point {
@@ -98,13 +98,13 @@ type Color {
 }
 
 impl Show for Point {
-    fn show(self) -> string {
+    fn show(self): string {
         return "(" + str(self.x) + ", " + str(self.y) + ")";
     }
 }
 
 impl Show for Color {
-    fn show(self) -> string {
+    fn show(self): string {
         return "rgb(" + str(self.r) + ", " + str(self.g) + ", " + str(self.b) + ")";
     }
 }
@@ -129,7 +129,7 @@ The real power shows up when you write code that works for *any* type implementi
 
 ```cronyx
 trait Summary {
-    fn summarize(self) -> string;
+    fn summarize(self): string;
 }
 
 type Article {
@@ -143,13 +143,13 @@ type Tweet {
 }
 
 impl Summary for Article {
-    fn summarize(self) -> string {
+    fn summarize(self): string {
         return self.title + " by " + self.author;
     }
 }
 
 impl Summary for Tweet {
-    fn summarize(self) -> string {
+    fn summarize(self): string {
         return self.username + ": " + self.content;
     }
 }
@@ -176,13 +176,13 @@ You'll see this pattern everywhere. A function with a trait bound is the standar
 
 ## Try it
 
-Define a trait `Area` with one method, `area(self) -> int`. Implement it for `Circle { radius: int }` and `Rectangle { width: int, height: int }`. Then write a generic function `print_area<T: Area>(shape: T)` that prints the area of any shape, and call it with one of each.
+Define a trait `Area` with one method, `area(self): int`. Implement it for `Circle { radius: int }` and `Rectangle { width: int, height: int }`. Then write a generic function `print_area<T: Area>(shape: T)` that prints the area of any shape, and call it with one of each.
 
 A working answer:
 
 ```cronyx
 trait Area {
-    fn area(self) -> int;
+    fn area(self): int;
 }
 
 type Circle {
@@ -195,13 +195,13 @@ type Rectangle {
 }
 
 impl Area for Circle {
-    fn area(self) -> int {
+    fn area(self): int {
         return self.radius * self.radius * 3;
     }
 }
 
 impl Area for Rectangle {
-    fn area(self) -> int {
+    fn area(self): int {
         return self.width * self.height;
     }
 }

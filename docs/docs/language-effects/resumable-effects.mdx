@@ -4,4 +4,219 @@ sidebar_position: 3
 
 # Resumable effects
 
-Coming soon. Introduces `ctl` operations and the `resume` keyword. Uses an `ask` effect as the running example — a handler computes a value and resumes the calling code with it. Sets up the comparison between `fn` (no resumption) and `ctl` (with resumption) operations.
+The handlers in the last chapter all did the same structural thing: run a little code, hand back a value, let the caller carry on. That's the `fn` operation, and it's the well-behaved case.
+
+A `ctl` operation is the general one. Its arm doesn't just compute a value — it receives *the rest of the computation*, and decides what happens to it.
+
+## `ctl` and `resume`
+
+Declare the operation with `ctl` instead of `fn`, and the arm continues the caller explicitly with `resume`:
+
+```cronyx
+effect ask {
+    ctl ask(): int;
+}
+
+fn doubled(): <ask> int {
+    return ask() * 2;
+}
+
+run {
+    print(doubled());
+} handle ask {
+    ctl ask() {
+        resume 21;
+    }
+}
+```
+
+```
+42
+```
+
+`resume 21` means "continue the paused code, and let `ask()` evaluate to 21." Everything after the call — the `* 2`, the `return`, the `print` — is the thing being resumed.
+
+Compare the two declarations. With `fn ask(): int` the arm writes `return 21` and continuation is automatic. With `ctl ask(): int` the arm writes `resume 21`, and *not* writing it is a real option.
+
+The `: <ask> int` on `doubled` is the effect showing up in a signature — `doubled` returns an `int` and performs `ask` along the way. You can write that annotation; you rarely have to, since it's inferred.
+
+## Not resuming
+
+An arm that never calls `resume` discards the rest of the block. The call site never comes back:
+
+```cronyx
+effect exception {
+    ctl throw(msg: string): unit;
+}
+
+fn divide(n, d) {
+    if (d == 0) {
+        throw("division by zero");
+    }
+    return n / d;
+}
+
+run {
+    print(divide(10, 2));
+    print(divide(5, 0));
+    print("unreachable");
+} handle exception {
+    ctl throw(msg) {
+        print(msg);
+    }
+}
+```
+
+```
+5
+division by zero
+```
+
+The first `divide` returns normally. The second performs `throw`, the arm prints and stops — and `"unreachable"` is never printed, because the rest of the `run` block was in the continuation the arm chose to drop. That is `throw`/`catch`, built out of the same three parts as logging, and it's the subject of the [next chapter](./error-handling.mdx).
+
+## Resuming with a repair
+
+Between "continue normally" and "abandon everything" is the interesting case: the arm inspects the problem, decides on a substitute, and continues:
+
+```cronyx
+effect parse_error {
+    ctl invalid(input: string): int;
+}
+
+fn parse_int(str: string): int {
+    if (str == "10") {
+        return 10;
+    }
+    return invalid(str);
+}
+
+run {
+    print(parse_int("10"));
+    print(parse_int("apple"));
+    print("recovered");
+} handle parse_error {
+    ctl invalid(input) {
+        print("Parse error, invalid string: " + input);
+        resume -1;
+    }
+}
+```
+
+```
+10
+Parse error, invalid string: apple
+-1
+recovered
+```
+
+`parse_int` reports a problem it can't solve and gets an answer back. The *policy* — use `-1`, or prompt again, or give up — lives with the caller, which is the code that actually knows what the program should do about a bad input. Try writing that with exceptions: `catch` can't put a value back where the failure happened.
+
+## A `run` block is an expression
+
+`run` produces a value, so it can go on the right of a `var`:
+
+```cronyx
+effect Ask { ctl ask(): int; }
+
+fn doubled(): <Ask> int { return ask() * 2; }
+
+var total = run { doubled() } handle Ask {
+    ctl ask() { resume 21; }
+};
+
+print(total);
+```
+
+```
+42
+```
+
+The block's value is the value of its last expression. A `return` clause transforms it on the way out:
+
+```cronyx
+effect Ask { ctl ask(): int; }
+
+fn doubled(): <Ask> int { return ask() * 2; }
+
+var total = run { doubled() } handle Ask {
+    ctl ask() { resume 21; }
+} return (x) { x + 1 };
+
+print(total);
+```
+
+```
+43
+```
+
+An arm can also answer for the whole block. `return` inside an arm — as opposed to `resume` — means "this is the block's value, don't continue":
+
+```cronyx
+effect Yield { ctl yield(v: int): unit; }
+
+fn each(): <Yield> unit {
+    yield(1);
+    yield(2);
+    yield(3);
+}
+
+var first = run { each() } handle Yield {
+    ctl yield(v) { return v; }
+} return (nothing) { 0 };
+
+print(first);
+```
+
+```
+1
+```
+
+`each` would have yielded three values. The first one reaches an arm that answers with it instead of resuming, so the block is finished at that point and the other two never happen. Note that the `return` clause runs only when the block finishes on its own — here the arm supplied the answer, so `0` is not what comes out.
+
+## `fn` or `ctl`?
+
+Use `fn` when the operation is a question with an answer and the caller always continues: read a config value, get the current time, write a log line. The arm can't accidentally break control flow because it has no way to.
+
+Use `ctl` when the handler needs a say in what happens next — abort, retry, resume with a repair, resume more than once, or stash the continuation and run it later. Everything in the rest of this section is `ctl`.
+
+## Try it
+
+Declare an effect `limit` with `ctl clamp(value: int, max: int): int`. Write `add(a, b)` that returns `a + b`, but calls `clamp` when the sum exceeds 100. Handle it by printing a warning and resuming with the maximum.
+
+A working answer:
+
+```cronyx
+effect limit {
+    ctl clamp(value: int, max: int): int;
+}
+
+fn add(a: int, b: int): int {
+    var sum = a + b;
+    if (sum > 100) {
+        return clamp(sum, 100);
+    }
+    return sum;
+}
+
+run {
+    print(add(2, 3));
+    print(add(60, 60));
+} handle limit {
+    ctl clamp(value, max) {
+        print("clamping " + str(value));
+        resume max;
+    }
+}
+```
+
+```
+5
+clamping 120
+100
+```
+
+Now change the arm to drop the `resume` and see the second `print` disappear along with everything after it.
+
+## What's next
+
+An arm that never resumes is an abort, and an abort is an exception. Next up: **error handling** — building `throw`/`catch` out of `ctl`, why a handler that can resume beats one that can't, and the `final ctl` shorthand for an operation that never comes back.

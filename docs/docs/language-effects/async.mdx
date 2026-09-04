@@ -4,4 +4,282 @@ sidebar_position: 8
 
 # Case study: async
 
-Coming soon. Capstone chapter showing cooperative multitasking implemented entirely as an effect handler — `spawn` and `tick` operations with a handler that maintains a task queue. Demonstrates that async/await isn't a language feature in Cronyx; it's a library pattern built on the same machinery as logging and error handling.
+Everything in this section has been building to one claim: `async`/`await` is not a language feature. It's a handler.
+
+Nothing in the chapters so far was designed with concurrency in mind — an operation, an arm, a `resume` that may be called zero, one or many times. Cooperative multitasking needs exactly one thing more: an arm that calls `resume` *later*.
+
+## A continuation you keep
+
+`resume` doesn't have to be called while the arm is running. Wrap it in a closure and the arm can put it somewhere:
+
+```cronyx
+effect deferred {
+    ctl todo(): unit;
+}
+
+var pending: List<() -> unit> = [];
+
+run {
+    print("before");
+    todo();
+    print("after");
+} handle deferred {
+    ctl todo() { pending.push(() => { resume; }); }
+}
+
+print("run finished");
+pending[0]();
+print("done");
+```
+
+```
+before
+run finished
+after
+done
+```
+
+Look at that order. The `run` block *completed* — `"run finished"` printed — while the code inside it was still parked at `todo()`. Later, calling the stored closure ran the remainder. The suspended computation outlived the block it was written in.
+
+Once a paused computation is a value you can hold, the rest is data structures.
+
+## A scheduler in twenty lines
+
+Keep the parked continuations in a queue instead of a single variable, and give the block a way to say "let someone else run":
+
+```cronyx
+effect sched {
+    ctl tick(): unit;
+}
+
+var queue: List<() -> unit> = [];
+
+fn counter(name: string): <sched> unit {
+    for (var i = 0; i < 3; i += 1) {
+        print(name + ": " + str(i));
+        tick();
+    }
+}
+
+fn spawn(task: () -> <sched> unit) {
+    run {
+        task();
+    } handle sched {
+        ctl tick() { queue.push { resume; }; }
+    }
+}
+
+while (queue.len() > 0) {
+    var next = queue[0];
+    queue = queue[1:];
+    next();
+}
+```
+
+Add two tasks before the loop:
+
+```cronyx
+effect sched {
+    ctl tick(): unit;
+}
+
+var queue: List<() -> unit> = [];
+
+fn counter(name: string): <sched> unit {
+    for (var i = 0; i < 3; i += 1) {
+        print(name + ": " + str(i));
+        tick();
+    }
+}
+
+fn spawn(task: () -> <sched> unit) {
+    run {
+        task();
+    } handle sched {
+        ctl tick() { queue.push { resume; }; }
+    }
+}
+
+spawn(() => { counter("A"); });
+spawn(() => { counter("B"); });
+
+while (queue.len() > 0) {
+    var next = queue[0];
+    queue = queue[1:];
+    next();
+}
+```
+
+```
+A: 0
+B: 0
+A: 1
+B: 1
+A: 2
+B: 2
+```
+
+Two tasks interleaved, and there is no runtime here. `spawn` installs a handler; `tick` parks the caller by pushing its continuation; the `while` loop is the event loop, written in the same language as everything else, visible and replaceable. Change the queue to a stack and you change the scheduling policy. Add a priority field and you have priorities.
+
+`counter` is worth a second look. It is a plain `for` loop. It has no `async` keyword, and calling it doesn't produce a promise — the only trace of concurrency in its signature is the `<sched>` the compiler would have inferred anyway. This is the "no function coloring" claim from [Why effects](./why-effects.mdx), delivered.
+
+## The `async` effect
+
+`tick` yields to the scheduler but can't wait for anything in particular. The general operation takes a *registration* function — something that will be handed a callback to invoke when the awaited thing is ready:
+
+```cronyx
+effect async {
+    ctl suspend<T>(register: ((T) -> unit) -> unit): T;
+}
+```
+
+That is the entire effect. `suspend` hands `register` a callback and parks; whoever calls that callback supplies the value `suspend` returns, and the parked computation continues from there.
+
+Here it is driving two counters through a scheduler built the same way as the one above:
+
+```cronyx
+effect async {
+    ctl suspend<T>(register: ((T) -> unit) -> unit): T;
+}
+
+fn pause() {
+    return suspend { it(()) };
+}
+
+fn interleaved(actions: List<() -> <async> unit>) {
+    var ready: List<() -> unit> = [];
+
+    fn strand(action: () -> <async> unit) {
+        run {
+            action();
+        } handle async {
+            ctl suspend(register) {
+                register {
+                    ready.push { resume it; };
+                };
+            }
+        }
+    }
+
+    for (action in actions) {
+        ready.push { strand(action); };
+    }
+
+    while (ready.len() > 0) {
+        var next = ready[0];
+        ready = ready[1:];
+        next();
+    }
+}
+
+fn counter(name) {
+    for (var i = 0; i < 3; i += 1) {
+        print(name + ": " + str(i));
+        pause();
+    }
+}
+
+interleaved([
+    () => { counter("A"); },
+    () => { counter("B"); }
+]);
+```
+
+```
+A: 0
+B: 0
+A: 1
+B: 1
+A: 2
+B: 2
+```
+
+`pause()` is `suspend` with a registration that fires immediately — yield to the scheduler and be rescheduled at once. A registration that instead stored the callback with a timer, a socket, or another task's completion list is what makes this a real `await`.
+
+## Why only one operation
+
+Koka's `std/async` declares four operations. Three of them exist to talk to a host event loop — register a callback with libuv, run an IO action at the outer level, cancel an outstanding request. Only `do-await` is about suspension itself.
+
+Cronyx has no event loop to bridge to, so `suspend` is `do-await` with the platform removed, and the other three have nothing to be. Everything a program needs on top of it — promises, `await`, task groups, cancellation — is ordinary code over that one operation.
+
+## A promise is data
+
+Nothing about waiting on a value needs the handler's help once `suspend` exists. A promise is a variant with two states:
+
+```cronyx
+type PromiseState<T> {
+    Resolved(T),
+    Awaiting(List<(T) -> unit>)
+}
+```
+
+`await` and `resolve` are ordinary generic functions over that type, not operations: `await` on an `Awaiting` promise calls `suspend` and registers its callback in the list; `resolve` fills in the value and calls everything waiting. The two states are exclusive, which is the point of using a variant — a resolved promise can't still be holding listeners nobody will call.
+
+## What you've built
+
+Look back at what these chapters have in common. Logging, exceptions, generators, backtracking search, and cooperative multitasking are the same three parts each time — an effect declaration, an operation call, a handler — differing only in what the arm does with the continuation:
+
+| Chapter                | The arm                                     |
+| ---------------------- | ------------------------------------------- |
+| A first effect         | does something, control returns             |
+| Resumable effects      | resumes with a value                        |
+| Error handling         | doesn't resume                              |
+| Generators             | resumes once per value produced             |
+| Multiple resumption    | resumes more than once                      |
+| Async                  | stores the continuation and resumes it later |
+
+Five mechanisms in other languages; one here, and the axis they vary along is a single question about `resume`.
+
+## Try it
+
+Extend the `sched` scheduler so a task can spawn another task while running. A working answer needs no new machinery — `spawn` is just a function, so a task may call it:
+
+```cronyx
+effect sched {
+    ctl tick(): unit;
+}
+
+var queue: List<() -> unit> = [];
+
+fn spawn(task: () -> <sched> unit) {
+    run {
+        task();
+    } handle sched {
+        ctl tick() { queue.push { resume; }; }
+    }
+}
+
+fn child(): <sched> unit {
+    print("child start");
+    tick();
+    print("child end");
+}
+
+fn parent(): <sched> unit {
+    print("parent start");
+    spawn(() => { child(); });
+    tick();
+    print("parent end");
+}
+
+spawn(() => { parent(); });
+
+while (queue.len() > 0) {
+    var next = queue[0];
+    queue = queue[1:];
+    next();
+}
+```
+
+```
+parent start
+child start
+child end
+parent end
+```
+
+Trace the queue by hand once. `parent` runs as far as `spawn`, which runs `child` immediately up to its `tick` — so the child's continuation is queued first, and the parent's second. The loop then drains them in that order. `spawn` starting the task eagerly rather than queueing it is a policy decision sitting in plain sight, and changing it is a two-line edit.
+
+## What's next
+
+You've seen the whole mechanism. What remains is the annotation you occasionally have to write: **[effect polymorphism](./effect-polymorphism.mdx)**, for functions that pass effects through — `map` over a callback that logs, a `traced` combinator that adds an effect to whatever it wraps.
