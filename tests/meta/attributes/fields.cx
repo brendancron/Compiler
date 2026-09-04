@@ -30,9 +30,7 @@ meta fn derive(shape: TypeShape) for Show {
                         for (arg in a.args) {
                             match arg {
                                 AttrArg::Str(v) => { label = v; }
-                                AttrArg::Int(v) => {}
-                                AttrArg::Float(v) => {}
-                                AttrArg::Bool(v) => {}
+                                _ => {}
                             }
                         }
                     }
@@ -46,9 +44,7 @@ meta fn derive(shape: TypeShape) for Show {
                 fn show(self): string { return text; }
             }
         }
-        TypeShape::Sum(t, variants) => {}
-        TypeShape::Scalar => {}
-        TypeShape::Other => {}
+        _ => {}
     }
 }
 

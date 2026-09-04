@@ -34,9 +34,7 @@ meta fn derive(shape: TypeShape) for Describe {
                 fn describe(self): string { return text; }
             }
         }
-        TypeShape::Sum(t, variants) => {}
-        TypeShape::Scalar => {}
-        TypeShape::Other => {}
+        _ => {}
     }
 }
 
