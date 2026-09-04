@@ -18,6 +18,21 @@ Running: `log`, `ask`, `multi_handle`, `exception`, `delim`, `flip`, `recover`.
 
 Two pieces of work that meet in the middle: effect rows in the type system, and a selective CPS pass that consumes what the checker inferred.
 
+## A handler may narrow a declaration, never widen it
+
+An operation's kind in the `effect` declaration is the worst case every caller is compiled for, and a handler may promise less than it but not more.
+
+```cronyx
+effect task { fn yield(): unit; }
+effect amb  { ctl flip(): bool; }
+```
+
+A `ctl` operation may be answered by a `fn` arm: the caller was compiled holding a continuation the arm simply never reaches for. A `fn` operation may not be answered by a `ctl` arm, because its caller holds no continuation for `resume` to name. `Typecheck` rejects that, and `tests/effects/errors/handler_widens` is the case.
+
+The rule is what lets a compiled dependency exist at all. Under it, whether `yield`'s caller needs continuations is settled by the file that declared `task` — so a package can ship `work` already transformed, and no consumer can demand a different transform of it by writing a different handler. Without it, a dependency's function has as many machine forms as its consumers have handler shapes.
+
+`Cps` does not yet read the rule: it still decides from the arms it finds rather than from the declaration, which means a handler that resumes in tail position keeps a `ctl` effect out of the continuation-passing translation. Making that switch is what a compiled dependency waits on, and it is not free — see [Package Manager Plan.md](Package%20Manager%20Plan.md).
+
 ## Planned: `print` is an effect
 
 `print` and `clock` are the two entries in `builtins.ml` that exist because they do I/O. The plan for `print` is an effect declared in the prelude with a handler installed at the program's root:

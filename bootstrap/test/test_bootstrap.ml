@@ -352,6 +352,7 @@ let error_cases =
   ; "tests/types/errors/local_type_escapes"
   ; "tests/types/inference/errors/unspecializable_names_the_caller"
   ; "tests/core/modules/errors/outside_package/main"
+  ; "tests/effects/errors/handler_widens"
   ]
 
 (* Accepted, then failing while running. Separate from [error_cases], which

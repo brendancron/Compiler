@@ -839,6 +839,11 @@ let name_implicit_params (callee : Types.infer_ty) (args : Ast.desugared_expr li
   | Types.IFn (expected, _, _) -> name_implicit_params_from expected args
   | _ -> args
 
+let kind_name = function
+  | Ast.Op_fn -> "fn"
+  | Ast.Op_ctl -> "ctl"
+  | Ast.Op_final -> "final ctl"
+
 let rec infer_expr env ctx (e : Ast.desugared_expr) : checked_expr =
   try infer_expr_impl env ctx e with
   | Types.Type_error message -> raise (Located { span = e.Ast.span; message })
@@ -2378,6 +2383,17 @@ and infer_handler env ctx assigned ~answer ~args (h : Ast.desugared_stmt Ast.han
         a.Ast.arm_name
         (List.length param_types)
         (List.length a.Ast.arm_params);
+    (* The declaration is the worst case the performing function was compiled
+       for, so a handler may promise less than it and never more: a `fn`
+       operation's caller has no continuation for a `ctl` arm to capture. *)
+    (match op.Ast.op_kind, a.Ast.arm_kind with
+     | Ast.Op_fn, (Ast.Op_ctl | Ast.Op_final) | Ast.Op_final, Ast.Op_ctl ->
+       Types.error
+         "'%s' is declared `%s`, so a handler may not answer it with `%s`."
+         a.Ast.arm_name
+         (kind_name op.Ast.op_kind)
+         (kind_name a.Ast.arm_kind)
+     | _ -> ());
     let scope = new_env (Some env) in
     List.iter2 (fun name ty -> bind scope name (Types.mono ty)) a.Ast.arm_params param_types;
     let body =
