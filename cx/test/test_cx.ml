@@ -55,6 +55,26 @@ let read_file path =
 
 let normalize s = String.trim s
 
+(* An expectation that names the running compiler would otherwise have to be
+   edited by hand on every version bump — and the release script runs this
+   suite after setting the version, so the bump would always fail here. *)
+let expectation path =
+  let text = read_file path in
+  let needle = "{compiler}" in
+  let width = String.length needle in
+  let out = Buffer.create (String.length text) in
+  let i = ref 0 in
+  while !i < String.length text do
+    if !i + width <= String.length text && String.equal (String.sub text !i width) needle
+    then (
+      Buffer.add_string out Release.version;
+      i := !i + width)
+    else (
+      Buffer.add_char out text.[!i];
+      incr i)
+  done;
+  Buffer.contents out
+
 let summary (m : Cx.Manifest.t) =
   String.concat
     "\n"
@@ -312,7 +332,7 @@ let built root =
    cache rather than part of the program. *)
 let package_case dir name =
   let root = Filename.concat dir name in
-  let expected = read_file (Filename.concat root "expected.txt") in
+  let expected = expectation (Filename.concat root "expected.txt") in
   clean dir;
   match built root, built root with
   | Ok cold, Ok warm ->
@@ -330,7 +350,7 @@ let test_package_case dir name =
   | Error errors, true ->
     compare_case
       ("test/" ^ name)
-      ~expected:(read_file failing)
+      ~expected:(expectation failing)
       ~actual:(diagnostics ~root:dir root errors)
   | Error errors, false ->
     Printf.printf "FAIL test/%s\n  %s\n" name (diagnostics ~root:dir root errors);
@@ -338,7 +358,7 @@ let test_package_case dir name =
   | Ok (rendered, _), false ->
     compare_case
       ("test/" ^ name)
-      ~expected:(read_file (Filename.concat root "expected.txt"))
+      ~expected:(expectation (Filename.concat root "expected.txt"))
       ~actual:rendered
   | Ok _, true ->
     Printf.printf "FAIL test/%s\n  expected the diagnostics in expected.err\n" name;
@@ -346,7 +366,7 @@ let test_package_case dir name =
 
 let bad_package_case dir name =
   let root = Filename.concat dir name in
-  let expected = read_file (Filename.concat root "expected.err") in
+  let expected = expectation (Filename.concat root "expected.err") in
   let rejected path errors =
     compare_case ("package/" ^ name) ~expected ~actual:(diagnostics ~root:dir path errors)
   in
