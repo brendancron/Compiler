@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 #
-# Cuts a release from the working tree: builds the compiler, tags the commit,
-# and publishes the binary as a GitHub release.
+# Cuts a release from the working tree: sets the version, builds the compiler,
+# tags the commit, and publishes the binary as a GitHub release.
 #
 #   scripts/release.sh v0.2.0
+#   scripts/release.sh --dry-run v0.2.0
+#
+# The tag is the only place the version is typed. `bootstrap/lib/release.ml` is
+# where it lives, and this writes it — a binary that reports a version the tag
+# does not is one `cx` refuses to hand a job to, and nothing would have caught
+# it before someone installed the toolchain.
+#
+# `--dry-run` builds and packages, prints the archive and its checksum, and
+# stops before tagging, pushing or publishing. The version is set for the build
+# and put back afterwards, so the archive is exactly what a real run would ship.
 #
 # One platform per run — the machine you are on. An OCaml binary is native and
 # there is no cross-compilation worth the trouble, so releasing for macOS or
@@ -16,12 +26,27 @@ cd "$root"
 
 die() { echo "error: $*" >&2; exit 1; }
 
-version=${1:-}
-[ -n "$version" ] || die "usage: scripts/release.sh vMAJOR.MINOR.PATCH"
-[[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "'$version' is not vMAJOR.MINOR.PATCH"
+dry=false
+version=""
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) dry=true ;;
+    -*) die "unknown option: $arg" ;;
+    *)
+      [ -z "$version" ] || die "one version, not two"
+      version=$arg
+      ;;
+  esac
+done
 
-command -v gh >/dev/null || die "gh is not installed"
-gh auth status >/dev/null 2>&1 || die "gh is not logged in"
+[ -n "$version" ] || die "usage: scripts/release.sh [--dry-run] vMAJOR.MINOR.PATCH"
+[[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "'$version' is not vMAJOR.MINOR.PATCH"
+bare=${version#v}
+
+if ! $dry; then
+  command -v gh >/dev/null || die "gh is not installed"
+  gh auth status >/dev/null 2>&1 || die "gh is not logged in"
+fi
 
 [ -z "$(git status --porcelain)" ] || die "the working tree has changes"
 git rev-parse -q --verify "refs/tags/$version" >/dev/null && die "tag $version already exists"
@@ -29,9 +54,34 @@ git rev-parse -q --verify "refs/tags/$version" >/dev/null && die "tag $version a
 # The tag has to name a commit the remote already has, or the release points at
 # something nobody can check out.
 branch=$(git rev-parse --abbrev-ref HEAD)
-git fetch -q origin "$branch" 2>/dev/null || die "origin has no branch '$branch' — push it first"
-[ "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)" ] \
-  || die "HEAD and origin/$branch differ — push or pull first"
+if ! $dry; then
+  git fetch -q origin "$branch" 2>/dev/null || die "origin has no branch '$branch' — push it first"
+  [ "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)" ] \
+    || die "HEAD and origin/$branch differ — push or pull first"
+fi
+
+stamp=bootstrap/lib/release.ml
+current=$(sed -n 's/^let version = "\(.*\)"$/\1/p' "$stamp")
+[ -n "$current" ] || die "cannot read the version out of $stamp"
+
+# The tree was clean coming in, so putting the file back is enough to undo this
+# — which a dry run always does, and a real run does only if it fails before
+# the commit.
+out=""
+restore=false
+cleanup() {
+  [ -n "$out" ] && rm -rf "$out"
+  $restore && git checkout -q -- "$stamp"
+  return 0
+}
+trap cleanup EXIT
+
+if [ "$current" != "$bare" ]; then
+  echo "==> Version $current -> $bare"
+  restore=true
+  sed -i.bak "s/^let version = \".*\"$/let version = \"$bare\"/" "$stamp"
+  rm -f "$stamp.bak"
+fi
 
 echo "==> Testing"
 (cd bootstrap && dune test)
@@ -53,7 +103,6 @@ esac
 # and the standard library it resolves `std/…` against. `cx` finds the library
 # at ../lib/cronyx/stdlib, so the layout here is the layout it is installed in.
 out=$(mktemp -d)
-trap 'rm -rf "$out"' EXIT
 tree="$out/cronyx-$version-$target"
 mkdir -p "$tree/bin" "$tree/lib/cronyx"
 cp _build/default/cx/bin/main.exe "$tree/bin/cx"
@@ -61,9 +110,32 @@ cp _build/default/bootstrap/bin/main.exe "$tree/bin/cronyxc"
 chmod +x "$tree/bin/cx" "$tree/bin/cronyxc"
 cp -R stdlib "$tree/lib/cronyx/stdlib"
 
+reported=$("$tree/bin/cx" version)
+[ "$reported" = "cx $bare" ] || die "the binary reports '$reported', not 'cx $bare'"
+
 archive="cronyx-$version-$target.tar.gz"
 tar -czf "$out/$archive" -C "$out" "cronyx-$version-$target"
 shasum -a 256 "$out/$archive" | awk '{print $1}' > "$out/$archive.sha256"
+
+if $dry; then
+  keep=$(mktemp -d)
+  cp "$out/$archive" "$out/$archive.sha256" "$keep/"
+  out=""
+  echo
+  echo "==> Dry run: not tagged, not pushed, not published"
+  echo "  $reported"
+  echo "  $keep/$archive"
+  echo "  sha256 $(cat "$keep/$archive.sha256")"
+  exit 0
+fi
+
+if $restore; then
+  echo "==> Recording the version"
+  git add "$stamp"
+  git commit -q -m "release: $bare"
+  git push -q origin "$branch"
+  restore=false
+fi
 
 echo "==> Tagging $version"
 git tag "$version"
