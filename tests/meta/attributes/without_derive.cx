@@ -1,0 +1,27 @@
+type Person {
+    @rename("full name")
+    name: string,
+
+    @unit("years")
+    age: int,
+}
+
+match typeof(Person).shape {
+    TypeShape::Product(t, fields) => {
+        for (f in fields) {
+            for (a in f.attrs) {
+                for (arg in a.args) {
+                    match arg {
+                        AttrArg::Str(v) => { print(str(f.name) + " " + str(a.name) + " " + v); }
+                        AttrArg::Int(v) => {}
+                        AttrArg::Float(v) => {}
+                        AttrArg::Bool(v) => {}
+                    }
+                }
+            }
+        }
+    }
+    TypeShape::Sum(t, variants) => {}
+    TypeShape::Scalar => {}
+    TypeShape::Other => {}
+}

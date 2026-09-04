@@ -18,9 +18,13 @@ type Person {
 
 `Ast.node` is `('a, 'ann)`, and `'ann` is the per-node type slot that carries `unit` through the front end and `Types.ty` after checking. That name was taken first, so the user-facing feature is an *attribute*.
 
+## The reader is `typeof`, not `derive`
+
+A deriver is the common consumer, not the channel. Attributes arrive on `TypeField` and `TypeVariant`, which come from `typeof(T).shape`, so anything that can write that reads them — a deriver, a bare `meta` block, or ordinary code. The third looks like runtime reflection and is not: `Reflect` folds the projection into a literal before CPS, so the loop runs over constants the compiler wrote down and the declaration it came from is already gone.
+
 ## Erasure is the whole design
 
-An attribute exists so a deriver can read it. Nothing else in the language looks at one: no pass changes behaviour on an attribute, and there is no way to ask for one at runtime.
+An attribute exists so that generated or reflecting code can read it. Nothing else in the language looks at one: no pass changes behaviour on an attribute, and there is no way to ask for one at runtime.
 
 That is enforced by the shape of the tree rather than by a rule anyone has to remember. `type_defs` appears in `stmt_kind`, `desugared_stmt_kind`, `typed_stmt_kind`, `resolved_stmt_kind` and `reflected_stmt_kind` — and not in `cps_stmt_kind`. A `Type_decl` is therefore already gone by the time `Interp` runs, so an attribute riding on one cannot reach the program. A pass that tried to read an attribute after CPS would not compile.
 

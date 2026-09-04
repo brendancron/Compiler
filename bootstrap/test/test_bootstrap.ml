@@ -209,6 +209,7 @@ let cases =
   ; "tests/meta/attributes/fields"
   ; "tests/meta/attributes/variants"
   ; "tests/meta/attributes/arguments"
+  ; "tests/meta/attributes/without_derive"
   ; "tests/core/records/nominal"
   ; "tests/core/enums/tuple_variants"
   ; "tests/core/enums/struct_variants"
