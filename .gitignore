@@ -3,3 +3,4 @@ scratch/
 .obsidian/
 _build/
 target/
+*.install
