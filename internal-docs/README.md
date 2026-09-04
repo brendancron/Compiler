@@ -9,7 +9,9 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 | [Architecture.md](Architecture.md)                           | `bootstrap` pipeline, a heading per pass                              |
 | [Type System.md](Type%20System.md)                           | Type system and type checking for `bootstrap` (OCaml)                 |
 | [Algebraic Effects.md](Algebraic%20Effects.md)               | Effect rows and the selective CPS pass                                |
+| [Row Polymorphism.md](Row%20Polymorphism.md)                 | Abstracting over the effects a callback performs                      |
 | [Continuations and Tasks.md](Continuations%20and%20Tasks.md) | Why a continuation is pure and a task is not, and what a scheduler owes to it |
+| [Async.md](Async.md)                                         | The one operation `async` declares, and why a promise is data         |
 | [Data Structures.md](Data%20Structures.md)                   | The datatypes and how each is used                                    |
 | [Collection Literals.md](Collection%20Literals.md)           | How `[...]` picks a collection type                                   |
 | [Elaboration.md](Elaboration.md)                             | Type-directed resolution of operators, indexing, and literals         |

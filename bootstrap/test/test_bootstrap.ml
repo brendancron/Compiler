@@ -422,9 +422,13 @@ let expected_failing : (string * blocker) list =
   ; "tests/compile/m6/apply", Parked
   ; "tests/compile/m7/safe_div", Parked
   ; "tests/compile/m8/gadt", Parked
-    (* Row polymorphism. Inference already generalizes over rows; what is
-       missing is per-instantiation evidence arity in `Cps`, and a way to write
-       a row variable in an arrow. *)
+    (* One function whose effect two handlers discharge differently. An arm
+       resuming in tail position is passed evidence; one that never resumes is
+       passed a continuation, which is a second argument. `Cps` gives the
+       function a single arity, so whichever handler it was not compiled for
+       calls it wrong. *)
+  ; ( "tests/effects/multi_handle/differing_arms"
+    , Waiting "`Cps` choosing evidence arity per handler, as `Type_mono` copies per row" )
   ]
 
 (* Ought to be rejected and are not, paired with the `.err` they should

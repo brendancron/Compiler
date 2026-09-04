@@ -4,4 +4,184 @@ sidebar_position: 2
 
 # A first effect
 
-Coming soon. Walks through the full declare/perform/handle lifecycle on the simplest case: a `log` effect declared with `fn` (fire-and-forget). Introduces the three-part pattern that every effect follows.
+Every effect in Cronyx has the same three parts: a **declaration** naming the operations, a **call site** that performs one, and a **handler** that says what performing it means. This chapter walks through the smallest interesting example one part at a time.
+
+## Declaring an effect
+
+An effect is a named set of operations. Here is one with a single operation:
+
+```cronyx
+effect log {
+    fn log(msg: string): unit;
+}
+```
+
+That declares an *interface*, not an implementation. `log(msg)` takes a string and produces nothing; what actually happens when someone calls it isn't decided here, and can't be — the whole point is that the decision belongs to whoever runs the code.
+
+The operation and the effect are allowed to share a name, as they do here. `log` the effect is what you install a handler for; `log` the operation is what you call.
+
+## Performing it
+
+Calling an operation looks exactly like calling a function:
+
+```cronyx
+fn greet(name: string): unit {
+    log("Hello, " + name);
+}
+```
+
+`greet` has no idea what logging *is*. It has no logger parameter, no `Logger` object, no import of a logging library. It names an operation and moves on.
+
+What it does have — invisibly — is an effect on its signature. The compiler notices that `greet` calls `log` and records that `greet` performs the `log` effect, and that anything calling `greet` does too, all the way up. You never write this down; you'll see it in [Effect polymorphism](./effect-polymorphism.mdx) when we ask the compiler to print a signature back.
+
+## Handling it
+
+A `run` block installs a handler over a piece of code:
+
+```cronyx
+effect log {
+    fn log(msg: string): unit;
+}
+
+fn greet(name: string): unit {
+    log("Hello, " + name);
+}
+
+run {
+    greet("Brendan");
+} handle log {
+    fn log(msg: string) {
+        print(msg);
+    }
+}
+```
+
+```
+Hello, Brendan
+```
+
+Read `run { ... } handle log { ... }` as: run this code, and while it runs, `log` means *this*. The arm inside `handle` has the same shape as the declaration — one entry per operation, taking the same parameters.
+
+## Swapping the handler
+
+The reason to separate the three parts is that the third one can change without touching the first two. Same `greet`, different meaning:
+
+```cronyx
+effect log {
+    fn log(msg: string): unit;
+}
+
+fn greet(name: string): unit {
+    log("Hello, " + name);
+}
+
+run {
+    greet("Brendan");
+} handle log {
+    fn log(msg: string) {
+        print(msg);
+    }
+}
+
+run {
+    greet("Brendan");
+} handle log {
+    fn log(msg: string) {
+        print("Log: " + msg);
+    }
+}
+```
+
+```
+Hello, Brendan
+Log: Hello, Brendan
+```
+
+In a real program the second handler writes to a file, batches messages, tags them with a request id, or drops them entirely in a test run. `greet` is untouched in every case. This is the "swap the handler, not the code" property from [Why effects](./why-effects.mdx), and it falls out of the three-part split rather than being a feature of its own.
+
+## An operation can answer
+
+An operation declared with a return type hands a value back to the call site. The handler's arm computes it:
+
+```cronyx
+effect ask {
+    fn ask(): int;
+}
+
+fn double() {
+    return ask() * 2;
+}
+
+run {
+    print(double());
+} handle ask {
+    fn ask() {
+        return 21;
+    }
+}
+```
+
+```
+42
+```
+
+`double` calls `ask()` and multiplies what comes back, the way it would with any function. The `return 21` in the arm is what `ask()` evaluates to. Nothing in `double` says where 21 came from — a config file, a prompt, a test fixture — and it doesn't have to.
+
+## Forgetting the handler is a compile error
+
+Effects are part of the type system, so an unhandled one is caught before your program runs:
+
+```cronyx
+effect logger { fn log(msg: string): unit; }
+
+log("boom");
+```
+
+```
+Unhandled effect(s): logger.
+```
+
+Nothing encloses the top level, so nothing can discharge the effect. This is the guarantee that makes the rest of the section safe to build on: if a function four levels down performs an effect and you forgot the handler, you hear about it at compile time, not at three in the morning.
+
+## Try it
+
+Declare an effect `confirm` with one operation, `ask_yes_no(question: string): bool`. Write a function `delete_all()` that asks for confirmation and prints either `"deleted"` or `"kept"`. Run it twice, once under a handler that always answers `true` and once under one that always answers `false`.
+
+A working answer:
+
+```cronyx
+effect confirm {
+    fn ask_yes_no(question: string): bool;
+}
+
+fn delete_all() {
+    if (ask_yes_no("delete everything?")) {
+        print("deleted");
+    } else {
+        print("kept");
+    }
+}
+
+run {
+    delete_all();
+} handle confirm {
+    fn ask_yes_no(question) { return true; }
+}
+
+run {
+    delete_all();
+} handle confirm {
+    fn ask_yes_no(question) { return false; }
+}
+```
+
+```
+deleted
+kept
+```
+
+That second handler is a test double, and you wrote it without a mocking library.
+
+## What's next
+
+An `fn` operation computes a value and lets the caller carry on — useful, but the handler has no say in *whether* the caller carries on at all. Next up: **resumable effects** — `ctl` operations, where the arm receives the rest of the program as something it can hold, and decides when to continue it.
