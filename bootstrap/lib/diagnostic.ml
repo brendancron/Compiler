@@ -2,6 +2,7 @@
    the boundary, so the sequence of passes can be written once. *)
 
 type stage =
+  | Manifest
   | Scan
   | Parse
   | Load
@@ -23,6 +24,7 @@ type error =
   }
 
 let stage_name = function
+  | Manifest -> "Manifest"
   | Scan -> "Scan"
   | Parse -> "Parse"
   | Load -> "Load"
@@ -40,7 +42,8 @@ let stage_name = function
 (* A program the compiler rejected is the user's fault; one that got past the
    checker and then broke is the compiler's. *)
 let exit_code = function
-  | Scan | Parse | Load | Meta | Desugar | Value_mono | Type | Type_mono | Resolve | Reflect -> 65
+  | Manifest | Scan | Parse | Load | Meta | Desugar | Value_mono | Type | Type_mono | Resolve
+  | Reflect -> 65
   | Cps | Verify | Runtime -> 70
 
 let at stage span message = { stage; span; message }

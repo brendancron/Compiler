@@ -1,4 +1,4 @@
 (executable
  (public_name cx)
  (name main)
- (libraries bootstrap))
+ (libraries bootstrap cx))

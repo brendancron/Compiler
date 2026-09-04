@@ -30,11 +30,21 @@ dune exec --root . bin/main.exe -- ../tests/core/print/hello.cx
 # From the repo root: build both projects, and run a program through `cx`
 dune build
 dune exec cx -- run tests/core/print/hello.cx
+dune exec cx -- new mypkg
+
+# The package manager's own suite: manifest fixtures, and the version and
+# requirement tables
+dune test cx
 
 # `cx run` and `bootstrap` must agree on every fixture, both streams and the
-# exit code. This is what milestone 0 of the package manager is checked by.
+# exit code.
 ./scripts/cx-parity.sh
 ```
+
+`cx/test/manifests/` holds `.toml` fixtures paired with a `.ok` of what the
+tool read or a `.err` of the diagnostics it produced, and the same rule as
+`tests/` applies: a fixture no list in `cx/test/test_cx.ml` names is a failure
+of its own.
 
 **CLI flags**, each printing one stage and then running:
 - `--dump-source` — the source as the scanner received it

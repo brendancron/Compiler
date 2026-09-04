@@ -1,0 +1,6 @@
+package.name    = "mypkg"
+package.version = "0.3.1"
+package.cronyx  = "0.1.1"
+
+[dependencies]
+http = { path = "../http" }

@@ -1,0 +1,5 @@
+# A manifest is a file humans edit, so it has comments.
+[package]              # and they sit after a value too
+name    = "mypkg"      # the name
+"version" = "1.0.0-rc.1+build.7"
+cronyx  = "0.1.1"

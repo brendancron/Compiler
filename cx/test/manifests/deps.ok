@@ -1,0 +1,5 @@
+name = mypkg
+version = 0.3.1
+cronyx = 0.1.1
+dep http = path ../http
+dep local = path ../local

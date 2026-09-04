@@ -1,0 +1,1 @@
+[7:8] 'http' names a registry dependency, and there is no registry yet. Use { path = "…" }.

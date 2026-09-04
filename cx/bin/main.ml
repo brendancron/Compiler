@@ -2,6 +2,7 @@ open Bootstrap
 
 let usage =
   "usage: cx <command> [options]\n\n\
+  \  new <name>      create a package skeleton\n\
   \  run <file.cx>   compile and execute a program\n\n\
    options for `run`:\n\
   \  --dump-source   echo the source before running\n\
@@ -40,12 +41,21 @@ let parse_run args =
   | None -> Driver.die ("run needs a file to run.\n" ^ usage)
   | Some path -> path, !dumps
 
+let new_package = function
+  | [ name ] ->
+    (match Cx.Skeleton.create ~directory:name ~name with
+     | Ok () -> Printf.printf "Created package '%s'.\n" name
+     | Error message -> Driver.die message)
+  | [] -> Driver.die ("new needs a name.\n" ^ usage)
+  | _ -> Driver.die ("new takes one name.\n" ^ usage)
+
 let () =
   match List.tl (Array.to_list Sys.argv) with
   | [] -> Driver.die usage
   | ("-h" | "--help") :: _ ->
     print_endline usage;
     exit 0
+  | "new" :: args -> new_package args
   | "run" :: args ->
     let path, dumps = parse_run args in
     Driver.execute ~dumps path
