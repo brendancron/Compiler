@@ -20,9 +20,7 @@ meta fn derive(shape: TypeShape) for Tagged {
                         for (arg in a.args) {
                             match arg {
                                 AttrArg::Str(x) => { label = label + ":" + x; }
-                                AttrArg::Int(x) => {}
-                                AttrArg::Float(x) => {}
-                                AttrArg::Bool(x) => {}
+                                _ => {}
                             }
                         }
                     }
@@ -34,9 +32,7 @@ meta fn derive(shape: TypeShape) for Tagged {
                 fn tags(self): string { return text; }
             }
         }
-        TypeShape::Product(t, fields) => {}
-        TypeShape::Scalar => {}
-        TypeShape::Other => {}
+        _ => {}
     }
 }
 

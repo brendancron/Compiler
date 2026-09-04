@@ -53,9 +53,7 @@ for (a in f.attrs) {
         for (arg in a.args) {
             match arg {
                 AttrArg::Str(v) => { label = v; }
-                AttrArg::Int(v) => {}
-                AttrArg::Float(v) => {}
-                AttrArg::Bool(v) => {}
+                _ => {}
             }
         }
     }

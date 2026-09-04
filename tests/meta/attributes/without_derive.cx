@@ -13,15 +13,11 @@ match typeof(Person).shape {
                 for (arg in a.args) {
                     match arg {
                         AttrArg::Str(v) => { print(str(f.name) + " " + str(a.name) + " " + v); }
-                        AttrArg::Int(v) => {}
-                        AttrArg::Float(v) => {}
-                        AttrArg::Bool(v) => {}
+                        _ => {}
                     }
                 }
             }
         }
     }
-    TypeShape::Sum(t, variants) => {}
-    TypeShape::Scalar => {}
-    TypeShape::Other => {}
+    _ => {}
 }
