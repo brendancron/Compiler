@@ -1,7 +1,7 @@
-open Bootstrap2
+open Bootstrap
 
 let usage =
-  "usage: bootstrap2 [options] <file.cx>\n\
+  "usage: bootstrap [options] <file.cx>\n\
   \  --dump-source   echo the source before running\n\
   \  --dump-tokens   print the token stream\n\
   \  --dump-ast      print the parsed AST\n\

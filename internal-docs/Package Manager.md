@@ -23,12 +23,12 @@ cx publish               upload to a registry
 
 ## The tool lives in the compiler's repo
 
-`cx` is a sibling of `bootstrap2/` in this repository, not a separate one. The rule from the section above — the compiler is a library the tool links against — makes the seam a build-graph edge, not a network of pinned repos. Splitting them would mean a version-pinned dependency between two trees the same people own, which is friction with no payoff: every compiler change that touches a public type would need a coordinated two-repo pull request.
+`cx` is a sibling of `bootstrap/` in this repository, not a separate one. The rule from the section above — the compiler is a library the tool links against — makes the seam a build-graph edge, not a network of pinned repos. Splitting them would mean a version-pinned dependency between two trees the same people own, which is friction with no payoff: every compiler change that touches a public type would need a coordinated two-repo pull request.
 
 ```
 CronyxLang/
-  bootstrap2/              the compiler: library + `cronyxc` binary
-  cx/                      the package manager, links `bootstrap2` as a library
+  bootstrap/              the compiler: library + `cronyxc` binary
+  cx/                      the package manager, links `bootstrap` as a library
   stdlib/                  shared
   tests/                   shared: `cx test` and `dune test` read the same fixtures
   internal-docs/
@@ -320,7 +320,7 @@ error: no version of `bytes` satisfies every requirement.
 
 **Feature unification across dev-deps.** If `mypkg`'s dev-deps enable a feature of a runtime dep, does the runtime build see it? Cargo's answer changed once (resolver v2) and the change was disruptive. The design here is: no. Dev-deps live in their own resolution scope, sharing the runtime deps' versions but not their feature sets. This needs a fixture before it is a decision.
 
-**How the compiler consumes a dependency.** A dependency ships typed IR for generics and post-CPS IR for the rest, but *the format* is not designed. Whether it is the compiler's own serialised AST types, a stable IR with its own schema, or something in between decides how quickly the compiler can evolve. The `bootstrap2` types change often enough that a stable schema is not free.
+**How the compiler consumes a dependency.** A dependency ships typed IR for generics and post-CPS IR for the rest, but *the format* is not designed. Whether it is the compiler's own serialised AST types, a stable IR with its own schema, or something in between decides how quickly the compiler can evolve. The `bootstrap` types change often enough that a stable schema is not free.
 
 **Registry federation.** Two registries defining a package with the same name is a collision waiting to happen. Namespacing by registry (`internal:sekrit`) at the manifest is one answer; a global-name-per-registry policy is another. This is a governance decision as much as a technical one.
 

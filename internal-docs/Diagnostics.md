@@ -14,7 +14,7 @@ half a frame.
 
 ## What the Rust compiler got wrong
 
-`bootstrap/src/error.rs` built a `Diagnostic` whose location, source line,
+`legacy-bootstrap/src/error.rs` built a `Diagnostic` whose location, source line,
 underline column, underline length, label and help were each an `Option`, and
 rendered every section under an `if let`. Every combination of those six
 compiled, and most of them draw something broken. Two showed up constantly:
@@ -114,6 +114,6 @@ design that is not already here.
 The fixture suite compares `[line:col] message` against a `.err` file, which
 would not notice a frame missing its source line or its closing rule. The
 renderer is pinned separately by `run_rendering` in
-`bootstrap2/test/test_bootstrap2.ml`: a span inside a line, a two-digit line
+`bootstrap/test/test_bootstrap.ml`: a span inside a line, a two-digit line
 number for the gutter, a line carrying a tab and a wide character, and a span
 with no source behind it.

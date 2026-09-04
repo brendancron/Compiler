@@ -6,8 +6,8 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 
 | Document                                                     | Subject                                                               |
 | ------------------------------------------------------------ | --------------------------------------------------------------------- |
-| [Architecture.md](Architecture.md)                           | `bootstrap2` pipeline, a heading per pass                             |
-| [Type System.md](Type%20System.md)                           | Type system and type checking for `bootstrap2` (OCaml)                |
+| [Architecture.md](Architecture.md)                           | `bootstrap` pipeline, a heading per pass                              |
+| [Type System.md](Type%20System.md)                           | Type system and type checking for `bootstrap` (OCaml)                 |
 | [Algebraic Effects.md](Algebraic%20Effects.md)               | Effect rows and the selective CPS pass                                |
 | [Continuations and Tasks.md](Continuations%20and%20Tasks.md) | Why a continuation is pure and a task is not, and what a scheduler owes to it |
 | [Data Structures.md](Data%20Structures.md)                   | The datatypes and how each is used                                    |

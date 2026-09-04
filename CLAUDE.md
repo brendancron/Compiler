@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-`bootstrap2/` (OCaml) is the compiler. `bootstrap/` (Rust) is the one it
+`bootstrap/` (OCaml) is the compiler. `legacy-bootstrap/` (Rust) is the one it
 replaced — it is kept for reference, is not in CI, and no longer compiles the
 current `stdlib/` or `tests/`.
 
-All commands run from `bootstrap2/` unless noted.
+All commands run from `bootstrap/` unless noted.
 
 ```bash
 # Build
@@ -47,7 +47,7 @@ is stale the moment the first lands.
 
 ## Code style
 
-Applies to `bootstrap/` (Rust), `bootstrap2/` (OCaml), and the `.cx` fixtures in `tests/`. A fixture is read alongside its `.txt`, which already says what the program produces, so a header explaining what it demonstrates is the same noise as anywhere else.
+Applies to `legacy-bootstrap/` (Rust), `bootstrap/` (OCaml), and the `.cx` fixtures in `tests/`. A fixture is read alongside its `.txt`, which already says what the program produces, so a header explaining what it demonstrates is the same noise as anywhere else.
 
 **A comment is the exception.** Start from the assumption that it should not exist and make it earn its place. Two kinds do:
 
@@ -86,7 +86,7 @@ Rewriting a comment to be more insightful is usually the wrong fix. Deleting it 
 Cronyx is a statically-typed, metaprogramming-first language.
 [internal-docs/Architecture.md](internal-docs/Architecture.md) is the authority
 on the pipeline and carries a heading per pass; the order itself lives in
-`bootstrap2/lib/compile.ml` and nowhere else.
+`bootstrap/lib/compile.ml` and nowhere else.
 
 ```
 Scanner → Parser → Loader → Metaprocess → Desugar → Value monomorphize
@@ -119,11 +119,11 @@ its handlers resume in tail position.
 
 ### Test fixtures
 
-`tests/` (repo root, not `bootstrap2/test/`) holds `.cx` sources paired with
+`tests/` (repo root, not `bootstrap/test/`) holds `.cx` sources paired with
 what they must produce: a `.txt` of expected stdout, a `.err` of expected
 diagnostics, or a `.rt` for one that runs and then fails.
 
-Every fixture must be named by a list in `bootstrap2/test/test_bootstrap2.ml`,
+Every fixture must be named by a list in `bootstrap/test/test_bootstrap.ml`,
 and a fixture no list names is a test failure of its own. A feature that does
 not work yet goes in `expected_failing` with the work it waits on — the suite
 asserts it still fails, and says so the moment it starts passing. Write the

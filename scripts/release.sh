@@ -34,10 +34,10 @@ git fetch -q origin "$branch" 2>/dev/null || die "origin has no branch '$branch'
   || die "HEAD and origin/$branch differ — push or pull first"
 
 echo "==> Testing"
-(cd bootstrap2 && dune test)
+(cd bootstrap && dune test)
 
 echo "==> Building"
-(cd bootstrap2 && dune build --release)
+(cd bootstrap && dune build --release)
 
 # uname's spelling of the host, in the triple form the archives have always used.
 case "$(uname -s)-$(uname -m)" in
@@ -49,7 +49,7 @@ esac
 
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
-cp bootstrap2/_build/default/bin/main.exe "$out/cronyxc"
+cp bootstrap/_build/default/bin/main.exe "$out/cronyxc"
 chmod +x "$out/cronyxc"
 
 archive="cronyxc-$version-$target.tar.gz"

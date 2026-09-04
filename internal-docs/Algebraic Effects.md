@@ -1,4 +1,4 @@
-# Algebraic effects — bootstrap2
+# Algebraic effects — bootstrap
 
 Status: **implemented.**
 
@@ -117,7 +117,7 @@ producing four lines of output from two `flip` calls.
 
 ## Why CPS and not OCaml 5 handlers
 
-`bootstrap2` runs on OCaml 5.5, whose handlers would otherwise map onto this almost directly. They cannot be used: **OCaml's continuations are one-shot** and `flip` resumes the same one twice. CPS continuations are ordinary closures, and multi-shot for free.
+`bootstrap` runs on OCaml 5.5, whose handlers would otherwise map onto this almost directly. They cannot be used: **OCaml's continuations are one-shot** and `flip` resumes the same one twice. CPS continuations are ordinary closures, and multi-shot for free.
 
 Independently, CPS is the representation a compiler backend needs, so the pass is not throwaway the way an interpreter-only mechanism would be.
 

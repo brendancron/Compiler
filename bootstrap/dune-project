@@ -1,6 +1,6 @@
 (lang dune 3.24)
 
-(name bootstrap2)
+(name bootstrap)
 
 (generate_opam_files true)
 
@@ -12,10 +12,10 @@
 (maintainers "Brendan Cron <brendancron@gmail.com>")
 
 (package
- (name bootstrap2)
+ (name bootstrap)
  (synopsis "A self-hosting-oriented compiler for the Cronyx language")
  (description
-  "The second bootstrap compiler for Cronyx: scanner, parser, type checker, metaprogramming, effect handlers via a selective CPS transform, and a tree-walking interpreter.")
+  "The bootstrap compiler for Cronyx: scanner, parser, type checker, metaprogramming, effect handlers via a selective CPS transform, and a tree-walking interpreter.")
  (depends ocaml)
  (tags
   (compiler language metaprogramming "algebraic effects")))

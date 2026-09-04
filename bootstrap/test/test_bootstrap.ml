@@ -2,7 +2,7 @@
    with a .err holding one `[line:col] message` per diagnostic. Listed
    explicitly, so the lists record what this bootstrap supports. *)
 
-open Bootstrap2
+open Bootstrap
 
 let cases =
   [ "tests/core/print/hello"
@@ -541,13 +541,13 @@ let run_round_trip root name =
     Printf.printf "FAIL %s (round trip)\n  %s\n" name message;
     false
   | Ok once ->
-    let printed = Bootstrap2.Source.program once in
+    let printed = Bootstrap.Source.program once in
     (match parse "its own output" printed with
      | Error message ->
        Printf.printf "FAIL %s (round trip)\n  %s\n" name message;
        false
      | Ok twice ->
-       let again = Bootstrap2.Source.program twice in
+       let again = Bootstrap.Source.program twice in
        if String.equal printed again
        then (
          Printf.printf "ok   %s (round trip)\n" name;

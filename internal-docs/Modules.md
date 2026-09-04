@@ -139,11 +139,11 @@ The prelude is still a string in `lib/prelude.ml` rather than a unit the loader 
 
 ## What the Rust bootstrap did
 
-`bootstrap/src/frontend/module_loader.rs` is 196 lines and the design above agrees with most of it: a breadth-first walk with a `visited` set so cycles load rather than fail, paths canonicalized and resolved against the importing file's directory with `.cx` appended, wildcards expanded before the rest of the pipeline, and every unit's declarations merged into one tree with the entry's statements last. Two things were taken from it directly — the wildcard expansion and the entry-only statement rule.
+`legacy-bootstrap/src/frontend/module_loader.rs` is 196 lines and the design above agrees with most of it: a breadth-first walk with a `visited` set so cycles load rather than fail, paths canonicalized and resolved against the importing file's directory with `.cx` appended, wildcards expanded before the rest of the pipeline, and every unit's declarations merged into one tree with the entry's statements last. Two things were taken from it directly — the wildcard expansion and the entry-only statement rule.
 
 Three things are deliberately different.
 
-**Namespaces resolve by mangling, not by an export list.** Rust keeps a `ModuleBinding::Namespace { bind_name, exports }` where each export is a `(name, node_id)` pair, with the comment that node IDs are what keep two modules' `add` apart. `bootstrap2` has no node IDs, and `unit__name` is unique by construction. The cost is a collision this design has to state: a module `a_b` with `fn c` and a module `a` with `fn b__c` mangle alike. A reserved separator or a rejection at load is the fix, and it is the same problem `Ast.method_name` already has.
+**Namespaces resolve by mangling, not by an export list.** Rust keeps a `ModuleBinding::Namespace { bind_name, exports }` where each export is a `(name, node_id)` pair, with the comment that node IDs are what keep two modules' `add` apart. `bootstrap` has no node IDs, and `unit__name` is unique by construction. The cost is a collision this design has to state: a module `a_b` with `fn c` and a module `a` with `fn b__c` mangle alike. A reserved separator or a rejection at load is the fix, and it is the same problem `Ast.method_name` already has.
 
 **Namespace access is type checked.** Rust binds an imported namespace to a *fresh type variable* (`runtime_type_checker.rs:681`), so `util.foo()` is unchecked — the same shape as the receiver heuristic this bootstrap removed. Mangling turns `util.foo(x)` into an ordinary call before the checker runs, so it is checked like any other.
 
