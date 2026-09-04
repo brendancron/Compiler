@@ -6,20 +6,23 @@ The tool ships alongside the compiler and is the boundary where the [Modules](Mo
 
 ## What the tool is called and what it does
 
-`cx`. One binary, subcommands. The compiler is a library it links against, not a program it shells out to — a `cx build` that fork/execs the compiler pays the OCaml startup cost per invocation and loses structured diagnostics to a pipe.
+`cx`. One binary, subcommands. The compiler is a library it links against, not a program it shells out to — a `cx build` that fork/execs the compiler pays the OCaml startup cost per invocation and loses structured diagnostics to a pipe. `cx` may exec *once*, at startup, to hand the job to a different toolchain's `cx` (see [Toolchains](#toolchains-cx-installs-its-own-compiler)); after that the compiler is a library for the rest of the run.
 
-Six subcommands cover the whole model. Each one is small; extra flags earn their place the same way a comment does.
+Seven subcommands cover the whole model. Each one is small; extra flags earn their place the same way a comment does.
 
 ```
 cx new <name>            create a package skeleton
-cx build                 compile the current package
+cx build                 resolve, fetch, check, cache
 cx run [-- args…]        build then execute the entry
 cx test [filter]         run the fixture suite
 cx add <pkg>[@<req>]     record a dependency, resolve, lock
 cx publish               upload to a registry
+cx toolchain <cmd>       install, list, and pin compiler versions
 ```
 
-`fmt`, `doc`, `bench`, `check`, `clean`, `update`, `search`, `login`, `yank`, `tree` follow later. None of them change the model.
+`toolchain` is in the list rather than deferred because dispatch depends on it: the tool that picks a compiler must also be able to install one.
+
+`why`, `vendor`, `fmt`, `doc`, `bench`, `check`, `clean`, `update`, `search`, `login`, `yank`, and `tree` follow later. None of them change the model. Two are load-bearing when they land: `why <pkg>` prints the requirement chain that selected a version, which is the only way to learn which dependency raised the compiler floor; and `vendor` is what `--offline` needs on a machine with a cold cache.
 
 ## The tool lives in the compiler's repo
 
@@ -36,7 +39,7 @@ CronyxLang/
 
 Three consequences.
 
-- **One release ships one artefact.** The toolchain tarball carries `cronyxc` and `cx` together; a split repo means two release trains that must stay in sync anyway, and every mismatch is a bug report.
+- **One release ships one artifact.** The toolchain tarball carries `cronyxc` and `cx` together; a split repo means two release trains that must stay in sync anyway, and every mismatch is a bug report.
 - **Fixtures are not duplicated.** `tests/` is the same set of `.cx` files under both `dune test` (the compiler's own suite) and `cx test` (the package tool driving the compiler as a library). A split would need a submodule or a copy, both worse.
 - **The Cargo / Rust split is historical.** Cargo predates `rustup` and predates being part of the release train; the seam is one the Rust project has spent effort papering over rather than defending. Go, Deno, Bun, and Zig keep the tool in-tree, and none regret it.
 
@@ -44,42 +47,50 @@ Three consequences.
 
 ## Toolchains: `cx` installs its own compiler
 
-The `cx` on `$PATH` is a **shim**. It reads the package's compiler requirement, resolves it to an installed toolchain, and execs into it. A missing toolchain is downloaded and installed on first use, not a diagnostic asking the user to go get one. This is the Go / Deno / Bun shape rather than the Rust `rustup` split, and the reason is one line: a language young enough not to have channels (stable / beta / nightly) does not need a second tool to manage them.
+**There is no shim.** Every toolchain ships a complete `cx`, and `~/.cronyx/bin/cx` is a copy of one of them. On startup `cx` walks up for `cronyx.toml`, reads the toolchain the package requires, and if that is not the version it happens to be, execs that toolchain's `cx` with the original argv. Dispatch is a mode of the full tool, not a separate program.
+
+This is Go's shape. The `rustup` split — a tiny stable launcher in front of a moving toolchain — buys one failure that has to be apologized for: a toolchain needing a launcher capability the installed launcher lacks, repaired by hand with a self-update command. A design whose stated failure mode is manual repair of the component that was supposed to never need repair has the seam in the wrong place. Here the seam is the dispatch preamble alone, and it heals on its own: installing any newer toolchain refreshes `~/.cronyx/bin/cx`.
 
 What this buys, in order of importance:
 
-- **A fresh clone builds.** A repo pinned to `cronyx = "2026.1"` on a machine that has never seen 2026.1 downloads it and runs. There is no "install the right compiler first" step because the tool doing the build is the tool that installs compilers.
-- **The shim is stable, the toolchain moves.** Users install `cx` once. Every compiler release lands as a new toolchain the shim can dispatch to, not a replacement for `cx` itself. A user with a two-year-old shim opens a repo pinned to a two-week-old compiler and it works.
-- **CI is one line.** `curl https://cronyx.dev/install | sh` gives a machine `cx`, and every subsequent build resolves and downloads its own toolchain. There is no matrix of preinstalled compiler versions to maintain.
+- **A fresh clone builds.** A repo pinned to `cronyx = "0.1.1"` on a machine that has never seen 0.1.1 downloads it and runs. There is no "install the right compiler first" step because the tool doing the build is the tool that installs compilers.
+- **No second release train.** A package-manager feature ships in a toolchain like everything else. There is no version of `cx` that is separately installed, separately updated, or separately reported in a bug.
+- **CI is one line.** `curl https://cronyx.dev/install | sh` gives a machine a toolchain, and every subsequent build resolves and downloads whichever one it needs. There is no matrix of preinstalled compiler versions to maintain.
 
 ```
 ~/.cronyx/
-  bin/cx                              the shim, on $PATH
+  bin/cx                              a copy of one toolchain's cx, on $PATH
   toolchains/
-    2026.1.4/
-      bin/cronyxc                     the compiler binary
+    0.1.4/
+      bin/cx                          the whole tool: dispatch, resolver, compiler
+      bin/cronyxc                     the bare compiler driver
       lib/…                           prelude and stdlib for this version
-    2026.2.0/
+    0.2.0/
       …
   registry/                           the cache from the previous section
 ```
 
-**`cronyx = "…"` is the compiler toolchain requirement.** A machine running `cx build` with a compiler that does not satisfy it installs one that does — silently, once, cached. The lockfile pins the exact version resolved.
+**`bin/cx` only ever moves forward.** Installing a toolchain overwrites it when the new version is higher, and leaves it alone when it is lower. Without that rule, `cx toolchain install 0.1.0` to reproduce an old bug would leave the dispatcher too old to read a current package.
+
+**The dispatch preamble is frozen grammar.** `cx` must be able to find the required version in a manifest written by a compiler released years after it. So `cronyx = "…"` is a top-level string under `[package]`, never nested, never conditional, never computed, and that shape does not change. A `cx` that reads the field and cannot satisfy it fails naming the version and where to get it — never with a parse error.
+
+**Dispatch runs in two phases**, because the graph can raise the floor above the root's:
+
+1. Find the package root, read `[package].cronyx`, and exec that toolchain if it is not the running one.
+2. Resolve. If the resolved compiler version exceeds the running one, install it, exec once more, and stop — the lockfile now pins the answer, so the second exec cannot cascade.
+
+**`cronyx` is a node in the resolution graph, not a special field.** It resolves by the same machinery as every other package, with one restriction: it can only ever be a **lower bound**. `cronyx = "0.1.1"` means `>=0.1.1` and never `^0.1.1`. Resolution takes the maximum over the graph and the lockfile pins the exact version.
+
+The restriction is the whole design. A package able to express an *upper* bound on the compiler makes the ecosystem unbuildable the first time someone publishes `cronyx = "<2"` and stops maintaining it. Cargo's `rust-version` is a minimum only for exactly this reason, and it is the one place to copy Cargo without hesitation.
+
+Two consequences follow.
+
+- **A toolchain requirement cannot conflict.** The maximum satisfies every floor by construction, so the only failure is a floor no released version reaches — reported as an unsatisfiable requirement, in the same shape as any other. There is no second diagnostic to write.
+- **`cx why cronyx` is how a user learns why the floor moved.** The requirement chain is the answer to "which dependency dragged my compiler forward", and without it that question has no answer at all.
 
 A separate `edition` field for language dialects (the way Rust distinguishes 2018 / 2021 / 2024 source) is *not* shipped: there is one edition, so the field would always carry the same value. It arrives when a second edition does.
 
-**The shim's job list is short.**
-
-1. Find the package root (walk up looking for `cronyx.toml`).
-2. Read `[package].cronyx` and the lockfile.
-3. If the pinned toolchain is not installed, fetch it from `toolchains.cronyx.dev/<version>/<target>` and verify its checksum.
-4. Exec `~/.cronyx/toolchains/<version>/bin/cronyxc` with the original argv.
-
-Everything else — resolution, caching, publishing — lives in the toolchain, so a shim update is not needed to ship new package-manager features. This split matters: a tool that has to update itself to give users new functionality is a tool users refuse to update.
-
-**Outside a package**, the shim uses the highest installed toolchain, or the one named by `~/.cronyx/config.toml`'s `default = "…"`. `cx toolchain install <version>` and `cx toolchain list` handle the manual side; the automatic side is what carries the weight.
-
-**One caveat.** Compiler releases and shim releases have different cadences. The shim is deliberately tiny (a manifest parser, an HTTP fetch, an `execve`) so that it almost never needs to change; anything that grows the shim's job list is a design smell. If a new toolchain needs a shim capability the installed shim lacks, it fails with a diagnostic naming `cx self-update`, and the user runs one command. This is the only case where the shim's version matters, and keeping it rare is a discipline the shim's scope enforces.
+**Outside a package**, `cx` uses the toolchain it belongs to, or the one named by `~/.cronyx/config.toml`'s `default = "…"`. `cx toolchain install <version>` and `cx toolchain list` handle the manual side; the automatic side is what carries the weight.
 
 ## A package is a directory with a manifest
 
@@ -117,6 +128,18 @@ Two things the manifest deliberately will *not* grow, even when the rest does:
 - **No `[workspace]` in the leaf.** A workspace is a separate root manifest that lists members. Repeating it in every leaf is where Cargo grew a class of confusing errors.
 - **No `[patch]` at the leaf either.** Overrides live in the workspace or user config, never in a manifest that ships to a registry.
 
+## The standard library ships with the toolchain
+
+`stdlib` is **not a package**. It is part of the toolchain tarball, it has no manifest, no version of its own, and no entry in the lockfile. `import "std/…"` resolves against the running toolchain's root — never the filesystem, never a registry — which is what retires the `import "../../../stdlib/…"` shape the tests use today.
+
+The consequences are worth stating, because two of them are costs.
+
+- **`[package].cronyx` gates both.** One number is the compiler floor and the standard-library floor, so a package that needs a new `stdlib` function raises the same field it would raise for a new language feature.
+- **A `stdlib` fix requires a compiler release.** There is no route to shipping a library patch on its own cadence. This is the price of the version being implicit, and it is worth paying while the library is small enough that a compiler release is the natural unit anyway.
+- **`stdlib` cannot depend on a registry package.** It is compiled by the toolchain that contains it, before any resolution has happened.
+
+If the standard library ever needs to move independently, it becomes a normal package with a normal version, and every rule below applies to it unchanged. Nothing here forecloses that.
+
 ## The compilation unit
 
 **A package is a compilation unit.** One `Type_mono` run, one prelude, one global name space per package. This is what makes cycles inside a package legal — the [Modules](Modules.md) design already turns each unit's declarations into `unit__name` and concatenates. A package is the largest tree that goes through the pipeline together.
@@ -139,7 +162,8 @@ A requirement is a *set* of acceptable versions. The manifest DSL is Cargo's, ch
 | `"~1.4"` | `>=1.4.0, <1.5.0` |
 | `"=1.4.2"` | exactly that version |
 | `">=1, <2"` | a raw range |
-| `"1.4"` on a `0.x` package | `>=0.4.x, <0.5.0` — 0.y is treated as major, the SemVer convention |
+| `"0.4"` | `>=0.4.0, <0.5.0` — for a `0.y.z` package, `y` is treated as major, the SemVer convention |
+| `"0.0.3"` | `>=0.0.3, <0.0.4` — at `0.0.z`, every bump is a breaking change |
 
 Resolution is one function: given the manifest's requirements and a registry index, produce a set `{ package → version }` satisfying every requirement, with the constraint that a single graph carries **one version per package name** for each *public* dependency and *at most two majors* for private ones. This is stricter than Cargo (which allows any number of majors) and is what lets a type from one package flow through another without confusion. It costs the ability to have five versions of the same library linked at once; the language does not want that either.
 
@@ -152,8 +176,6 @@ Resolution is one function: given the manifest's requirements and a registry ind
 `cronyx.lock`, generated, checked in for **binaries**, checked in for **libraries too** — the Rust convention of omitting it for libraries saves nothing and makes bug reports irreproducible.
 
 ```toml
-version = 3
-
 [[package]]
 name = "mypkg"
 version = "0.3.1"
@@ -168,6 +190,19 @@ dependencies = ["bytes 0.1.4"]
 ```
 
 `checksum` covers the source tarball, not the compiled artifact. Binary caches are a separate concern (below) and have their own hash.
+
+**A git dependency locks two hashes, not one.** The resolved commit is what `rev` names, but a commit is a name a server chooses and a rewritten history can reuse; the lockfile therefore also records a hash of the checked-out tree, and a checkout whose tree does not match is an error rather than a rebuild.
+
+```toml
+[[package]]
+name = "tui"
+version = "0.2.0"
+source = "git+https://…?rev=abc123"
+commit = "abc123…"
+checksum = "sha256:…"        # over the checked-out tree
+```
+
+**No schema-version field.** Cargo's lockfile carries `version = 4` because it has been migrated three times; a fresh format has nothing to migrate from. When the schema needs to change, the field arrives with the first change and starts at `1`.
 
 ## The registry
 
@@ -185,6 +220,18 @@ The index is a **git repository of JSON files**, one file per package, sharded b
 
 Publishing is `PUT /api/v1/crates/new` with an API token and a tarball, the tarball's manifest signed by the token's account.
 
+**A `path` dependency blocks publishing unless it also carries a `version`.** `{ path = "../local" }` means nothing to anyone who downloads the tarball, so the registry rejects it. `{ path = "../local", version = "0.2" }` publishes: the path is used locally, the version is what the published manifest records. This is Cargo's rule and the reason for it is the same.
+
+**The tarball's contents are declared, not inferred.**
+
+```toml
+[package]
+include = ["src/**/*.cx", "cronyx.toml", "README.md", "LICENSE"]
+exclude = ["tests/fixtures/large/**"]
+```
+
+`include` wins where both appear. With neither, the default is the package root minus `target/`, minus VCS directories, and minus anything the VCS ignores. An allowlist is the safer default to reach for, and a package that ships its `target/` once has already leaked whatever was in it.
+
 **No auto-yank on vulnerability.** A yanked version still resolves for a lockfile that already selected it — otherwise a security disclosure breaks every downstream build simultaneously, which is not the disclosure's intent. New resolutions skip yanked versions with a diagnostic.
 
 ## Caches, directories, offline
@@ -194,7 +241,7 @@ $XDG_CACHE_HOME/cronyx/
   registry/
     index/                 the sparse-fetched JSON, per-registry
     src/                   unpacked source, one directory per <name>-<version>
-    bin/                   compiled artefacts, keyed by content hash
+    bin/                   compiled artifacts, keyed by content hash
   git/
     checkouts/             git-source deps, per revision
 ```
@@ -206,11 +253,16 @@ target/
   debug/                   the default profile
     build/                 build-script outputs
     deps/                  intermediate compiled units
-    <name>                 the final binary
   release/
 ```
 
 **Offline is a first-class mode.** `cx build --offline` refuses network access and errors if the cache lacks something. `cx build --frozen` additionally errors if the lockfile would need updating. Both are what CI wants; both are what a plane wants; the only way to reach that reliably is to make them modes, not the accidental effect of a warm cache.
+
+## What `cx build` produces
+
+**Nothing executable, for now.** The pipeline ends at the interpreter; there is no code generator, so there is no binary to emit. `cx build` resolves the graph, fetches sources, runs the compiler over every package, populates the artifact cache, and prints what it checked. `cx run` is the path that actually executes anything, and it runs the entry through the interpreter.
+
+This is a statement about today, not a design position. When a backend lands, `cx build` writes `target/<profile>/<name>` and nothing else in this document changes — which is the reason to say the current behavior plainly instead of describing an output that does not exist.
 
 ## Profiles
 
@@ -218,15 +270,13 @@ Two by default: `debug` and `release`. A profile is a set of compiler flags:
 
 ```toml
 [profile.debug]
-opt = 0
 checks = "all"             # bounds, overflow, effect assertions
-debug-info = "full"
 
 [profile.release]
-opt = 3
 checks = "safety"          # bounds and overflow stay; assertion-style checks compile out
-debug-info = "line-tables"
 ```
+
+`opt` and `debug-info` are absent on purpose. Both name knobs on a code generator that does not exist, and a manifest key that silently does nothing is worse than one the tool rejects. They arrive with the backend.
 
 Not four (`dev`, `release`, `test`, `bench`) — `test` and `bench` inherit from `debug` and `release` respectively, and the split only exists to let a user tune them separately, which nobody does. One rule.
 
@@ -242,7 +292,7 @@ async   = ["dep:runtime"]  # pulls in an optional dep
 serde   = ["dep:serde", "json?/serde"]   # forwards to a dep's own feature
 ```
 
-Features are **additive**. A feature must not remove behaviour, only add it; this is the invariant that lets union resolution be correct. A feature that turned an API off would silently break every consumer that expected it on. The tool cannot enforce additivity — it is a contract on the publisher — but the manifest schema makes the intent visible.
+Features are **additive**. A feature must not remove behavior, only add it; this is the invariant that lets union resolution be correct. A feature that turned an API off would silently break every consumer that expected it on. The tool cannot enforce additivity — it is a contract on the publisher — but the manifest schema makes the intent visible.
 
 **No global features.** A workspace-level default that flips a feature in a transitive dep is how Cargo builds end up differing between `cargo build` at the leaf and `cargo build` at the root. Not shipped.
 
@@ -272,7 +322,7 @@ A `meta` block that calls `readfile` or `embed` participates in the build's inpu
 
 **One version per package per resolution** (above) is the largest source. The rest is a checklist:
 
-1. **Timestamps are zeroed** in compiled artefacts. The one place a build embeds the wall clock is the one place two identical builds diverge.
+1. **Timestamps are zeroed** in compiled artifacts. The one place a build embeds the wall clock is the one place two identical builds diverge.
 2. **Paths in diagnostics are relative to the package root**, never absolute. `Ast.locate` already renders relative to the entry's directory; the tool extends that to *package* root.
 3. **The environment the build sees is empty** unless the manifest names variables. A `meta` block that reads `$HOME` is a diagnostic.
 4. **The compiler version is part of the lock**, and a mismatch installs the pinned toolchain rather than warning. See [Toolchains](#toolchains-cx-installs-its-own-compiler) — the lockfile records the exact `cronyx` version resolved, and `cx build` fetches it if the machine lacks it. A build on a fresh machine cannot silently use the wrong compiler because the tool never falls back to whatever is on `$PATH`.
@@ -312,7 +362,7 @@ error: no version of `bytes` satisfies every requirement.
 
 **Language editions.** There is one edition; no `edition` field. When a second arrives, packages declare it in `[package]`, the resolver accepts a mixed graph, and each package compiles under its own edition — but `meta` runs under the package that wrote it, so a macro never sees a foreign edition. Rust's editions are the reference; the commitment is smaller until it needs to grow.
 
-**`cargo install`-style global installs of binaries** ship at the same time as `cx publish`, since they are the same feature from the other side: a registry that serves source can serve a compiled binary for a target the tool asks for. Deferred until there is a registry.
+**`cargo install`-style global installs of binaries.** Blocked on a code generator before it is blocked on a registry — there is no binary to install. When both exist they are one feature seen from two sides, since a registry that serves source can serve a compiled binary for a target the tool asks for.
 
 ## Open
 
@@ -320,7 +370,13 @@ error: no version of `bytes` satisfies every requirement.
 
 **Feature unification across dev-deps.** If `mypkg`'s dev-deps enable a feature of a runtime dep, does the runtime build see it? Cargo's answer changed once (resolver v2) and the change was disruptive. The design here is: no. Dev-deps live in their own resolution scope, sharing the runtime deps' versions but not their feature sets. This needs a fixture before it is a decision.
 
-**How the compiler consumes a dependency.** A dependency ships typed IR for generics and post-CPS IR for the rest, but *the format* is not designed. Whether it is the compiler's own serialised AST types, a stable IR with its own schema, or something in between decides how quickly the compiler can evolve. The `bootstrap` types change often enough that a stable schema is not free.
+**What a dependency exports.** Everything it defines. There is no visibility system, and [Modules](Modules.md) resolves namespaces by mangling rather than an export list, so there is nothing yet for a package boundary to narrow. When `pub` arrives it narrows this without changing anything else here.
+
+**Symbol names across packages.** *Todo, and it needs an answer before two packages can be linked.* Modules mangles a unit's declarations to `unit__name`, which two packages that both contain a `util/parse` collide on. The obvious fix is a third segment — `pkg__unit__name` — which makes worse the collision [Modules.md](Modules.md) already documents, where a module `a_b` with `fn c` and a module `a` with `fn b__c` mangle alike. Package names come from a registry rather than from the author, so the reserved-separator-or-reject decision cannot stay informal the way it can inside one package.
+
+**Coherence across a package boundary.** Impls elaborate to plain functions and coherence is global after concatenation, so two dependencies that both write `impl Display for Value` compile fine on their own and collide only in the consumer. No pass owns that check today, and whether overlap is an error or an orphan rule prevents it is undecided.
+
+**How the compiler consumes a dependency** is *not* open, and the toolchain design is why. The lockfile pins an exact compiler version and every package in a build is compiled by that one binary, so a compiled artifact is never read by a compiler other than the one that wrote it. There is no cross-version compatibility requirement, so there is no schema: serialize the compiler's own types, tag the artifact with the compiler version, and key the cache on that tag. A compiler change that alters the types invalidates the cache and everything rebuilds, which leaves `bootstrap`'s types free to change every week. A stable schema is only needed when artifacts cross compiler versions, and the only thing that wants that is a binary cache shared across a team on mixed toolchains — which the pinning deliberately prevents. What remains open is the artifact's *contents*, above, not its format.
 
 **Registry federation.** Two registries defining a package with the same name is a collision waiting to happen. Namespacing by registry (`internal:sekrit`) at the manifest is one answer; a global-name-per-registry policy is another. This is a governance decision as much as a technical one.
 
