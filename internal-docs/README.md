@@ -19,6 +19,7 @@ This is separate from `docs/`, which is the Docusaurus site published for langua
 | [Diagnostics.md](Diagnostics.md)                             | Spans, and why a frame cannot render half-drawn                       |
 | [Modules.md](Modules.md)                                     | `import`, and why several files become one program                    |
 | [Package Manager.md](Package%20Manager.md)                   | `cx`, packages, resolution, and where the module boundary hardens     |
+| [Package Manager Plan.md](Package%20Manager%20Plan.md)       | The order `cx` gets built in, and what "done" means at each step      |
 | [Metaprocessing.md](Metaprocessing.md)                       | `meta` and `gen`, and compilation calling itself                      |
 | [Reify.md](Reify.md)                                         | Turning a compile-time value back into syntax                         |
 | [GADT Refinement.md](GADT%20Refinement.md)                   | Refining a type parameter in a match arm, and the choice of how       |
