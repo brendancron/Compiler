@@ -184,8 +184,10 @@ beside it — that is where \`import \"std/…\"\` resolves to.
 
 echo "==> $version published"
 
-# What the Homebrew formula needs, so cutting a release hands it over rather
-# than leaving someone to compute it.
+# The tap follows on its own: publishing the release fires
+# .github/workflows/bump-homebrew.yml, which points the formula at this
+# archive. Re-run it by hand with `gh workflow run bump-homebrew.yml -f
+# tag=$version` if it fails or if the archive is replaced.
 echo
 echo "For brendancron/homebrew-cronyx, $target:"
 echo "  url \"https://github.com/brendancron/CronyxLang/releases/download/$version/$archive\""

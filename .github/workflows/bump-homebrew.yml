@@ -1,0 +1,110 @@
+name: Bump Homebrew Formula
+
+# Toolchain releases are cut by hand, from a machine that can build the
+# archive. This is the part that follows: the tap pins a url and a checksum,
+# so `brew upgrade` shows a release only once the formula names it.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to bump the formula to, e.g. v0.0.2'
+        required: true
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Read the tag
+        id: tag
+        env:
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          # `vscode-v*` releases fire this same event and have nothing to do
+          # with the toolchain.
+          if [[ ! $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "$TAG is not a toolchain release; nothing to bump."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$PRERELEASE" = "true" ]; then
+            echo "$TAG is a prerelease; the tap tracks stable releases only."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Take the checksum from the archive itself
+        id: archive
+        if: steps.tag.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # One archive per platform, and the formula pins this one. If the
+          # release does not carry it the run fails rather than leaving the
+          # formula quietly a version behind.
+          target=x86_64-apple-darwin
+          archive="cronyx-$TAG-$target.tar.gz"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p "$archive" -p "$archive.sha256" -D dl
+
+          published=$(awk '{print $1}' "dl/$archive.sha256")
+          actual=$(sha256sum "dl/$archive" | awk '{print $1}')
+          [ "$published" = "$actual" ] || {
+            echo "::error::$archive hashes to $actual, but its .sha256 asset says $published"
+            exit 1
+          }
+
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "sha256=$actual" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the tap
+        if: steps.tag.outputs.skip == 'false'
+        uses: actions/checkout@v4
+        with:
+          repository: brendancron/homebrew-cronyx
+          # A cross-repository push, which the run's own token cannot do.
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Point the formula at the release
+        if: steps.tag.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          ARCHIVE: ${{ steps.archive.outputs.archive }}
+          SHA256: ${{ steps.archive.outputs.sha256 }}
+        run: |
+          formula=tap/Formula/cronyx.rb
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ARCHIVE"
+
+          sed -i \
+            -e "s|^  version \".*\"$|  version \"$VERSION\"|" \
+            -e "s|^  url \".*\"$|  url \"$url\"|" \
+            -e "s|^  sha256 \".*\"$|  sha256 \"$SHA256\"|" \
+            "$formula"
+
+          grep -q "version \"$VERSION\"" "$formula" || { echo "::error::the version did not take"; exit 1; }
+          grep -q "sha256 \"$SHA256\"" "$formula" || { echo "::error::the checksum did not take"; exit 1; }
+
+      - name: Push it
+        if: steps.tag.outputs.skip == 'false'
+        working-directory: tap
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          if git diff --quiet; then
+            echo "The formula already names $VERSION."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git commit -am "cronyx $VERSION"
+          git push
