@@ -1,0 +1,6 @@
+import "tests_dir" as pkg;
+
+@test
+fn subtracts() {
+    assert(pkg.add(3, 0 - 1) == 2, "3 - 1 is 2");
+}

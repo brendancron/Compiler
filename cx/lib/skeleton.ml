@@ -13,6 +13,18 @@ let manifest name =
     name
     Release.version
 
+(* Aliased rather than used bare: a package name may carry '-', which is no
+   identifier. *)
+let example name =
+  Printf.sprintf
+    "import \"%s\" as pkg;\n\
+     \n\
+     @test\n\
+     fn greets() {\n\
+    \    assert(pkg.greeting() == \"Hello, World!\", \"the greeting changed\");\n\
+     }\n"
+    name
+
 let create ~directory ~name =
   if Sys.file_exists directory
   then Error (Printf.sprintf "'%s' already exists." directory)
@@ -20,6 +32,7 @@ let create ~directory ~name =
     match
       Sys.mkdir directory 0o755;
       Sys.mkdir (Filename.concat directory "src") 0o755;
+      Sys.mkdir (Filename.concat directory "tests") 0o755;
       write (Filename.concat directory Manifest.file_name) (manifest name);
       write
         (Filename.concat directory (Filename.concat "src" "main.cx"))
@@ -27,12 +40,8 @@ let create ~directory ~name =
         \    return \"Hello, World!\";\n\
          }\n\
          \n\
-         print(greeting());\n\
-         \n\
-         @test\n\
-         fn greets() {\n\
-        \    assert(greeting() == \"Hello, World!\", \"the greeting changed\");\n\
-         }\n";
+         print(greeting());\n";
+      write (Filename.concat directory (Filename.concat "tests" "example.cx")) (example name);
       write (Filename.concat directory ".gitignore") "target/\n"
     with
     | () -> Ok ()

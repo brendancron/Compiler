@@ -32,7 +32,7 @@ let bad_packages =
 
 (* Run through `cx test` rather than `cx run`: the expectation is the report,
    not what the program prints. *)
-let test_packages = [ "tested"; "bad_test" ]
+let test_packages = [ "tested"; "bad_test"; "tests_dir" ]
 
 let repo_root () =
   let marker = Filename.concat "cx" (Filename.concat "test" "manifests") in
@@ -522,6 +522,25 @@ let skeleton_case () =
         Printf.printf "FAIL skeleton/run\n  %s\n" (diagnostics ~root:dir root errors);
         false
     in
+    let laid_out =
+      let has path = Sys.file_exists (Filename.concat root path) in
+      let inline =
+        let text = read_file (Filename.concat root "src/main.cx") in
+        let rec at i =
+          i + 5 <= String.length text
+          && (String.equal (String.sub text i 5) "@test" || at (i + 1))
+        in
+        at 0
+      in
+      if has "tests/example.cx" && not inline
+      then (
+        Printf.printf "ok   skeleton/tests directory\n";
+        true)
+      else (
+        Printf.printf
+          "FAIL skeleton/tests directory\n  the example test belongs in tests/, not inline\n";
+        false)
+    in
     let tested =
       match Cx.Test.run root with
       | Ok (rendered, failed) ->
@@ -532,7 +551,26 @@ let skeleton_case () =
         false
     in
     remove dir;
-    ran && tested
+    ran && laid_out && tested
+
+(* A test file is compiled against the package rather than into it, so an
+   archive that carried one would be shipping something no consumer can build:
+   their graph has none of its test-only dependencies. *)
+let archive_case dir =
+  let files = Cx.Archive.of_directory (Filename.concat dir "tests_dir") in
+  let named path = List.exists (fun (p, _) -> String.equal p path) files in
+  let carried_tests =
+    List.exists (fun (p, _) -> String.starts_with ~prefix:"tests/" p) files
+  in
+  if named "src/lib.cx" && named "cronyx.toml" && not carried_tests
+  then (
+    Printf.printf "ok   archive/leaves tests out\n";
+    true)
+  else (
+    Printf.printf
+      "FAIL archive/leaves tests out\n  packed: %s\n"
+      (String.concat ", " (List.map fst files));
+    false)
 
 (* A `cx` runs the job itself when it is new enough, hands it on once when it is
    not, and says where to get one when the machine has none. *)
@@ -734,6 +772,7 @@ let () =
       @ List.map run_dispatch dispatches
       @ List.map run_dispatched dispatched_commands
       @ [ skeleton_case ()
+        ; archive_case packages_dir
         ; registry_cases root
         ; lockfile_cases packages_dir
         ; cache_unchanged packages_dir

@@ -1,0 +1,6 @@
+ok   adds
+FAIL reports_a_failure
+  1 + 2 is not 4
+ok   subtracts
+
+2/3 passed

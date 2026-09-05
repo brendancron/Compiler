@@ -57,8 +57,15 @@ same rule as `tests/` applies to both: a fixture no list in
 
 ## Working in this repo
 
-`main` is protected: it takes no direct pushes, so every change lands through a
-pull request. Branch, push, open the PR, and let the `test` check run.
+**Do the thing that was asked, and stop there.** A request to write a file is a
+request to write a file — not to branch, commit, push, or open a pull request.
+Landing a change is its own instruction, and it is the user's to give. When work
+is finished and unasked-for, say what is in the working tree and let the user
+decide where it goes.
+
+`main` is protected: it takes no direct pushes, so a change that is *meant to
+land* lands through a pull request. Branch, push, open the PR, and let the
+`test` check run.
 
 **Do not watch CI.** Opening the PR is where the work ends. Do not poll
 `gh pr checks`, do not start a monitor on the run, and do not report back on

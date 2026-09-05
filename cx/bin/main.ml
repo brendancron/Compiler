@@ -76,6 +76,8 @@ let mode_of args =
       | "--locked" -> { mode with Cx.Build.locked = true }
       | "--offline" -> { mode with Cx.Build.offline = true }
       | "--frozen" -> { Cx.Build.locked = true; offline = true }
+      (* Read by [parse_run], which sees the same list. *)
+      | "--dump-source" | "--dump-tokens" | "--dump-ast" | "--dump-types" | "--dump-code" -> mode
       | _ when String.length arg > 1 && Char.equal arg.[0] '-' ->
         Driver.die ("unknown option: " ^ arg ^ "\n" ^ usage)
       | _ -> mode)

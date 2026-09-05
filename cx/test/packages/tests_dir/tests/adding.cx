@@ -1,0 +1,11 @@
+import "tests_dir" as pkg;
+
+@test
+fn adds() {
+    assert(pkg.add(1, 2) == 3, "1 + 2 is 3");
+}
+
+@test
+fn reports_a_failure() {
+    assert(pkg.add(1, 2) == 4, "1 + 2 is not 4");
+}

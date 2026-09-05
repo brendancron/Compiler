@@ -61,6 +61,18 @@ git rev-parse -q --verify "refs/tags/$version" >/dev/null && die "tag $version a
 # The tag has to name a commit the remote already has, or the release points at
 # something nobody can check out.
 branch=$(git rev-parse --abbrev-ref HEAD)
+
+# The second run happens after the bump has merged, and the branch this script
+# made for it is gone from origin by then. Tagging it would also put the tag on
+# a commit that is not on the branch anyone releases from.
+if [[ $branch == release-* ]]; then
+  die "you are on '$branch', which is where the bump was written.
+  The tag belongs on the branch it merged into:
+
+    git checkout main && git pull
+    scripts/release.sh $version"
+fi
+
 if ! $dry; then
   git fetch -q origin "$branch" 2>/dev/null || die "origin has no branch '$branch' — push it first"
   [ "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)" ] \
@@ -108,7 +120,9 @@ if [ "$current" != "$bare" ]; then
 Cut with \`scripts/release.sh $version\`, which opens this rather than pushing to \`$branch\` — merge it and run the same command again to tag and publish." \
       >/dev/null
     echo
-    echo "==> Merge it, then run: scripts/release.sh $version"
+    echo "==> Merge it, then:"
+    echo "      git checkout $branch && git pull"
+    echo "      scripts/release.sh $version"
     exit 0
   fi
 fi

@@ -10,21 +10,28 @@ let artifact_path root name = Filename.concat (debug_dir root) (name ^ Artifact.
 let ensure dir = if not (Sys.file_exists dir) then Sys.mkdir dir 0o755
 
 (* Every source file in the package, so the artifact holds all of it. *)
+let rec walk dir =
+  Sys.readdir dir
+  |> Array.to_list
+  |> List.sort String.compare
+  |> List.concat_map (fun entry ->
+    let path = Filename.concat dir entry in
+    if Sys.is_directory path
+    then walk path
+    else if Filename.check_suffix entry ".cx"
+    then [ path ]
+    else [])
+
 let sources root =
-  let rec walk dir =
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.sort String.compare
-    |> List.concat_map (fun entry ->
-      let path = Filename.concat dir entry in
-      if Sys.is_directory path
-      then walk path
-      else if Filename.check_suffix entry ".cx"
-      then [ path ]
-      else [])
-  in
   let src = Filename.concat root "src" in
   if Sys.file_exists src && Sys.is_directory src then walk src else []
+
+(* A test file is not a source file: it is compiled against the package's
+   artifact rather than into it, so `sources` must not see it and an artifact
+   never carries one. *)
+let tests root =
+  let dir = Filename.concat root "tests" in
+  if Sys.file_exists dir && Sys.is_directory dir then walk dir else []
 
 let manifest_of root =
   Manifest.load (Filename.concat root Manifest.file_name)
