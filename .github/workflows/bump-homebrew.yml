@@ -67,7 +67,7 @@ jobs:
 
       - name: Check out the tap
         if: steps.tag.outputs.skip == 'false'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: brendancron/homebrew-cronyx
           # A cross-repository push, which the run's own token cannot do. A

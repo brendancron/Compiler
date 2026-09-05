@@ -15,7 +15,7 @@ jobs:
     steps:
       # The fixtures live at the repo root and the harness finds them by walking
       # up from the test binary, so the whole tree has to be checked out.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install OCaml
         uses: ocaml/setup-ocaml@v3
