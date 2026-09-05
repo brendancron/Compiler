@@ -37,7 +37,7 @@ Two things happened that aren't obvious from the source:
 
 Dump the runtime code and you can see the substitution:
 
-```cronyx title="runtime_code.cx"
+```cronyx title="--dump-code"
 var x = 89;
 print(x);
 ```
@@ -81,7 +81,7 @@ Hello Fib
 89
 ```
 
-```cronyx title="runtime_code.cx"
+```cronyx title="--dump-code"
 print("Hello Fib");
 var x = 89;
 print(x);
@@ -134,7 +134,7 @@ print(factorial(7));
 5040
 ```
 
-```cronyx title="runtime_code.cx"
+```cronyx title="--dump-code"
 print(120);
 print(720);
 print(5040);

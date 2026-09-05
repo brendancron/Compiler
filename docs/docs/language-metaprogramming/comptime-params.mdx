@@ -36,9 +36,9 @@ true
 
 That single `identity` definition isn't really *one* function in the runtime program. It's three. The compiler walked the call sites, saw three different argument types, and produced three independent specialized copies — a process called **monomorphization** (literally, "making it one shape").
 
-You can see it directly with `--dump-runtime-code`:
+You can see it directly with `--dump-code`:
 
-```cronyx title="runtime_code.cx"
+```cronyx title="--dump-code"
 fn identity__int(x) { return x; }
 fn identity__str(x) { return x; }
 fn identity__bool(x) { return x; }
@@ -171,7 +171,7 @@ true
 
 Dump the runtime code:
 
-```cronyx title="runtime_code.cx"
+```cronyx title="--dump-code"
 fn pair_up__int(a, b)  { return (a, b); }
 fn pair_up__str(a, b)  { return (a, b); }
 fn pair_up__bool(a, b) { return (a, b); }

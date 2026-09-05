@@ -38,7 +38,7 @@ Bottom
 
 The `gen` turned a compile-time print into a runtime print. After the meta phase finishes, the program that actually runs is, literally:
 
-```cronyx title="runtime_code.cx"
+```cronyx title="--dump-code"
 print("Top");
 print("Middle");
 print("Bottom");
@@ -53,15 +53,25 @@ By the time the runtime phase starts, the `meta { ... }` block in your source co
 
 ### See it for yourself
 
-You don't have to take my word for the substitution. Pass `--dump-runtime-code` to the compiler and it writes the post-meta program to a file:
+You don't have to take my word for the substitution. Pass `--dump-code` and the program after the meta phase is printed before it runs:
 
 ```
-cronyx run main.cx --dump-runtime-code --out-dir out
+cx run main.cx --dump-code
 ```
 
-That produces `out/runtime_code.cx` — a pretty-printed source file showing the program after the meta phase has finished. For the example above, the dumped file will look like the three-line `print("Top"); print("Middle"); print("Bottom");` block above. Open it up whenever you want to see what your `meta` and `gen` actually produced.
+```
+-- code --
+print("Top");
+print("Middle");
+print("Bottom");
+Top
+Middle
+Bottom
+```
 
-This dump is the single best debugging tool when metaprogramming gets confusing. If a generated function isn't behaving the way you expected, dump the runtime code and *read it*. Nine times out of ten, the bug is obvious once you see the source the compiler actually produced.
+The block under `-- code --` is the program as Cronyx, pretty-printed after every `meta` block has been evaluated and substituted; what follows is the program running.
+
+This dump is the single best debugging tool when metaprogramming gets confusing. If a generated function isn't behaving the way you expected, dump the code and *read it*. Nine times out of ten, the bug is obvious once you see the source the compiler actually produced.
 
 Read `gen` that way: it's a "splice the following statement into the program at this position" instruction. The meta block is a generator; `gen` is the only thing it produces output with.
 
@@ -89,7 +99,7 @@ Walk through the generation:
 
 The generated program is:
 
-```cronyx title="runtime_code.cx"
+```cronyx title="--dump-code"
 var y = 4;
 var x = y + 5;
 print(x);
@@ -134,7 +144,7 @@ Read what's happening at compile time:
 
 After compilation, the runtime program is:
 
-```cronyx title="runtime_code.cx"
+```cronyx title="--dump-code"
 fn greet_alice()   { print("Hello alice"); }
 fn greet_bob()     { print("Hello bob"); }
 fn greet_charlie() { print("Hello charlie"); }
@@ -146,7 +156,7 @@ greet_charlie();
 
 You wrote three lines of `gen`; you got three real top-level functions. Add a name to the list, recompile, and a fourth function appears — *the program changes shape based on data the compiler had access to*. That's the payoff.
 
-Run with `--dump-runtime-code` and you'll see the three function declarations sitting at the top level of `runtime_code.cx`, followed by the three calls — exactly as if you'd written them out by hand.
+Run with `--dump-code` and you'll see the three function declarations sitting at the top level, followed by the three calls — exactly as if you'd written them out by hand.
 
 A subtle point worth lingering on: `fn_name` is being used in the *identifier position* — it's not a name being looked up at runtime, it's a name being *constructed* at compile time and spliced into the function declaration. When you see a meta-scope variable used where a function name or variable name would normally go, that's the splice happening.
 
@@ -180,9 +190,9 @@ dog says hi
 fox says hi
 ```
 
-Dump it with `--dump-runtime-code` and the meta block is gone — replaced by three concrete function declarations:
+Dump it with `--dump-code` and the meta block is gone — replaced by three concrete function declarations:
 
-```cronyx title="runtime_code.cx"
+```cronyx title="--dump-code"
 fn speak_cat() { print("cat says hi"); }
 fn speak_dog() { print("dog says hi"); }
 fn speak_fox() { print("fox says hi"); }

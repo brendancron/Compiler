@@ -8,15 +8,6 @@ Let's get setup with Cronyx in less than 5 minutes.
 
 ## Installation
 
-The Cronyx build manager can be installed via package managers. This is the simplest way to get started.
-
-### Windows
-
-```
-scoop bucket add cronyx https://github.com/brendancron/scoop-cronyx
-scoop install cronyx
-```
-
 ### Mac
 
 ```
@@ -24,26 +15,100 @@ brew tap brendancron/cronyx
 brew install cronyx
 ```
 
-### Installing a Toolchain
+That installs one complete toolchain: `cx`, which links the compiler rather than shelling out to it, and the standard library it resolves `import "std/…"` against. The command is `cx` — there is no separate compiler to install.
 
-The cronyx build manager automatically manages different versions of the cronyx compiler across projects. You can install a toolchain with the following:
+The published archive is Intel (`x86_64-apple-darwin`); Apple Silicon runs it under Rosetta 2.
+
+### Windows and Linux
+
+There is no prebuilt archive yet. Build one from source — you need OCaml 5 and dune:
 
 ```
-cronyx toolchain install vX.X.X
+git clone https://github.com/brendancron/CronyxLang
+cd CronyxLang/bootstrap
+opam install . --deps-only --yes
+cd ..
+dune build
 ```
+
+`cx` is then `_build/default/cx/bin/main.exe`. It looks for the standard library at `../lib/cronyx/stdlib`, relative to itself, so install it somewhere that layout holds:
+
+```
+mkdir -p ~/.local/bin ~/.local/lib/cronyx
+cp _build/default/cx/bin/main.exe ~/.local/bin/cx
+cp -R stdlib ~/.local/lib/cronyx/stdlib
+```
+
+Put `~/.local/bin` on your `PATH`. Setting `CRONYX_STDLIB` to the library's path overrides all of this if you would rather keep the two apart.
 
 ## Hello World
 
-In order to test that everything is working please make a file called `hello.cx` with the following:
-
 ```
-print("Hello, World!");
-```
-
-And run it with:
-
-```
-cronyx run hello.cx
+cx new hello
+cd hello
+cx run
 ```
 
-Great, You have ran your first cronyx program!
+```
+Hello, World!
+```
+
+`cx new` writes a package: a `cronyx.toml`, a `src/main.cx`, and a `.gitignore`. The program it starts you with is a greeting and a test of it:
+
+```cronyx title="src/main.cx"
+fn greeting(): string {
+    return "Hello, World!";
+}
+
+print(greeting());
+
+@test
+fn greets() {
+    assert(greeting() == "Hello, World!", "the greeting changed");
+}
+```
+
+So `cx test` has something to run from the start:
+
+```
+cx test
+```
+
+```
+ok   greets
+
+1/1 passed
+```
+
+A single file needs no package at all — write `hello.cx` and name it:
+
+```
+cx run hello.cx
+```
+
+## Toolchains
+
+A package names the compiler it needs in its `cronyx.toml`:
+
+```toml
+[package]
+name    = "hello"
+version = "0.1.0"
+cronyx  = "0.0.2"
+```
+
+That is a floor rather than a pin: a newer `cx` runs the package itself, and an older one hands the job to the version named, if that version is installed. Nothing has to be run before opening someone else's package.
+
+`cx toolchain list` says which are installed, and which one is running:
+
+```
+cx toolchain list
+```
+
+Installing one takes a version and the `cx` binary to install as it, unpacked from a release archive:
+
+```
+cx toolchain install 0.0.2 ./cronyx-v0.0.2-x86_64-apple-darwin/bin/cx
+```
+
+Archives are published at [github.com/brendancron/CronyxLang/releases](https://github.com/brendancron/CronyxLang/releases). Installing a *newer* toolchain also makes it the `cx` on your `PATH`; installing an older one leaves that alone, so the dispatcher only ever moves forward.
