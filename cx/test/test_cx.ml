@@ -502,6 +502,38 @@ let run_preamble (text, expected) =
     Printf.printf "FAIL preamble\n  expected %s\n  actual   %s\n" (show expected) (show actual);
     false)
 
+(* What `cx new` writes is the first Cronyx anyone runs, so it has to run and
+   its test has to pass -- checked through the same path `cx run` and `cx test`
+   take, rather than by comparing the file to a copy of itself. *)
+let skeleton_case () =
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) "cx-test-skeleton" in
+  remove dir;
+  Sys.mkdir dir 0o755;
+  let root = Filename.concat dir "hello" in
+  match Cx.Skeleton.create ~directory:root ~name:"hello" with
+  | Error message ->
+    Printf.printf "FAIL skeleton/new\n  %s\n" message;
+    false
+  | Ok () ->
+    let ran =
+      match built root with
+      | Ok output -> compare_case "skeleton/run" ~expected:"Hello, World!\n" ~actual:output
+      | Error errors ->
+        Printf.printf "FAIL skeleton/run\n  %s\n" (diagnostics ~root:dir root errors);
+        false
+    in
+    let tested =
+      match Cx.Test.run root with
+      | Ok (rendered, failed) ->
+        compare_case "skeleton/test" ~expected:"ok   greets\n\n1/1 passed\n" ~actual:rendered
+        && failed = 0
+      | Error errors ->
+        Printf.printf "FAIL skeleton/test\n  %s\n" (diagnostics ~root:dir root errors);
+        false
+    in
+    remove dir;
+    ran && tested
+
 (* A `cx` runs the job itself when it is new enough, hands it on once when it is
    not, and says where to get one when the machine has none. *)
 let dispatches =
@@ -701,7 +733,8 @@ let () =
       @ List.map run_preamble preambles
       @ List.map run_dispatch dispatches
       @ List.map run_dispatched dispatched_commands
-      @ [ registry_cases root
+      @ [ skeleton_case ()
+        ; registry_cases root
         ; lockfile_cases packages_dir
         ; cache_unchanged packages_dir
         ; cache_meta_read packages_dir

@@ -23,7 +23,16 @@ let create ~directory ~name =
       write (Filename.concat directory Manifest.file_name) (manifest name);
       write
         (Filename.concat directory (Filename.concat "src" "main.cx"))
-        "print(\"Hello, World!\");\n";
+        "fn greeting(): string {\n\
+        \    return \"Hello, World!\";\n\
+         }\n\
+         \n\
+         print(greeting());\n\
+         \n\
+         @test\n\
+         fn greets() {\n\
+        \    assert(greeting() == \"Hello, World!\", \"the greeting changed\");\n\
+         }\n";
       write (Filename.concat directory ".gitignore") "target/\n"
     with
     | () -> Ok ()
