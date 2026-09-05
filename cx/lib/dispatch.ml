@@ -52,6 +52,14 @@ let graph_floor root =
 
 (* Set across the exec, so a toolchain that is not the version it was installed
    as cannot bounce the job back and forth forever. Handing off happens once. *)
+(* The commands that read the package's code, and so need the toolchain it was
+   written for. The rest -- installing that toolchain above all -- runs here
+   whatever the package asks for, or a machine holding only an old `cx` has no
+   way to get a newer one. *)
+let dispatched = function
+  | ("build" | "run" | "test" | "publish") :: _ -> true
+  | _ -> false
+
 let marker = "CRONYX_DISPATCHED"
 
 type decision =
@@ -76,8 +84,8 @@ let decide ~running ~wanted =
 let unavailable version =
   Printf.sprintf
     "This package needs Cronyx %s, and %s is running.\n\
-     Install it with `cx toolchain install %s`, or fetch it from \
-     https://toolchains.cronyx.dev/%s."
+     Fetch it from https://toolchains.cronyx.dev/%s, then install it with `cx toolchain \
+     install %s <path-to-cx>`."
     version
     Release.version
     version

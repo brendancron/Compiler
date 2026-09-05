@@ -511,6 +511,35 @@ let dispatches =
   ; "0.1.0", Some "9.9.9", "missing"
   ]
 
+(* Installing a toolchain cannot be gated on the toolchain being installed. *)
+let dispatched_commands =
+  [ [ "run" ], true
+  ; [ "build"; "--locked" ], true
+  ; [ "test" ], true
+  ; [ "publish" ], true
+  ; [ "toolchain"; "install"; "0.0.2"; "./cx" ], false
+  ; [ "toolchain"; "list" ], false
+  ; [ "new"; "hello" ], false
+  ; [ "version" ], false
+  ; [ "--help" ], false
+  ; [], false
+  ]
+
+let run_dispatched (args, expected) =
+  let actual = Cx.Dispatch.dispatched args in
+  let shown = String.concat " " args in
+  if Bool.equal actual expected
+  then (
+    Printf.printf "ok   dispatched %s\n" (if shown = "" then "-" else shown);
+    true)
+  else (
+    Printf.printf
+      "FAIL dispatched %s\n  expected %b\n  actual   %b\n"
+      shown
+      expected
+      actual;
+    false)
+
 let run_dispatch (running, wanted, expected) =
   let actual =
     match Cx.Dispatch.decide ~running ~wanted with
@@ -671,6 +700,7 @@ let () =
       @ List.map (test_package_case packages_dir) test_packages
       @ List.map run_preamble preambles
       @ List.map run_dispatch dispatches
+      @ List.map run_dispatched dispatched_commands
       @ [ registry_cases root
         ; lockfile_cases packages_dir
         ; cache_unchanged packages_dir
