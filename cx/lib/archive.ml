@@ -57,7 +57,13 @@ let of_directory root =
       let path = Filename.concat dir entry in
       let relative = if String.equal prefix "" then entry else Filename.concat prefix entry in
       if Sys.is_directory path
-      then if String.equal entry "target" then [] else walk relative path
+      then
+        (* `target/` is output. `tests/` at the root is compiled against the
+           package rather than into it, and a consumer has neither the
+           test-only dependencies to build it nor a reason to. *)
+        if String.equal entry "target" || (String.equal prefix "" && String.equal entry "tests")
+        then []
+        else walk relative path
       else [ relative, In_channel.with_open_bin path In_channel.input_all ])
   in
   walk "" root

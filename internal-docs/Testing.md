@@ -1,6 +1,29 @@
 # Testing
 
-`cx test` runs the `@test` functions in a package. It is unrelated to `tests/`, which is the compiler's own golden-file suite and belongs to `dune test`; the two share a name and nothing else.
+`cx test` runs the `@test` functions in a package: those in `tests/`, and any written inline beside the code.
+
+(This is a package's own `tests/`. The compiler's golden-file suite at the repo root is also called `tests/` and belongs to `dune test`; the two share a name and nothing else.)
+
+## A test file is a consumer
+
+`cx new` puts the example test in `tests/`, which is the default place for one. A file there is not part of the package — it is compiled *against* it, reaching it by the name the manifest gave it:
+
+```cronyx
+import "hello" as pkg;
+
+@test
+fn greets() {
+    assert(pkg.greeting() == "Hello, World!", "the greeting changed");
+}
+```
+
+so the boundary is the one the loader already enforces. An `import "../src/main.cx"` from a test file is refused for reaching outside its root, exactly as it would be from any other package. What crosses is the dependency name, and the package's declarations arrive through its artifact already mangled.
+
+Each file in `tests/` is its own program, as a Rust integration test is its own crate: one that fails to compile is reported alongside the others rather than standing in front of them. The program a test file runs in holds the package's *declarations* without its top level — a test links the library, not the program, so `main.cx` does not re-run once per test file.
+
+An inline `@test` still works and still sees what the package does not export. That is the split Rust draws between `#[cfg(test)] mod tests` and `tests/`: inline for an invariant with no public surface, `tests/` for the contract a consumer depends on.
+
+Nothing in `tests/` reaches an artifact, because it was never part of the package. `cx publish` therefore ships none of it — a consumer could not build it in any case, since a package's test-only dependencies are not in their graph.
 
 ```cronyx
 fn add(a: int, b: int): int { return a + b; }
@@ -69,6 +92,9 @@ That is why making `print` an algebraic effect is *not* a prerequisite for any o
 **`cx test` exits 1 when anything failed**, and prints `no tests` rather than succeeding silently on a package with none.
 
 ## Open
+
+**The boundary is the loader's, not the type system's.** A test file cannot reach into `src/` by path, but everything the package declares is visible once it is reached by name: there is no export marker yet, so `tests/` checks the contract by convention rather than because the compiler stops it. When visibility lands, this is where it bites first.
+
 
 **`assert` takes its message.** `assert(x == 1, "x is 1")` is what is expressible today. pytest's rewritten asserts — reporting the subexpression values of a bare `assert x == 1` — cannot be had by making `assert` a `meta fn`: a meta function's arguments must be known at compile time, and `x` is a runtime value, so the call would fail with `Undefined variable 'x'`. Getting it needs the compiler to reify the argument's *source* into the message, which `Source.expr` can already print. That is one pass away and it is the single largest improvement available here.
 

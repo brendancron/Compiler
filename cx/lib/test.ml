@@ -90,7 +90,11 @@ let outcomes text =
             , Option.map (fun o -> { o with message = Some rest }) current )
           | _ -> acc, current))
       ([], None)
-      (String.split_on_char '\n' text)
+      ((* The final newline terminates the last line rather than opening an
+          empty one, and an empty one would be reported as a test's output. *)
+       match List.rev (String.split_on_char '\n' text) with
+       | "" :: rest -> List.rev rest
+       | lines -> List.rev lines)
   in
   List.rev_map
     (fun o -> { o with output = List.rev o.output })
@@ -136,16 +140,67 @@ let all_runnable found =
     found
   |> Result.map List.rev
 
-let run ?(mode = Build.unrestricted) ?filter root =
+(* The package as a test file sees it: its declarations, without the top level
+   that `cx run` would execute. A test links the library, not the program --
+   otherwise every test file re-runs whatever `main.cx` prints. *)
+let declarations program =
+  List.filter (fun s -> Option.is_some (Loader.declared_name s)) program
+
+(* One program per test file, as a Rust integration test is its own crate: a
+   file that fails to compile takes only itself down. *)
+let of_file ~root ~manifest ~package program file =
   let ( let* ) = Result.bind in
-  let* artifacts, _ = Build.package ~mode ~out:(fun _ -> ()) root in
-  let program = Build.link artifacts in
-  let* tests = all_runnable (List.filter (matching filter) (Discover.carrying "test" program)) in
+  let deps =
+    (manifest.Manifest.name, { Loader.dep_root = root; compiled = Some package })
+    :: Workspace.dependency_roots manifest
+  in
+  let roots =
+    { Loader.package = Filename.concat root "tests"; std = Toolchain.stdlib (); deps }
+  in
+  let* loaded, _ = Pipeline.package ~roots ~seeds:[ file ] ~out:(fun _ -> ()) file in
+  Ok (declarations program @ loaded, loaded)
+
+let executed ~filter program found =
+  let ( let* ) = Result.bind in
+  let* tests = all_runnable (List.filter (matching filter) found) in
   if tests = []
-  then Ok ("no tests\n", 0)
+  then Ok []
   else (
     let buffer = Buffer.create 4096 in
     let out = Buffer.add_string buffer in
     let* converted = Compile.program (program @ List.map wrapped tests) in
     let* () = Result.map_error (fun e -> [ e ]) (Pipeline.run (Builtins.env ~out) converted) in
-    Ok (report (outcomes (Buffer.contents buffer))))
+    Ok (outcomes (Buffer.contents buffer)))
+
+let run ?(mode = Build.unrestricted) ?filter root =
+  let ( let* ) = Result.bind in
+  let* artifacts, _ = Build.package ~mode ~out:(fun _ -> ()) root in
+  let* manifest = Build.manifest_of root in
+  let program = Build.link artifacts in
+  let package = List.nth artifacts (List.length artifacts - 1) in
+  (* Inline tests run in the whole program: they are part of it, and reach what
+     the package does not export. *)
+  let* inline = executed ~filter program (Discover.carrying "test" program) in
+  (* Each file is compiled on its own, so one that does not compile is reported
+     with the rest rather than standing in front of them. *)
+  let from_files, broken =
+    List.fold_left
+      (fun (seen, broken) file ->
+        let ran =
+          let* whole, own = of_file ~root ~manifest ~package program file in
+          (* Only this file's own tests: the package's inline ones are in
+             [whole] too, and have already run. *)
+          executed ~filter whole (Discover.carrying "test" own)
+        in
+        match ran with
+        | Ok outcomes -> seen @ outcomes, broken
+        | Error errors -> seen, broken @ errors)
+      ([], [])
+      (Build.tests root)
+  in
+  if broken <> []
+  then Error broken
+  else (
+    match inline @ from_files with
+    | [] -> Ok ("no tests\n", 0)
+    | all -> Ok (report all))
