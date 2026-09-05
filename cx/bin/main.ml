@@ -169,8 +169,9 @@ let publish () =
     Printf.printf "Published %s %s (%s).\n" name version checksum
 
 let () =
-  dispatch ();
-  match List.tl (Array.to_list Sys.argv) with
+  let args = List.tl (Array.to_list Sys.argv) in
+  if Cx.Dispatch.dispatched args then dispatch ();
+  match args with
   | [] -> Driver.die usage
   | ("-h" | "--help") :: _ ->
     print_endline usage;
