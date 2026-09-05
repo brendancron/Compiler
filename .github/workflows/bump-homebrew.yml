@@ -70,8 +70,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: brendancron/homebrew-cronyx
-          # A cross-repository push, which the run's own token cannot do.
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # A cross-repository push, which the run's own token cannot do. A
+          # deploy key rather than a personal token: it reaches that one
+          # repository and it does not expire, which a token did, silently,
+          # between one release and the next.
+          ssh-key: ${{ secrets.HOMEBREW_TAP_KEY }}
           path: tap
 
       - name: Point the formula at the release
