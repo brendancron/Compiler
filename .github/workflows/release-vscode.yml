@@ -13,10 +13,10 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
 
@@ -28,7 +28,7 @@ jobs:
         run: vsce package --no-dependencies -o cronyx-${{ github.ref_name }}.vsix
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: Cronyx VSCode Extension ${{ github.ref_name }}
           body: |
@@ -49,10 +49,10 @@ jobs:
     if: ${{ vars.PUBLISH_VSCODE == 'true' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
 
