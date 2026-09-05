@@ -45,7 +45,7 @@ string
 
 `typeof(value).name` returns a string describing the value's type. It runs at compile time — by the time the program executes, the call is gone:
 
-```cronyx title="runtime_code.cx"
+```cronyx title="--dump-code"
 var x = 42;
 var b = true;
 var s = "hello";
@@ -143,7 +143,7 @@ bool
 { x: int, y: int }
 ```
 
-Now dump the runtime code with `--dump-runtime-code`. You'll see six `print("...")` calls with the type strings already substituted in — the `typeof` calls themselves are gone. Reflection happened during compilation; the runtime program just prints strings.
+Now dump the runtime code with `--dump-code`. You'll see six `print("...")` calls with the type strings already substituted in — the `typeof` calls themselves are gone. Reflection happened during compilation; the runtime program just prints strings.
 
 ## What's next
 
